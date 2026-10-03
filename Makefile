@@ -13,14 +13,35 @@
 # run the same way. Nothing is computed by make and nothing is computed by the
 # shell that make cannot also do, so both of them produce the same build.
 #
-# Every artifact is written under build/. That directory also holds worktrees,
-# so `make clean` removes build products by name and never the directory, and
-# the formatting targets never look inside it.
+# Two directories, kept apart on purpose, and neither of them is the source
+# tree:
+#
+#   staged/bin/  build output. It holds the compiled binary, the per-target
+#                binaries, and the coverage profile, and nothing else, so
+#                `make clean` removes the whole of it rather than a list of
+#                files that has to be kept in step with whatever the build
+#                starts writing.
+#   worktrees/   a checkout of this repository per branch. Nothing here is ever
+#                written by a build and nothing here is ever touched by
+#                `make clean`.
+#
+# They are separate so that `make clean` cannot reach a worktree. Cleaning by
+# name in a directory that also holds a checkout is a target list that grows a
+# hole every time something new is written there, and the hole is a worktree
+# that gets deleted instead of a build product.
+#
+# `staged/` rather than `bin/` at the top, because a checkout is not somewhere
+# a build product belongs. Putting the output one level down names it as what it
+# is, and leaves room beside it for something a future target stages there.
 
 GO ?= go
 MODULE := github.com/glenjbarber/orcli
 
-BIN := build/orcli
+# Output lives under staged/bin/. The binary is named for the program, so an
+# install target has one file to place rather than a directory to copy.
+STAGE := staged
+BINDIR := $(STAGE)/bin
+BIN := $(BINDIR)/orcli
 MAIN := ./cmd/orcli
 
 # Every target that is compiled and vetted by `make crossbuild`. The terminal
@@ -44,14 +65,14 @@ export CGO_ENABLED = 0
 
 all: build
 
-# build places the binary at build/orcli.
+# build places the binary at staged/bin/orcli.
 #
 # A missing main package is reported and the target succeeds. It is an ordinary
 # message rather than a refusal: the library packages still compile, and a build
 # that refuses because a package has not been written yet stops the whole tree
 # from being built at all.
 build:
-	@mkdir -p build
+	@mkdir -p $(BINDIR)
 	@if [ -f cmd/orcli/main.go ]; then \
 		$(GO) build -o $(BIN) $(MAIN); \
 	else \
@@ -64,31 +85,30 @@ test:
 # check runs the suite under the race detector. CGO is re-enabled for it,
 # because the detector is not available without it.
 check:
-	@mkdir -p build
 	CGO_ENABLED=1 $(GO) test -race ./...
 
 cover:
-	@mkdir -p build
-	CGO_ENABLED=1 $(GO) test -coverprofile=build/coverage.out ./...
-	$(GO) tool cover -func=build/coverage.out
+	@mkdir -p $(BINDIR)
+	CGO_ENABLED=1 $(GO) test -coverprofile=$(BINDIR)/coverage.out ./...
+	$(GO) tool cover -func=$(BINDIR)/coverage.out
 
 # lint is the gate CI runs. It is a check and nothing more: no target in it
 # edits a file, because a lint step in CI that rewrites a tree reports success
 # while the problem it was asked to find is still there.
 lint: fmt vet
 
-# pkgdirs lists the directories holding a package of this module.
+# PKGDIRS lists the directories holding a package of this module.
 #
 # gofmt is pointed at these rather than at `.`, because `.` is a filesystem walk
-# and build/ holds worktrees. A worktree holds a copy of the module, so a walk
-# from the top level finds every file in it, and an unformatted draft in
+# and worktrees/ holds checkouts. A worktree holds a copy of the module, so a
+# walk from the top level finds every file in it, and an unformatted draft in
 # another worktree fails the gate on this branch. Asking the module for its own
 # packages cannot reach a directory the module does not contain.
 #
 # The module prefix is stripped so the paths are relative and so the output is
-# the same on a machine where the checkout is not under GOPATH. `go list` prints
-# nothing but warnings on a module that has no packages yet, so the exit status
-# is checked rather than the emptiness of the output.
+# the same on a machine where the checkout is not under GOPATH. A module with no
+# packages prints nothing but warnings, so the recipe checks the output rather
+# than the exit status, which is sed's.
 PKGDIRS = $(GO) list -f '{{.Dir}}' ./... 2>/dev/null | sed "s|$(PWD)/||; s|^$(MODULE)$$|.|"
 
 # fmt fails if gofmt would change any file in a package of this module. It asks
@@ -116,8 +136,12 @@ fmtwrite:
 		gofmt -w $$dirs; \
 	fi
 
-# crossbuild compiles and vets every supported target. Vet runs under each
-# GOOS as well, since a type error can be specific to one platform.
+# crossbuild compiles and vets every supported target. Vet runs under each GOOS
+# as well, since a type error can be specific to one platform.
+#
+# Each target's binary goes to its own directory under staged/bin/, so two
+# targets cannot overwrite each other's output and a stale artifact is not
+# mistaken for a current one.
 crossbuild:
 	@for target in $(PLATFORMS); do \
 		os=$${target%/*}; arch=$${target#*/}; \
@@ -125,8 +149,9 @@ crossbuild:
 		GOOS=$$os GOARCH=$$arch $(GO) build ./... || exit 1; \
 		GOOS=$$os GOARCH=$$arch $(GO) vet ./... || exit 1; \
 		if [ -f cmd/orcli/main.go ]; then \
+			mkdir -p $(BINDIR)/$$os-$$arch; \
 			GOOS=$$os GOARCH=$$arch $(GO) build \
-				-o build/$$os-$$arch/orcli $(MAIN) || exit 1; \
+				-o $(BINDIR)/$$os-$$arch/orcli $(MAIN) || exit 1; \
 		fi; \
 	done
 	@echo "crossbuild: every target compiled and vetted"
@@ -134,24 +159,25 @@ crossbuild:
 tidy:
 	$(GO) mod tidy
 
-# clean removes build products by name. It does not remove build/ itself, or
-# anything else under it, because build/ also holds worktrees.
+# clean removes staged/bin/ and nothing else.
+#
+# The directory is removed whole rather than by name, because it holds build
+# products and nothing else. worktrees/ is not touched at all: it holds
+# checkouts, and a clean that reached one would delete a branch rather than a
+# build product.
 clean:
-	rm -f $(BIN) build/coverage.out
-	@for target in $(PLATFORMS); do \
-		rm -f build/$${target%/*}-$${target#*/}/orcli; \
-	done
+	rm -rf $(BINDIR)
 
 help:
-	@echo "all        build the binary into build/"
-	@echo "build      build the binary into build/orcli"
+	@echo "all        build the binary into staged/bin/"
+	@echo "build      build the binary into staged/bin/orcli"
 	@echo "test       run the suite"
 	@echo "check      run the suite under the race detector"
-	@echo "cover      run the suite and write build/coverage.out"
+	@echo "cover      run the suite and write staged/bin/coverage.out"
 	@echo "lint       gofmt check and go vet"
 	@echo "vet        go vet"
 	@echo "fmt        fail if gofmt would change a package of this module"
 	@echo "fmtwrite   rewrite the packages of this module with gofmt"
 	@echo "crossbuild compile and vet every supported target"
 	@echo "tidy       tidy go.mod"
-	@echo "clean      remove build products, keeping build/ itself"
+	@echo "clean      remove staged/bin/, which holds build products and nothing else"

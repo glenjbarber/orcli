@@ -32,8 +32,11 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Build output and worktrees
-build/
+# Worktrees
+worktrees/
+
+# Build output
+staged/bin/
 
 # Local preferences and memory
 .OPENROUTER.md
