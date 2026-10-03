@@ -22,8 +22,8 @@ type Options struct {
 	APIKey string
 
 	// Model is the model a turn is sent to. An empty one is reported rather than
-	// sent, since a request with no model is a request the endpoint cannot
-	// answer and the reader is better served by being told which key to press.
+	// sent, since a request with no model is a request the endpoint cannot answer
+	// and the reader is better served by being told which key to press.
 	Model string
 
 	// Provider names the endpoint host, for the status bar.
@@ -48,6 +48,14 @@ type Options struct {
 
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
+
+	// Cognito reports that nothing is to be recorded.
+	//
+	// It is a field rather than something the session infers, because the promise
+	// is about the host and not only about the conversation. A worker that writes
+	// a file records what it did even though the transcript records nothing, and a
+	// reader who asked for nothing recorded should not get a findings file.
+	Cognito bool
 }
 
 // Approval is the mode a tool call is settled under.
@@ -71,17 +79,22 @@ const (
 	ApprovalDeny Approval = "deny"
 )
 
-// Session owns the log and the state the footer stack reports.
+// Session owns the log, the levels and the state the footer stack reports.
 //
-// It is the thing a Run drives, and it is deliberately small: the log, the four
-// states, and the counters the bars show. Everything that has a decision in it,
+// It is the thing a Run drives, and it is deliberately small: the log, the levels,
+// the four states, and the counters the bars show. Everything with a decision in it,
 // the terminal control, the line editor, the palette and the command table, is a
-// separate concern with its own file, and a session that grew all of them would
-// be the one file that decides everything.
+// separate concern with its own file, and a session that grew all of them would be
+// the one file that decides everything.
 type Session struct {
-	// Log is the record of what has been written. It is a value rather than a
+	// log is the record of what has been written. It is a value rather than a
 	// pointer so a Session is one thing rather than two that can disagree.
 	log Log
+
+	// levels is the table of thread identities. It has its own lock rather than
+	// sharing the session's, since a level is asked about while a turn is running
+	// and holding the state lock for that would block the painter.
+	levels *levels
 
 	opts Options
 
@@ -95,8 +108,8 @@ type Session struct {
 // The four are named rather than derived from a progress flag, because a reader
 // needs to know which of them they are in and a boolean pair answers that in two
 // places. `thinking` is the state a turn is in while the model is composing and
-// before any of it has been written, which is the whole window in which the
-// reader would otherwise have no idea anything was happening.
+// before any of it has been written, which is the whole window in which the reader
+// would otherwise have no idea anything was happening.
 type State string
 
 const (
@@ -112,11 +125,11 @@ const (
 
 // New returns a session holding the log and nothing else.
 //
-// The log starts with one row: the banner. A session that opens onto an empty
-// screen gives a reader nothing to tell it has started, and a row that names the
-// model is the one line of state a reader wants before typing anything.
+// The log starts with one row: the banner. A session that opens onto an empty screen
+// gives a reader nothing to tell it has started, and a row that names the program is
+// the one line of state a reader wants before typing anything.
 func New(opts Options) *Session {
-	s := &Session{opts: opts, state: StateIdle}
+	s := &Session{opts: opts, state: StateIdle, levels: newLevels()}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
@@ -150,11 +163,11 @@ func (s *Session) State() (State, string) {
 // SetState moves the session to a state.
 //
 // The transition is not checked. A session that refuses a transition it did not
-// expect has to hold the state somewhere to refuse it, and the place it holds it
-// is the place the caller already wrote, which makes the check a second source of
-// truth about the same thing. The rule that matters is enforced by the caller:
-// nothing may claim to be idle while a turn is running, since that is what tells a
-// reader they can walk away.
+// expect has to hold the state somewhere to refuse it, and the place it holds it is
+// the place the caller already wrote, which makes the check a second source of truth
+// about the same thing. The rule that matters is enforced by the caller: nothing may
+// claim to be idle while a turn is running, since that is what tells a reader they
+// can walk away.
 func (s *Session) SetState(state State, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -164,16 +177,16 @@ func (s *Session) SetState(state State, detail string) {
 // ErrNoModel reports a turn that has nothing to send.
 //
 // It is an error rather than an empty request, since the endpoint would answer a
-// request with no model with a refusal that names the model rather than the
-// reader, and the reader is the one who knows which key to press.
+// request with no model with a refusal that names the model rather than the reader,
+// and the reader is the one who knows which key to press.
 var ErrNoModel = errors.New("no model is chosen, so there is nothing to ask")
 
 // Ready reports whether a turn can be sent, and why not when it cannot.
 //
-// It exists so that the check lives in one place. Every caller that wants to start
-// a turn asks this rather than looking at the model itself, and a session that let
-// one path send a request with no model and another refuse it is a session where
-// the reader finds out by reading an error from the endpoint.
+// It exists so that the check lives in one place. Every caller that wants to start a
+// turn asks this rather than looking at the model itself, and a session that let one
+// path send a request with no model and another refuse it is a session where the
+// reader finds out by reading an error from the endpoint.
 func (s *Session) Ready() error {
 	if s.opts.Model == "" {
 		return ErrNoModel
@@ -183,15 +196,17 @@ func (s *Session) Ready() error {
 
 // Begin turns a question into a turn and reports what it took.
 //
-// The context is the caller's so that stopping a model stops the request and not
-// the session, which is the only reason a turn can be stopped without leaving. The
-// level is what the rows will be attributed to, and it is fixed here rather than
-// looked up later: a row that took its level when it was written cannot be
-// re-attributed by something that changed while the turn ran.
+// The context is the caller's so that stopping a model stops the request and not the
+// session, which is the only reason a turn can be stopped without leaving.
 //
-// The conversation is not consulted here. A session this size holds no turns yet,
-// and the thing that will hold them is a separate concern, so this returns what a
-// caller needs to start one and says nothing about what it will carry.
+// The level is the thread the rows will be attributed to. It is not derived from
+// the session here: a caller holds the level it asked for and passes it back, so
+// the level a row carries is the level the thread was given rather than the level
+// the session happens to be in when the row is written.
+//
+// The conversation is not consulted. A session this size holds no turns yet, and the
+// thing that will hold them is a separate concern, so this returns what a caller needs
+// to start one and says nothing about what it will carry.
 func (s *Session) Begin(ctx context.Context, question string, level int) (context.Context, error) {
 	if err := s.Ready(); err != nil {
 		return nil, err
@@ -216,13 +231,13 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 //
 // A milestone is one line, since a log that grows a row per token is a log that
 // scrolls past what the reader was reading. The first delivery moves the state from
-// thinking to working, and that transition is the whole reason both exist: the
-// window before the first one is the only time the reader has no evidence the
-// turn is running at all.
+// thinking to working, and that transition is the whole reason both exist: the window
+// before the first one is the only time the reader has no evidence the turn is
+// running at all.
 //
 // Text is written whole rather than a piece at a time, which is the decision the
-// interface was redesigned for. A reply held for its turn arrives as a block, so
-// the folding and the copy path see the same text the reader does.
+// interface was redesigned for. A reply held for its turn arrives as a block, so the
+// folding and the copy path see the same text the reader does.
 func (s *Session) Deliver(text string, level int) {
 	if text == "" {
 		return
@@ -241,10 +256,10 @@ func (s *Session) Deliver(text string, level int) {
 
 // Notice records a message from the client: a refusal, a failure, a milestone.
 //
-// It is a method rather than a caller reaching for the log, so that a notice lands
-// in the order it happened even when the turn goroutine and the input goroutine are
-// both writing, and so that a caller cannot forget the level and have a row
-// attributed to the wrong responder.
+// It is a method rather than a caller reaching for the log, so that a notice lands in
+// the order it happened even when the turn goroutine and the input goroutine are both
+// writing, and so that a caller cannot forget the level and have a row attributed to
+// the wrong responder.
 func (s *Session) Notice(text string, level int, role Role) {
 	s.log.Append(Row{
 		Kind:  KindNotice,
@@ -258,8 +273,8 @@ func (s *Session) Notice(text string, level int, role Role) {
 //
 // A turn that ended is idle whether it finished cleanly or was stopped, since a
 // reader who stopped a model should not be told something is still running. The
-// detail carries why, so the bar says `idle, stopped` rather than making the
-// reader work out which kind of not-running this is.
+// detail carries why, so the bar says `idle, stopped` rather than making the reader
+// work out which kind of not-running this is.
 func (s *Session) Finished(reason string) {
 	s.log.Append(Row{
 		Kind:  KindNotice,
@@ -272,10 +287,14 @@ func (s *Session) Finished(reason string) {
 
 // RowsAt returns the rows at a level, which is what `/copy N` copies.
 //
-// It is the level and not the row number, since a fold changes how many rows there
-// are and a reader who counted them would be counting something that moves. A level
-// names one exchange and covers every row of it, tool lines included, which is what
-// copying a responder's whole answer means.
+// It is the level and not the row number, since a fold changes how many rows there are
+// and a reader who counted them would be counting something that moves. A level names
+// one exchange and covers every row of it, tool lines included, which is what copying
+// a responder's whole answer means.
+//
+// A retired level still answers, and says so. The reader gets their rows and learns
+// the level is closed, rather than being told there is nothing there and left to
+// guess whether they mistyped the number.
 func (s *Session) RowsAt(level int) []Row {
 	var out []Row
 	for _, row := range s.log.Rows() {
@@ -286,34 +305,55 @@ func (s *Session) RowsAt(level int) []Row {
 	return out
 }
 
-// Levels reports the levels present in the log, lowest first.
+// CopyLevel returns what `/copy N` copies, and reports a closed level rather than
+// refusing to answer.
 //
-// A reader typing `/copy 3` needs to know whether a 3 exists before pressing enter,
-// and a bar listing them is how they know. The order is by value rather than by
-// first appearance so the list does not reorder as a turn runs.
-func (s *Session) Levels() []int {
-	seen := map[int]bool{}
-	for _, row := range s.log.Rows() {
-		seen[row.Level] = true
+// The distinction is the whole reason a retired level keeps a tombstone: a reader
+// who typed a wrong number and a reader who typed a stale one are two different
+// situations, and an answer that treats them the same makes the handle untrustworthy.
+func (s *Session) CopyLevel(n int) ([]Row, error) {
+	level, known := s.levels.lookup(n)
+	if !known {
+		return nil, ErrNoLevel
 	}
 
-	out := make([]int, 0, len(seen))
-	for level := range seen {
-		out = append(out, level)
+	rows := s.RowsAt(n)
+	if level.Closed {
+		return rows, ErrLevelClosed
 	}
-	sortInts(out)
-	return out
+	return rows, nil
 }
 
-// sortInts orders a small slice in place.
+// OpenLevel hands out a level for a thread branching from parent.
 //
-// It is a function rather than a call into sort because the levels are a handful
-// of integers and the package has no other use for sort, and a helper here keeps
-// that visible rather than leaving a general import for one call.
-func sortInts(xs []int) {
-	for i := 1; i < len(xs); i++ {
-		for j := i; j > 0 && xs[j] < xs[j-1]; j-- {
-			xs[j], xs[j-1] = xs[j-1], xs[j]
-		}
-	}
+// The number is allocated here rather than when the thread is asked, so a level is
+// spent even if the reader walks away from the thread before asking it anything.
+// A number that could be reclaimed is one that could be handed out twice, and a
+// handle pointing at the wrong exchange is worse than a gap in the numbering a
+// reader can see.
+func (s *Session) OpenLevel(parent int, title string) (Level, error) {
+	return s.levels.open(parent, title)
 }
+
+// CloseLevel ends a level and keeps what it was.
+//
+// This is what a thread does to itself when it has finished, and what a reader
+// invokes as `/close`. The two are the same operation because they answer the same
+// question, which is whether this exchange is still a thing `/copy` can reach.
+func (s *Session) CloseLevel(n int) error {
+	return s.levels.retire(n)
+}
+
+// Level reports a level and whether it was handed out.
+func (s *Session) Level(n int) (Level, bool) {
+	return s.levels.lookup(n)
+}
+
+// Levels returns every level handed out, ordered, closed ones included.
+//
+// A list that silently dropped retired entries is how a reader concludes they
+// mistyped, so the bar shows every number that was ever given out.
+func (s *Session) Levels() []Level { return s.levels.all() }
+
+// OpenLevels returns the levels a new thread may branch from.
+func (s *Session) OpenLevels() []Level { return s.levels.openLevels() }
