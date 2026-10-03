@@ -57,11 +57,12 @@ PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 \
              freebsd/amd64 freebsd/arm64 openbsd/amd64 netbsd/amd64
 
 # CGO is off for every cross build. A cross target has no C toolchain on this
-# host, and a driver that compiles C would produce a binary that builds for
-# every target and then fails at the first query.
+# host, and a driver that compiles C would produce a binary that builds for every
+# target and then fails at the first query.
 export CGO_ENABLED = 0
 
-.PHONY: all build test check cover lint vet fmt fmtwrite crossbuild tidy clean help
+.PHONY: all build test check cover lint vet fmt fmtwrite crossbuild tidy \
+        prune-merged clean help
 
 all: build
 
@@ -159,6 +160,68 @@ crossbuild:
 tidy:
 	$(GO) mod tidy
 
+# prune-merged removes the worktrees and branches whose work is on the main
+# line, and touches nothing else.
+#
+# Every spawned worker lands on a branch and every one of them is merged
+# eventually, so the list of branches grows without bound and every one of them
+# is something `git branch` lists and a reader has to read past. A target that
+# clears them is the check happening every time rather than once.
+#
+# Two refusals, and both are the point of the target:
+#
+#   - a branch that is not an ancestor of main is left alone. Its work may be
+#     unmerged, or uncommitted, or both, and `git branch -d` would refuse it
+#     anyway; asking first and saying so is clearer than a failure per branch.
+#   - a worktree with a modified or untracked file is left alone, along with the
+#     branch checked out in it. A worker between steps looks exactly like this,
+#     and removing the directory would destroy work that exists nowhere else.
+#
+# Nothing is forced. `-d` rather than `-D`, and no `--force` on the worktree, so
+# a branch that somehow is not merged and a directory that somehow is not clean
+# are both left in place rather than deleted on the strength of this recipe
+# being wrong about them.
+#
+# PRUNE_KEEP is a space-separated list of branch names to leave alone, for a
+# branch a reader wants to keep a checkout for.
+PRUNE_KEEP ?=
+
+prune-merged:
+	@kept=0; removed=0; \
+	for branch in `git branch --format='%(refname:short)'`; do \
+		case " $$PRUNE_KEEP " in \
+			*" $$branch "*) echo "keeping $$branch, it is named in PRUNE_KEEP"; \
+				kept=$$((kept+1)); continue;; \
+		esac; \
+		[ "$$branch" = "main" ] && continue; \
+		if git merge-base --is-ancestor "$$branch" main; then \
+			merged=yes; \
+		else \
+			merged=no; \
+			echo "leaving $$branch, its work is not on the main line"; \
+			kept=$$((kept+1)); \
+			continue; \
+		fi; \
+		for wt in `git worktree list --porcelain | sed -n 's/^worktree //p'`; do \
+			if [ "`git -C "$$wt" rev-parse --abbrev-ref HEAD 2>/dev/null`" != "$$branch" ]; then \
+				continue; \
+			fi; \
+			if [ -n "`git -C "$$wt" status --short 2>/dev/null`" ]; then \
+				echo "leaving $$branch, $$wt has work in it"; \
+				kept=$$((kept+1)); \
+				merged=no; \
+				continue; \
+			fi; \
+			git worktree remove "$$wt" || exit 1; \
+			echo "removed the worktree $$wt"; \
+		done; \
+		[ "$$merged" = "no" ] && continue; \
+		git branch -d "$$branch" || exit 1; \
+		removed=$$((removed+1)); \
+	done; \
+	git worktree prune; \
+	echo "prune-merged: $$removed removed, $$kept left alone"
+
 # clean removes staged/bin/ and nothing else.
 #
 # The directory is removed whole rather than by name, because it holds build
@@ -169,15 +232,16 @@ clean:
 	rm -rf $(BINDIR)
 
 help:
-	@echo "all        build the binary into staged/bin/"
-	@echo "build      build the binary into staged/bin/orcli"
-	@echo "test       run the suite"
-	@echo "check      run the suite under the race detector"
-	@echo "cover      run the suite and write staged/bin/coverage.out"
-	@echo "lint       gofmt check and go vet"
-	@echo "vet        go vet"
-	@echo "fmt        fail if gofmt would change a package of this module"
-	@echo "fmtwrite   rewrite the packages of this module with gofmt"
-	@echo "crossbuild compile and vet every supported target"
-	@echo "tidy       tidy go.mod"
-	@echo "clean      remove staged/bin/, which holds build products and nothing else"
+	@echo "all          build the binary into staged/bin/"
+	@echo "build        build the binary into staged/bin/orcli"
+	@echo "test         run the suite"
+	@echo "check        run the suite under the race detector"
+	@echo "cover        run the suite and write staged/bin/coverage.out"
+	@echo "lint         gofmt check and go vet"
+	@echo "vet          go vet"
+	@echo "fmt          fail if gofmt would change a package of this module"
+	@echo "fmtwrite     rewrite the packages of this module with gofmt"
+	@echo "crossbuild   compile and vet every supported target"
+	@echo "tidy         tidy go.mod"
+	@echo "prune-merged remove worktrees and branches already on the main line"
+	@echo "clean        remove staged/bin/, which holds build products and nothing else"
