@@ -48,7 +48,9 @@ const (
 // Every name resolves by bare name through the path search. That is what makes the list
 // portable rather than pinned to one host, and it is also what a reader should know
 // before approving one: the program that runs is whichever binary of that name the
-// session reaches first.
+// session reaches first. A name not present on the host is a refusal from the search and
+// not a failure of this client, so the list carries platform-specific programs without
+// carrying a platform-specific claim that they exist.
 //
 // gh and rm are on the list for the opposite reason to the readers above, and the reason
 // is that they write. A model repairing a tree needs to remove what a build left behind,
@@ -91,6 +93,7 @@ var shellPermitted = []string{
 	"od",
 	"jq",
 	"ps",
+	"dmesg",
 
 	// Writers.
 	"gh",
@@ -162,6 +165,13 @@ var pathShapes = map[string]pathShape{
 	"hexdump": firstPath,
 	"od":      firstPath,
 	"jq":      firstPath,
+
+	// dmesg takes no path at all. Every argument is either an option or a value
+	// belonging to one: the facility to filter on, a level, a column count, a
+	// follow or not-follow mode, or a buffer to read. A facility reads as an
+	// ordinary word, so any other shape would resolve it as a file name and refuse
+	// the call, which is the defect the noPaths shape exists to prevent.
+	"dmesg": noPaths,
 }
 
 // refusedOptions are the options each program may not be given, by name.
@@ -178,6 +188,11 @@ var pathShapes = map[string]pathShape{
 // maker rather than something to decide by omission.
 var refusedOptions = map[string][]string{
 	"find": {"-exec", "-execdir", "-fls", "-fprint"},
+
+	// dmesg clears the ring buffer and writes to it, so -c and -r are refused by
+	// name for the reason -delete is not refused on find: both destroy the evidence
+	// the reader asked to read, and neither is recoverable afterwards.
+	"dmesg": {"-c", "--clear", "-r", "--read-clear", "-C", "--read-clear"},
 }
 
 // isRefusedOption reports whether an argument is an option a program may not be given.
@@ -273,7 +288,8 @@ func shellDescription() string {
 		"and each argument is passed to the program as written. Paths are relative to "+
 		"the working directory, and an absolute path or one that leaves the tree is "+
 		"refused. A pattern is judged by the directory leading to it, so *.go is "+
-		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec. "+
+		"allowed and ../*.go is not. gh and rm write, find may not be given -exec, and "+
+		"dmesg may not be given -c since that clears the buffer being read. "+
 		"one command runs for at most %s and writes at most %d bytes, and a command "+
 		"past either bound is stopped and reported rather than truncated. %s",
 		len(shellPermitted), permittedPrograms(), shellTimeout, outputLimit,
