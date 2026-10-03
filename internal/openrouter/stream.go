@@ -43,12 +43,86 @@ type chunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 
+	// Error is a failure the endpoint reported inside the stream.
+	//
+	// The endpoint reports an upstream failure as a payload carrying an error
+	// object and nothing else. A parser reading only Choices and Usage sees a
+	// chunk with neither, reports nothing, and then tells the reader the stream
+	// ended without its terminating marker, which names a symptom rather than
+	// the cause.
+	Error *reportedError `json:"error"`
+
 	// Usage is held raw and decoded on its own, and that is the whole point of
 	// it being raw. The endpoint regularly sends a count in a shape this client
 	// cannot read, and a decode that failed over it would take the reply text
 	// sitting in the same payload with it. Accounting is worth less than the
 	// words beside it.
 	Usage json.RawMessage `json:"usage"`
+}
+
+// reportedError is the failure the endpoint wrote into the stream.
+//
+// Only the message is read. The code beside it is quoted as a number by some
+// failures and as a string by others, and nothing this client does depends on
+// distinguishing them: the message is what a reader is shown and what [Chat]
+// decides a retry on.
+type reportedError struct {
+	Message string `json:"message"`
+}
+
+// progress is what one stream attempt has delivered so far.
+//
+// It exists so the retry rule is decided in one place rather than in the reader
+// loop. A request that has delivered nothing has spent nothing and a second
+// attempt cannot duplicate text the reader has already seen, so it is the one
+// case worth trying again; a request that has delivered something is a reply
+// that was paid for, and the text before a cut is kept rather than taken back.
+type progress struct {
+	acc *assembler
+
+	reason string
+	marked bool
+
+	// delivered counts what the reader has been shown: reply text and completed
+	// tool calls.
+	delivered int
+
+	// reported is the failure the endpoint wrote into the stream, if it wrote
+	// one. It is kept as text rather than raised at once, since whether it can
+	// be retried depends on delivered.
+	reported string
+
+	// told records that a failure has already been shown to the reader, so the
+	// missing terminating marker does not arrive as a second and vaguer one.
+	told bool
+}
+
+// report delivers one event and counts it, so the retry rule sees everything the
+// reader saw rather than only what the parser chose to tally.
+func (p *progress) report(onEvent func(Event), e Event) {
+	switch e.Kind {
+	case EventDelta, EventTool:
+		p.delivered++
+	}
+	onEvent(e)
+}
+
+// fail records a failure the endpoint reported inside the stream.
+//
+// A failure arriving before anything was delivered is held rather than shown:
+// the request has not failed, this attempt has, and [Chat] has to be free to try
+// again without the reader having been told a reply is broken. A failure after
+// text has arrived is shown at once, because the reply is short and the cause is
+// what the reader needs now.
+func (p *progress) fail(c *Client, message string, onEvent func(Event)) {
+	p.reported = message
+	if p.delivered > 0 && !p.told {
+		p.told = true
+		onEvent(Event{
+			Kind: EventError,
+			Err:  fmt.Errorf("openrouter: %s", Filter(message, c.apiKey)),
+		})
+	}
 }
 
 // toolFragment is one piece of a tool call as the stream carries it.
@@ -148,18 +222,20 @@ func (a *assembler) take() []ToolCall {
 // outcome this client exists to avoid, so an unmarked end produces an error
 // event and a final event with Finished false. The text that arrived before the
 // cut has already been reported and is not taken back.
+//
+// The return value is not for the reader. It carries errNothingDelivered when
+// the endpoint reported a failure and nothing at all arrived, which tells [Chat]
+// the attempt cost nothing and may be made again. Everything else a reader needs
+// has already gone to the callback.
 func (c *Client) stream(ctx context.Context, body io.Reader, onEvent func(Event)) error {
 	br := bufio.NewReader(body)
-	acc := &assembler{}
-
-	var reason string
-	marked := false
+	p := &progress{acc: &assembler{}}
 
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
-			if data, ok := dataOf(line); ok && c.handleChunk(onEvent, acc, &reason, data) {
-				marked = true
+			if data, ok := dataOf(line); ok && c.handleChunk(onEvent, p, data) {
+				p.marked = true
 			}
 		}
 		if err != nil {
@@ -177,15 +253,25 @@ func (c *Client) stream(ctx context.Context, body io.Reader, onEvent func(Event)
 		}
 	}
 
-	c.deliver(acc, onEvent)
+	c.deliver(p, onEvent)
 
-	if !marked {
+	// The one case worth trying again. Nothing was delivered, so nothing was
+	// spent and a second attempt cannot duplicate anything, and the endpoint
+	// named the cause rather than leaving a cut stream to be guessed at.
+	if p.reported != "" && p.delivered == 0 {
+		return &undeliveredError{msg: Filter(p.reported, c.apiKey)}
+	}
+
+	// The cause is known already when it arrived after text, and repeating it as
+	// a missing marker would report the symptom a second time and let it read as
+	// the whole of what went wrong.
+	if !p.marked && !p.told {
 		onEvent(Event{
 			Kind: EventError,
 			Err:  errors.New("openrouter: stream ended without its terminating marker"),
 		})
 	}
-	onEvent(Event{Kind: EventFinish, Finished: marked, Reason: reason})
+	onEvent(Event{Kind: EventFinish, Finished: p.marked, Reason: p.reason})
 	return nil
 }
 
@@ -209,7 +295,7 @@ func dataOf(line string) (string, bool) {
 
 // handleChunk reports the events one payload produced, and whether that payload
 // was the terminating marker.
-func (c *Client) handleChunk(onEvent func(Event), acc *assembler, reason *string, data string) bool {
+func (c *Client) handleChunk(onEvent func(Event), p *progress, data string) bool {
 	data = strings.TrimSpace(data)
 	switch data {
 	case "":
@@ -231,19 +317,24 @@ func (c *Client) handleChunk(onEvent func(Event), acc *assembler, reason *string
 		return false
 	}
 
+	if ch.Error != nil && ch.Error.Message != "" {
+		p.fail(c, ch.Error.Message, onEvent)
+		return false
+	}
+
 	for _, choice := range ch.Choices {
 		if choice.Delta.Content != "" {
-			onEvent(Event{Kind: EventDelta, Text: choice.Delta.Content})
+			p.report(onEvent, Event{Kind: EventDelta, Text: choice.Delta.Content})
 		}
 		for _, f := range choice.Delta.ToolCalls {
-			acc.add(f)
+			p.acc.add(f)
 		}
 		if choice.FinishReason != "" {
 			// The finish reason terminates the calls the stream carried, so
 			// what has been collected is delivered here rather than held until
 			// the end, which may never come.
-			*reason = choice.FinishReason
-			c.deliver(acc, onEvent)
+			p.reason = choice.FinishReason
+			c.deliver(p, onEvent)
 		}
 	}
 
@@ -257,10 +348,10 @@ func (c *Client) handleChunk(onEvent func(Event), acc *assembler, reason *string
 }
 
 // deliver reports the calls held by the assembler as finished tool calls.
-func (c *Client) deliver(acc *assembler, onEvent func(Event)) {
-	for _, call := range acc.take() {
+func (c *Client) deliver(p *progress, onEvent func(Event)) {
+	for _, call := range p.acc.take() {
 		call := call
-		onEvent(Event{Kind: EventTool, ToolCall: &call})
+		p.report(onEvent, Event{Kind: EventTool, ToolCall: &call})
 	}
 }
 

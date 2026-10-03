@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ErrNoAPIKey is returned when a request is attempted with no credential.
@@ -17,6 +18,41 @@ import (
 // no credential exactly as it answers an invalid one, and a caller cannot tell
 // those two apart from the response alone.
 var ErrNoAPIKey = errors.New("openrouter: no API key configured")
+
+// retryBound is the total number of attempts one request makes, the first
+// included.
+//
+// Three is a judgment and not a derivation. One is what the client did before,
+// which shows the reader a failed reply the first time an upstream stalls; more
+// than three spends the allowance on a request that is not working, and a reader
+// is better served by a reported failure than by a longer wait.
+//
+// It is a constant rather than a configuration key on purpose. internal/config
+// has named writers and holds the credential, so a new key is a third writer, and
+// AGENTS.md records that the packages import one another in no direction, which a
+// transport bound read from the configuration would be the first edge across.
+const retryBound = 3
+
+// retryWait is the first pause between attempts. Each pause after it is twice the
+// one before.
+//
+// Zero would be the wrong first value. An upstream that has just reported an idle
+// timeout is the upstream least likely to answer immediately, so a retry with no
+// wait at all is the shape of a tight loop against a provider already behind.
+const retryWait = 250 * time.Millisecond
+
+// undeliveredError is a failure the endpoint reported for an attempt that
+// delivered nothing.
+//
+// It is what [Client.Chat] decides a retry on. Nothing was spent and nothing can
+// be duplicated, so a further attempt costs the reader nothing and cannot cost
+// them a reply they had begun reading.
+type undeliveredError struct {
+	msg string
+}
+
+// Error implements error.
+func (e *undeliveredError) Error() string { return "openrouter: " + e.msg }
 
 // Client talks to the OpenRouter API.
 //
@@ -50,6 +86,22 @@ func New(apiKey string) *Client {
 // The terminating [DONE] marker is required. A stream that ends without it is
 // reported as EventFinish with Finished false and an error, because presenting a
 // cut stream as a complete reply is the one outcome this client exists to avoid.
+//
+// A request that delivered nothing and was failed by the endpoint is tried again,
+// up to [retryBound] attempts in all. That condition is the whole of the rule:
+// nothing spent, nothing to duplicate, so a further attempt is invisible to the
+// reader unless every attempt fails. A request that delivered text or a completed
+// tool call is never retried, since the reply was paid for and the text arriving
+// before a cut is kept rather than taken back.
+//
+// A failure carrying an HTTP status is not retried. The status is the endpoint
+// refusing the request rather than an upstream stalling behind it, and a second
+// request cannot satisfy a rejected credential or a malformed request.
+//
+// Exactly one [EventFinish] is delivered per call, whichever way it ends. The
+// stream parser stays silent about a failure it will be retried over, which means
+// an attempt that was retried reports nothing and the reader is told the cause
+// and the unfinished turn here, once the attempts are exhausted.
 func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) error {
 	if onEvent == nil {
 		return errors.New("openrouter: Chat requires an event callback")
@@ -58,22 +110,98 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		return ErrNoAPIKey
 	}
 
-	// The status is examined without reading the body on success, because the
-	// body is the stream. Reading it would consume the reply before the parser
-	// seen it. On an error path the body is read, bounded, and quoted.
-	resp, err := c.post(ctx, req)
-	if err != nil {
-		onEvent(Event{Kind: EventError, Err: err})
-		return nil
-	}
-	defer resp.Body.Close()
+	waits := retryWaits(retryBound)
 
-	if resp.StatusCode != http.StatusOK {
-		onEvent(Event{Kind: EventError, Err: boundedError(c, resp)})
-		return nil
+	var last *undeliveredError
+	for attempt := range retryBound {
+		if attempt > 0 {
+			if err := pause(ctx, waits[attempt-1]); err != nil {
+				onEvent(Event{Kind: EventError, Err: err})
+				return nil
+			}
+		}
+
+		// The status is examined without reading the body on success, because the
+		// body is the stream. Reading it would consume the reply before the parser
+		// seen it. On an error path the body is read, bounded, and quoted.
+		resp, err := c.post(ctx, req)
+		if err != nil {
+			onEvent(Event{Kind: EventError, Err: err})
+			return nil
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			err := boundedError(c, resp)
+			resp.Body.Close()
+			onEvent(Event{Kind: EventError, Err: err})
+			return nil
+		}
+
+		err = c.stream(ctx, resp.Body, onEvent)
+		resp.Body.Close()
+
+		switch {
+		case err == nil:
+			return nil
+		case ctx.Err() != nil:
+			// A turn the reader stopped has to stop the retry, since a second
+			// attempt at a request the reader abandoned is one they did not ask
+			// for.
+			return err
+		case errors.As(err, &last):
+			continue
+		default:
+			return nil
+		}
 	}
 
-	return c.stream(ctx, resp.Body, onEvent)
+	// Every attempt failed the same way, so the reader is told the cause the
+	// endpoint named rather than a symptom of it, and the turn finishes
+	// unfinished since no reply ever arrived.
+	onEvent(Event{Kind: EventError, Err: last})
+	onEvent(Event{Kind: EventFinish, Finished: false})
+	return nil
+}
+
+// retryWaits returns the pause preceding each attempt after the first.
+//
+// The figures are derived rather than named one by one so a bound and a backoff
+// cannot disagree, which is how the search and the pager each kept a count of
+// their own and drifted from what the renderer drew.
+func retryWaits(bound int) []time.Duration {
+	waits := make([]time.Duration, 0, bound)
+	wait := retryWait
+	for range bound - 1 {
+		waits = append(waits, wait)
+		wait *= 2
+	}
+	return waits
+}
+
+// pause waits for d, or until the turn is stopped.
+//
+// A reader stopping a turn has to end the pause: a request waiting out a backoff
+// is a request the reader cannot stop. The wait is taken in steps rather than
+// slept through whole, so a stop is noticed rather than waited out.
+func pause(ctx context.Context, d time.Duration) error {
+	deadline := time.Now().Add(d)
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return nil
+		}
+		if remain > retryWait {
+			remain = retryWait
+		}
+
+		timer := time.NewTimer(remain)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // Filter redacts the credential from a string bound for a diagnostic.
