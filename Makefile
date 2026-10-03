@@ -14,7 +14,8 @@
 # shell that make cannot also do, so both of them produce the same build.
 #
 # Every artifact is written under build/. That directory also holds worktrees,
-# so `make clean` removes build products by name and never the directory.
+# so `make clean` removes build products by name and never the directory, and
+# the formatting targets never look inside it.
 
 GO ?= go
 MODULE := github.com/glenjbarber/orcli
@@ -76,12 +77,29 @@ cover:
 # while the problem it was asked to find is still there.
 lint: fmt vet
 
-# fmt fails if gofmt would change any file. It asks gofmt for a list and
-# requires the list to be empty. `go fmt` is not used here, because `go fmt`
-# rewrites the files it visits and a check that edits is not a check.
+# pkgdirs lists the directories holding a package of this module.
+#
+# gofmt is pointed at these rather than at `.`, because `.` is a filesystem walk
+# and build/ holds worktrees. A worktree holds a copy of the module, so a walk
+# from the top level finds every file in it, and an unformatted draft in
+# another worktree fails the gate on this branch. Asking the module for its own
+# packages cannot reach a directory the module does not contain.
+#
+# The module prefix is stripped so the paths are relative and so the output is
+# the same on a machine where the checkout is not under GOPATH. `go list` prints
+# nothing but warnings on a module that has no packages yet, so the exit status
+# is checked rather than the emptiness of the output.
+PKGDIRS = $(GO) list -f '{{.Dir}}' ./... 2>/dev/null | sed "s|$(PWD)/||; s|^$(MODULE)$$|.|"
+
+# fmt fails if gofmt would change any file in a package of this module. It asks
+# gofmt for a list and requires the list to be empty. `go fmt` is not used here,
+# because `go fmt` rewrites the files it visits and a check that edits is not a
+# check.
 fmt:
-	@out=$$(gofmt -l . 2>&1); \
-	if [ -n "$$out" ]; then \
+	@dirs=$$($(PKGDIRS)); \
+	if [ -z "$$dirs" ]; then \
+		echo "no packages to format yet"; \
+	elif out=$$(gofmt -l $$dirs 2>&1) && [ -n "$$out" ]; then \
 		echo "gofmt reported differences:"; \
 		echo "$$out"; \
 		exit 1; \
@@ -93,7 +111,10 @@ vet:
 # fmtwrite is the correcting form, kept separate so that lint never edits a tree
 # a reader did not ask it to edit.
 fmtwrite:
-	gofmt -w .
+	@dirs=$$($(PKGDIRS)); \
+	if [ -n "$$dirs" ]; then \
+		gofmt -w $$dirs; \
+	fi
 
 # crossbuild compiles and vets every supported target. Vet runs under each
 # GOOS as well, since a type error can be specific to one platform.
@@ -129,8 +150,8 @@ help:
 	@echo "cover      run the suite and write build/coverage.out"
 	@echo "lint       gofmt check and go vet"
 	@echo "vet        go vet"
-	@echo "fmt        fail if gofmt would change a file"
-	@echo "fmtwrite   rewrite files with gofmt"
+	@echo "fmt        fail if gofmt would change a package of this module"
+	@echo "fmtwrite   rewrite the packages of this module with gofmt"
 	@echo "crossbuild compile and vet every supported target"
 	@echo "tidy       tidy go.mod"
 	@echo "clean      remove build products, keeping build/ itself"
