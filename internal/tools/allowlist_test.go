@@ -43,12 +43,13 @@ func TestTheShellPermittedMapMatchesItsList(t *testing.T) {
 	}
 }
 
-// TestTheDescriptionIsBuiltFromTheList is what keeps the two from drifting.
+// TestTheDescriptionNamesEveryPermittedProgram is what keeps the two copies
+// together.
 //
 // The description a model reads is rendered from the list rather than written out
 // beside it, so a program added to the list cannot be missing from it. This test is
 // the belt to that braces: it checks the rendering actually names every program.
-func TestTheDescriptionIsBuiltFromTheList(t *testing.T) {
+func TestTheDescriptionNamesEveryPermittedProgram(t *testing.T) {
 	description := NewShell(t.TempDir()).Describe().Function.Description
 
 	for _, name := range shellPermitted {
@@ -58,6 +59,43 @@ func TestTheDescriptionIsBuiltFromTheList(t *testing.T) {
 	}
 	if !strings.Contains(description, "not a shell") {
 		t.Error("the description does not say the tool is not a shell")
+	}
+}
+
+// TestTheDescriptionNamesNoProgramThatIsNotPermitted checks the other direction.
+//
+// The check is on the listed names rather than on a substring anywhere in the text,
+// since sh appears inside shell and rm inside rm: a substring test would report both
+// as named when they are named as parts of other words.
+func TestTheDescriptionNamesNoProgramThatIsNotPermitted(t *testing.T) {
+	description := NewShell(t.TempDir()).Describe().Function.Description
+
+	// The named programs are the ones between the first colon and the period, so
+	// the check is on that run rather than on the whole description.
+	start := strings.Index(description, ": ")
+	if start < 0 {
+		t.Fatalf("the description names no list: %s", description)
+	}
+	rest := description[start+2:]
+	end := strings.Index(rest, ".")
+	if end < 0 {
+		t.Fatalf("the description names no closing period: %s", description)
+	}
+	listed := strings.Split(rest[:end], ",")
+
+	for _, name := range listed {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !shellPermittedMap[name] {
+			t.Errorf("the description names %q, which is not permitted", name)
+		}
+	}
+
+	if len(listed) != len(shellPermitted) {
+		t.Errorf("the description names %d programs, the list holds %d",
+			len(listed), len(shellPermitted))
 	}
 }
 
@@ -115,10 +153,9 @@ func TestAPatternIsNotARewrittenPath(t *testing.T) {
 
 // TestAPatternWithNoDirectoryIsJudgedWhereItExpands covers cutWildcard.
 //
-// *.go is judged against the directory it will be expanded in and is allowed, since
-// that is the ordinary form a shell would expand. A pattern with no directory in
-// front of it yields an empty head, which resolves to the working directory, so it is
-// not refused.
+// *.go is judged against the directory it will be expanded in and is allowed, since that
+// is the ordinary form a shell would expand. A pattern with no directory in front of it
+// yields an empty head, which resolves to the working directory, so it is not refused.
 func TestAPatternWithNoDirectoryIsJudgedWhereItExpands(t *testing.T) {
 	shell := NewShell(tree(t))
 
@@ -150,9 +187,9 @@ func TestAPatternLeavingTheTreeIsRefused(t *testing.T) {
 
 // TestRefusedOptionsAreCaughtAtAnyPosition covers a reader not finding it first.
 //
-// The refused option is placed after the directory find needs, so the position under
-// test is the position the flag was written to rather than an overwrite of the
-// directory by the test itself.
+// The refused option is placed after the directory find needs, so the position under test
+// is the position the flag was written to rather than an overwrite of the directory by
+// the test itself.
 func TestRefusedOptionsAreCaughtAtAnyPosition(t *testing.T) {
 	shell := NewShell(tree(t))
 
@@ -178,8 +215,8 @@ func TestRefusedOptionIsCaughtBeforeTheFirstArgument(t *testing.T) {
 
 // TestAPermittedProgramWithNoShapeIsRefused covers the gap.
 //
-// A gap in the table is not a licence to run a program whose arguments nobody has
-// thought about, so the call is refused rather than run unchecked.
+// A gap in the table is not a licence to run a program whose arguments nobody has thought
+// about, so the call is refused rather than run unchecked.
 func TestAPermittedProgramWithNoShapeIsRefused(t *testing.T) {
 	shell := NewShell(t.TempDir())
 
