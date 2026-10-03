@@ -12,9 +12,8 @@ been scoped.
 
 ## Status
 
-The project is at the beginning. The API client is written and its stream parser
-is tested; the interface, tools, configuration, persistence, panes and
-compaction are not.
+The project is at the beginning. The API client is written and tested; the
+interface, tools, configuration, persistence, panes and compaction are not.
 
 Implemented:
 
@@ -27,6 +26,9 @@ Tested:
 | Area | Coverage |
 | --- | --- |
 | Stream parser | marker required, text kept before a cut, fragments joined on the wire index, counts read in every shape the endpoint uses |
+| Request path | the request and its headers, the body reaching the parser unconsumed, a refused request quoted and bounded and redacted, tool calls and usage end to end, cancellation |
+
+There is no `cmd/orcli` yet, so no binary is produced by `make build`.
 
 Not yet written:
 
@@ -39,10 +41,6 @@ Not yet written:
 | `internal/saved` | SQLite session store, autosave naming |
 | `internal/tools` | tool execution: filesystem, git, shell |
 | `internal/tui` | the interface: rendering, input, session, panes |
-
-There is no `cmd/orcli` yet, so no binary is produced by `make build`. The
-`Chat` entry point itself is not yet covered: the tests drive the parser
-directly, so the request and response path is unexercised.
 
 ## Design overview
 
