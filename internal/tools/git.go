@@ -7,30 +7,27 @@ import (
 	"strings"
 )
 
-// ErrRefusedGit is returned when a git call is refused.
+// ErrRefusedGit is returned when a git call is refused, whether it was made through
+// the git tool or through the shell.
 //
-// It is a distinct error rather than ErrRefused because the git tool has reasons
-// of its own that a reader is told about differently: a subcommand that is not on the
-// allowlist is a question about what this client does with a repository, and a
-// wildcard is a question about what a command would touch.
+// It is a distinct error rather than ErrRefused because a reader being told a git
+// subcommand is refused wants to know which of the two tools asked for it.
 var ErrRefusedGit = errors.New("tools: refused a git call")
 
 // gitPermitted is the subcommands the git tool may run.
 //
-// It is declared once and every other form is derived from it, so the list a
-// refusal names, the map a lookup consults, and the schema a model is shown cannot
-// drift apart.
+// It is declared once and every other form is derived from it, so the list a refusal
+// names, the map a lookup consults, and the schema a model is shown cannot drift apart.
 //
 // The list is an allowlist and not a denylist, since a denylist of subcommands is a
-// list that has to be extended every time git adds one. A model asking for a
-// subcommand that is not here is refused by name, and the refusal names what is
-// offered, since a model chooses its next call from that message.
+// list that has to be extended every time git adds one. A model asking for a subcommand
+// that is not here is refused by name, and the refusal names what is offered, since a
+// model chooses its next call from that message.
 //
-// The commit, push, worktree and merge subcommands are here because a model working on
-// a repository needs them, and refusing them would mean the decision maker does the
-// work at a second prompt. What bounds them is the approval mode and the argument
-// checks, not a rule of their own: a name on this list bounds what may be proposed and
-// nothing more.
+// The commit, push, worktree and merge subcommands are here because a model working on a
+// repository needs them, and refusing them would mean the decision maker does the work at
+// a second prompt. What bounds them is the approval mode and the argument checks, not a
+// rule of their own: a name on this list bounds what may be proposed and nothing more.
 var gitPermitted = []string{
 	// Reading.
 	"status",
@@ -67,8 +64,8 @@ var gitPermitted = []string{
 
 // gitPermittedMap is the lookup form of the list.
 //
-// It is derived rather than written out, so a subcommand added to the list is
-// permitted without a second edit that could be forgotten.
+// It is derived rather than written out, so a subcommand added to the list is permitted
+// without a second edit that could be forgotten.
 var gitPermittedMap = func() map[string]bool {
 	m := make(map[string]bool, len(gitPermitted))
 	for _, name := range gitPermitted {
@@ -82,9 +79,9 @@ func permittedSubcommands() string { return strings.Join(gitPermitted, ", ") }
 
 // gitRefusedSubcommands are the subcommands refused by name, with the reason.
 //
-// They are refused rather than absent, so the refusal can say this client does not do
-// that rather than implying the subcommand does not exist. A model told a subcommand is
-// unknown will try another spelling; a model told it is refused will move on.
+// They are refused rather than absent, so the refusal can say this client does not do that
+// rather than implying the subcommand does not exist. A model told a subcommand is unknown
+// will try another spelling; a model told it is refused will move on.
 //
 // Each one either removes something the repository cannot recover or rewrites history
 // for every commit at once. There is no approval answer that makes either a reasonable
@@ -105,13 +102,14 @@ var gitRefusedSubcommands = map[string]string{
 // gitRefusedOptions are the options that may not be given to any subcommand, with the
 // reason.
 //
-// The pattern is the same as the shell's, and the reasoning is the same: an option here
-// is a way of making a command reach further than an argument check can see. These are
-// the options that widen a pathspec to the whole repository or to every matching file,
-// and they are refused by name rather than by cleaning the argument, since a glob is
-// not a path and cleaning one produces a path that is not a file the pattern would have
-// matched.
+// They fall into three groups. The first widens a pathspec past what the argument check
+// can see, so `--all` on `git add` stages the whole tree without a single path being
+// named. The second names a file to write, or a program the repository names rather than
+// one the model wrote. The third redirects where git reads or writes at all, and a command
+// pointed at another repository is not a command about the working directory this tool
+// contains.
 var gitRefusedOptions = map[string]string{
+	// Widening a pathspec past the check.
 	"--all":      "it names every path in the repository rather than a path",
 	"--glob":     "it names files by pattern rather than by path",
 	"--branches": "it names branches rather than a path",
@@ -119,6 +117,23 @@ var gitRefusedOptions = map[string]string{
 	"--remotes":  "it names remote branches rather than a path",
 	"--not":      "it inverts a pathspec, so what is named is what is not named",
 	"--exclude":  "it excludes by pattern, which is a wildcard this tool will not expand",
+
+	// Naming a file to write, or a program to run.
+	"--output":       "it names a file to write the reply to",
+	"-o":             "it names a file to write the reply to",
+	"--textconv":     "it runs a program named in the repository",
+	"--ext-diff":     "it runs a program named in the repository",
+	"--upload-pack":  "it names a program git runs",
+	"--receive-pack": "it names a program git runs",
+
+	// Redirecting where git reads or writes.
+	"-C":             "it moves the working directory",
+	"--git-dir":      "it points git at another repository",
+	"--work-tree":    "it points git at another working tree",
+	"--namespace":    "it redirects where git reads and writes",
+	"--super-prefix": "it redirects where git reads and writes",
+	"--exec-path":    "it redirects where git looks for programs",
+	"--config-env":   "it sets a value from the environment, and the environment is not read",
 }
 
 // gitRefusedOptionsBySubcommand are options refused for one subcommand only.
@@ -132,6 +147,10 @@ var gitRefusedOptionsBySubcommand = map[string]map[string]string{
 
 // refusedGitOption reports whether an argument is an option the subcommand may not be
 // given, and why.
+//
+// The match is exact for the same reason the shell's is: a program that accepts a
+// different spelling of an option is accepting a different option, and this list names
+// options rather than prefixes.
 func refusedGitOption(subcommand, arg string) (string, bool) {
 	if reason, ok := gitRefusedOptions[arg]; ok {
 		return reason, true
@@ -171,7 +190,9 @@ func (g *Git) Name() string { return "git" }
 // Describe returns the schema.
 //
 // The description is built from the list rather than written out beside it, so a
-// subcommand added to the list cannot be missing from what a model is told.
+// subcommand added to the list cannot be missing from what a model is told. The refused
+// subcommands are named too, since a model that is not told one is refused will ask for
+// it and be refused again.
 func (g *Git) Describe() Schema {
 	return Schema{
 		Type: "function",
@@ -198,9 +219,6 @@ func (g *Git) Describe() Schema {
 }
 
 // gitDescription renders the model-facing description from the list.
-//
-// The refused subcommands are named too, since a model that is not told a subcommand
-// is refused will ask for it and be refused again.
 func gitDescription() string {
 	refused := make([]string, 0, len(gitRefusedSubcommands))
 	for name := range gitRefusedSubcommands {
