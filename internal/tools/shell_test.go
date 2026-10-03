@@ -48,13 +48,15 @@ func TestShellRefusalNamesWhatItRuns(t *testing.T) {
 	}
 }
 
-// TestShellPermittedListIsExactlyThirtyTwo pins the count the design names.
+// TestShellPermittedListIsExactlyThirtyThree pins the count the design names.
 //
 // A list that grows without a decision is a list nobody has agreed to, and the count is
-// the cheapest way to notice that happening.
-func TestShellPermittedListIsExactlyThirtyTwo(t *testing.T) {
-	if got := len(shellPermitted); got != 32 {
-		t.Errorf("the list holds %d programs, want 32", got)
+// the cheapest way to notice that happening. It is raised from thirty-two by the addition
+// of dmesg, which is a reader that takes no path and may not be given the option that
+// clears what it reads.
+func TestShellPermittedListIsExactlyThirtyThree(t *testing.T) {
+	if got := len(shellPermitted); got != 33 {
+		t.Errorf("the list holds %d programs, want 33", got)
 	}
 
 	seen := map[string]bool{}
