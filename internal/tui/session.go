@@ -82,10 +82,10 @@ const (
 // Session owns the log, the levels and the state the footer stack reports.
 //
 // It is the thing a Run drives, and it is deliberately small: the log, the levels,
-// the four states, and the counters the bars show. Everything with a decision in it,
-// the terminal control, the line editor, the palette and the command table, is a
-// separate concern with its own file, and a session that grew all of them would be
-// the one file that decides everything.
+// the workers, the four states, and the counters the bars show. Everything with a
+// decision in it, the terminal control, the line editor, the palette and the command
+// table, is a separate concern with its own file, and a session that grew all of them
+// would be the one file that decides everything.
 type Session struct {
 	// log is the record of what has been written. It is a value rather than a
 	// pointer so a Session is one thing rather than two that can disagree.
@@ -97,6 +97,13 @@ type Session struct {
 	levels *levels
 
 	opts Options
+
+	// workers are the background turns this session started.
+	//
+	// They are under the session's own lock rather than the levels' lock, because a
+	// worker is asked about by the reader while a turn is running and the levels'
+	// lock is held briefly for the table rather than for the duration of a turn.
+	workers []*Worker
 
 	mu     sync.RWMutex
 	state  State
@@ -177,15 +184,15 @@ func (s *Session) SetState(state State, detail string) {
 // ErrNoModel reports a turn that has nothing to send.
 //
 // It is an error rather than an empty request, since the endpoint would answer a
-// request with no model with a refusal that names the model rather than the reader,
-// and the reader is the one who knows which key to press.
+// request with no model with a refusal that names the model rather than the
+// reader, and the reader is the one who knows which key to press.
 var ErrNoModel = errors.New("no model is chosen, so there is nothing to ask")
 
 // Ready reports whether a turn can be sent, and why not when it cannot.
 //
-// It exists so that the check lives in one place. Every caller that wants to start a
-// turn asks this rather than looking at the model itself, and a session that let one
-// path send a request with no model and another refuse it is a session where the
+// It exists so that the check lives in one place. Every caller that wants to start
+// a turn asks this rather than looking at the model itself, and a session that let
+// one path send a request with no model and another refuse it is a session where the
 // reader finds out by reading an error from the endpoint.
 func (s *Session) Ready() error {
 	if s.opts.Model == "" {
@@ -196,8 +203,8 @@ func (s *Session) Ready() error {
 
 // Begin turns a question into a turn and reports what it took.
 //
-// The context is the caller's so that stopping a model stops the request and not the
-// session, which is the only reason a turn can be stopped without leaving.
+// The context is the caller's so that stopping a model stops the request and not
+// the session, which is the only reason a turn can be stopped without leaving.
 //
 // The level is the thread the rows will be attributed to. It is not derived from
 // the session here: a caller holds the level it asked for and passes it back, so
@@ -212,7 +219,7 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 		return nil, err
 	}
 	if question == "" {
-		return nil, errors.New("no question was given")
+		return nil, ErrNoQuestion
 	}
 
 	s.log.Append(Row{
@@ -236,8 +243,8 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 // running at all.
 //
 // Text is written whole rather than a piece at a time, which is the decision the
-// interface was redesigned for. A reply held for its turn arrives as a block, so the
-// folding and the copy path see the same text the reader does.
+// interface was redesigned for. A reply held for its turn arrives as a block, so
+// the folding and the copy path see the same text the reader does.
 func (s *Session) Deliver(text string, level int) {
 	if text == "" {
 		return
