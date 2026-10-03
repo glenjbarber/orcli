@@ -13,35 +13,28 @@ decides, and the disagreement is a bug in one of the two.
 ## Where things live
 
 ```
-cmd/orcli/               the main package: flags, trust gate, wiring
 internal/openrouter/     HTTP client, SSE stream parser, wire types
 internal/config/         JSON configuration, colour writer, trusted directories
 internal/saved/          SQLite session store, autosave naming
 internal/tools/          tool execution: filesystem, git, shell
-internal/bootstrap/      --bootstrap documents and symlink resolution
-internal/complete/       Tab completion engine
-internal/tui/            the interface: rendering, input, session, panes
+.github/workflows/       CI definitions
 Makefile                 developer targets, written for BSD make and GNU make alike
-doc/                     manual pages
-files/                   port auxiliary files, including the pkg-descr
-test/                    test scripts and fixtures
 ```
 
 `internal/` is the module boundary. Nothing is importable from outside it.
 
-The dependency direction is one-way and deliberate:
+The four packages carry the code that exists today, and they import one another in
+no direction, because each is a leaf that the wiring layer is not yet written to
+join. A dependency that runs the other way is what lets a model tool reach the
+interface that drew it, so the direction is worth stating when there is one; for
+now the honest statement is that there is none, and a new edge needs a reason.
 
-```
-main → config, bootstrap, tui
-tui   → openrouter, tools, config, complete, saved, bootstrap
-tools → openrouter        (wire types only)
-openrouter → (stdlib)
-```
-
-`tools` imports `openrouter` for the wire types only and never runs a request.
-`tui` runs the requests and the tools. Preserve the direction when adding a
-package; a dependency that runs the other way is what lets a model tool reach the
-interface that drew it.
+The interface, the main package, the bootstrap loader, the completion engine and
+the clipboard encoder are described in the design documents under `staged/` and
+are not in the tree yet. Treat those documents as the specification for what a
+package will do, not as a description of a package that exists. `staged/` is
+ignored and holds build output beside that material, so nothing under it is
+committed and `go build ./...` may pick up a stray file placed there.
 
 ## Building
 
@@ -61,6 +54,9 @@ repository.
 
 Output goes to `staged/bin/`, worktrees to `worktrees/`, and both are ignored.
 Never write a build product beside a source file.
+
+`bmake build` reports that there is no main package and places no binary, and that
+is an ordinary message rather than a fault: the library packages still compile.
 
 Worktrees are named `{feature,bug,security}/{three-word-summary}`.
 
@@ -154,3 +150,7 @@ what to do and where things are. Neither records why a decision was taken.
 The rule for adding to them: `DESIGN.md` gets a change that alters what the
 system does, and this file gets a change that alters how to work on it. A
 rationale belongs in neither and in a commit message.
+
+Where the two disagree, one of them is wrong and the disagreement is a bug to be
+fixed rather than a nuance to be noted. Name the file that is wrong in the commit
+that fixes it, so the next reader does not have to work out which one it was.
