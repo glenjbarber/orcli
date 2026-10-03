@@ -12,14 +12,21 @@ been scoped.
 
 ## Status
 
-The project is at the beginning. The API client is written and tested; the
-interface, tools, configuration, persistence, panes and compaction are not.
+The project is at the beginning. The API client is written and its stream parser
+is tested; the interface, tools, configuration, persistence, panes and
+compaction are not.
 
 Implemented:
 
 | Package | Contents |
 | --- | --- |
 | `internal/openrouter` | HTTP client, SSE stream parser, wire types |
+
+Tested:
+
+| Area | Coverage |
+| --- | --- |
+| Stream parser | marker required, text kept before a cut, fragments joined on the wire index, counts read in every shape the endpoint uses |
 
 Not yet written:
 
@@ -33,7 +40,9 @@ Not yet written:
 | `internal/tools` | tool execution: filesystem, git, shell |
 | `internal/tui` | the interface: rendering, input, session, panes |
 
-There is no `cmd/orcli` yet, so no binary is produced by `make build`.
+There is no `cmd/orcli` yet, so no binary is produced by `make build`. The
+`Chat` entry point itself is not yet covered: the tests drive the parser
+directly, so the request and response path is unexercised.
 
 ## Design overview
 
@@ -146,8 +155,12 @@ rather than arrival order, since the index is the only field every fragment
 carries. Usage and cost are pointers, because a reported zero and an absent value
 are different.
 
-This is the one package that exists. The behavior described here is implemented
-in `internal/openrouter`.
+Accounting is decoded apart from the reply text. The endpoint sends counts in
+shapes this client cannot always read, and a figure it cannot parse must not cost
+the words beside it: a session with no cost for one response has an inexact
+total, which is a thing the ledger can say, while a lost reply is not.
+
+This is the one package that exists.
 
 ### Configuration
 
