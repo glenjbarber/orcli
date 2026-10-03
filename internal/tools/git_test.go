@@ -12,14 +12,13 @@ import (
 
 // gitBin is the git this suite arranges repositories with. It is resolved once and the
 // suite skips rather than fails when git is not installed, since the properties under
-// test are git's own: what a subcommand accepts, what a pathspec is, and how -- is
-// read.
+// test are git's own: what a subcommand accepts, what a pathspec is, and how -- is read.
 var gitBin, gitErr = exec.LookPath("git")
 
 // gitIn runs git in a directory, for arranging a test rather than for testing one.
 //
-// The arguments go in as an array and the environment is set explicitly, so nothing in
-// a test's own argument reaches a shell.
+// The arguments go in as an array and the environment is set explicitly, so nothing in a
+// test's own argument reaches a shell.
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 
@@ -78,12 +77,12 @@ func TestGitRefusesASubcommandOutsideTheList(t *testing.T) {
 	}
 }
 
-// TestForbiddenAndUnknownAreRefusedDifferently checks the two refusals differ in
-// wording.
+// TestForbiddenAndUnknownSubcommandsAreRefusedDifferently checks the two refusals
+// differ in wording.
 //
 // A model told a subcommand is unknown will try another spelling; a model told this
 // tool refuses it will move on.
-func TestForbiddenAndUnknownAreRefusedDifferently(t *testing.T) {
+func TestForbiddenAndUnknownSubcommandsAreRefusedDifferently(t *testing.T) {
 	g := NewGit(repo(t))
 
 	forbidden := invoke(g, body(t, map[string]any{"subcommand": "clean"}))
@@ -285,8 +284,11 @@ func TestEveryPermittedSubcommandIsNamedToTheModel(t *testing.T) {
 	}
 }
 
-// TestThePermittedMapMatchesTheList holds the derived form to the declaration.
-func TestThePermittedMapMatchesTheList(t *testing.T) {
+// TestTheGitPermittedMapMatchesItsList holds the derived form to the declaration.
+//
+// The shell tool has an equivalent test under a different name, since both tools keep a
+// derived map and two tests with one name in one package do not compile.
+func TestTheGitPermittedMapMatchesItsList(t *testing.T) {
 	if len(gitPermittedMap) != len(gitPermitted) {
 		t.Errorf("the map holds %d names, the list holds %d",
 			len(gitPermittedMap), len(gitPermitted))
@@ -307,8 +309,8 @@ func TestNoSubcommandIsBothPermittedAndRefused(t *testing.T) {
 	}
 }
 
-// TestARefusalCarriesTheSentinel checks the error is tellable apart.
-func TestARefusalCarriesTheSentinel(t *testing.T) {
+// TestAGitRefusalCarriesTheSentinel checks the error is tellable apart.
+func TestAGitRefusalCarriesTheSentinel(t *testing.T) {
 	g := NewGit(repo(t))
 
 	result := invoke(g, body(t, map[string]any{"subcommand": "clean"}))

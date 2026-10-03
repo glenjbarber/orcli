@@ -9,58 +9,57 @@ import (
 
 // ErrRefused is returned when a call is refused rather than failing.
 //
-// It is a refusal and not a fault: a model asked for something it may not have is
-// told so and carries on, which is different from a program that ran and failed.
+// It is a refusal and not a fault: a model asked for something it may not have is told
+// so and carries on, which is different from a program that ran and failed.
 var ErrRefused = errors.New("tools: refused")
 
 // pathShape says how a program finds its path arguments.
 //
-// Deciding whether an argument is a path needs the program, not the argument. ls
-// takes no path, echo takes no path at all and prints what it is given, grep takes
-// a pattern before its file, and rm takes paths and flags interleaved. Resolving
-// every argument as a path would rewrite the first three of those into something the
-// model did not write, which is a way of changing the call rather than of checking it.
+// Deciding whether an argument is a path needs the program, not the argument. ls takes
+// no path, echo takes no path at all and prints what it is given, grep takes a pattern
+// before its file, and rm takes paths and flags interleaved. Resolving every argument as
+// a path would rewrite the first three of those into something the model did not write,
+// which is a way of changing the call rather than of checking it.
 type pathShape int
 
 const (
 	// noPaths: the program takes no path at all. Every argument is passed through
-	// exactly as the model wrote it. ls, pwd and ps are the cases, and echo is the
-	// case that makes the distinction matter: echo prints its arguments, so
-	// resolving one as a path would replace the text the model wrote with a
-	// directory it did not name.
+	// exactly as the model wrote it. ls, pwd and ps are the cases, and echo is the case
+	// that makes the distinction matter: echo prints its arguments, so resolving one as
+	// a path would replace the text the model wrote with a directory it did not name.
 	noPaths pathShape = iota
 
 	// leadingPaths: every argument that is not an option is a path. This is the
 	// conservative shape and it belongs to the writers: cat, rm and the rest.
 	leadingPaths
 
-	// firstPath: the first argument is a path. find and wc are the cases, where a
-	// later argument is a pattern or a flag rather than a file.
+	// firstPath: the first argument is a path. find and wc are the cases, where a later
+	// argument is a pattern or a flag rather than a file.
 	firstPath
 
-	// finalPath: the last non-option argument is a path, and the rest are patterns
-	// or flags. grep and rg are the cases.
+	// finalPath: the last non-option argument is a path, and the rest are patterns or
+	// flags. grep and rg are the cases.
 	finalPath
 )
 
 // shellPermitted is the programs the shell tool may run.
 //
-// The list is a list of names, resolved by bare name through PATH, and it is fixed
-// here rather than read from the configuration file. What a program may do is a
-// property of this package; what a reader is asked before it happens is decided by
-// the interface, and neither can widen the other.
+// The list is a list of names, resolved by bare name through PATH, and it is fixed here
+// rather than read from the configuration file. What a program may do is a property of
+// this package; what a reader is asked before it happens is decided by the interface,
+// and neither can widen the other.
 //
-// The order groups the build tools first, then the readers, then the writers. It is
-// not sorted, because the declaration is the thing a reader reads, and a model shown
-// a refusal looks for the name it wanted near what it already knows.
+// The order groups the build tools first, then the readers, then the writers. It is not
+// sorted, because the declaration is the thing a reader reads, and a model shown a
+// refusal looks for the name it wanted near what it already knows.
 //
-// gh and rm are on the list for the opposite reason to the readers above, and the
-// reason is that they write. A model repairing a tree needs to remove what a build
-// left behind, and a model working on a repository needs to read and act on a pull
-// request. What bounds them is not a rule of their own: a name on this list bounds
-// what may be proposed and nothing more, since every call is still put to the reader,
-// and the arguments go to the program as an array, so there is no pipe, redirect or
-// chain by which one could reach a program not named here.
+// gh and rm are on the list for the opposite reason to the readers above, and the reason
+// is that they write. A model repairing a tree needs to remove what a build left behind,
+// and a model working on a repository needs to read and act on a pull request. What
+// bounds them is not a rule of their own: a name on this list bounds what may be
+// proposed and nothing more, since every call is still put to the reader, and the
+// arguments go to the program as an array, so there is no pipe, redirect or chain by
+// which one could reach a program not named here.
 var shellPermitted = []string{
 	// Build and toolchain.
 	"go",
@@ -103,8 +102,8 @@ var shellPermitted = []string{
 
 // shellPermittedMap is the lookup form of the list.
 //
-// It is derived in a variable initialiser so it cannot drift out of step with the
-// list above. A second copy of the list, maintained by hand, is a list that is wrong
+// It is derived in a variable initialiser so it cannot drift out of step with the list
+// above. A second copy of the list, maintained by hand, is a list that is wrong
 // somewhere by the first time a program is added.
 var shellPermittedMap = func() map[string]bool {
 	m := make(map[string]bool, len(shellPermitted))
@@ -116,23 +115,23 @@ var shellPermittedMap = func() map[string]bool {
 
 // permittedPrograms renders the list for a refusal.
 //
-// The refusal names the list, so a model that asked for something outside it learns
-// what it may ask for instead of learning only that it was refused.
+// The refusal names the list, so a model that asked for something outside it learns what
+// it may ask for instead of learning only that it was refused.
 func permittedPrograms() string { return strings.Join(shellPermitted, ", ") }
 
 // pathShapes is the path shape of each permitted program.
 //
-// Every program on the list has an entry, and a test enforces it. A program without
-// one is refused rather than run unchecked, since a gap in this table is not a licence
-// to run a program whose arguments nobody has thought about.
+// Every program on the list has an entry, and a test enforces it. A program without one
+// is refused rather than run unchecked, since a gap in this table is not a licence to
+// run a program whose arguments nobody has thought about.
 //
 // This is the one table a person adding a program has to touch, alongside the list
 // itself and the description below. Both are single points of change rather than
 // knowledge spread through the code: add the name to shellPermitted, give it a shape
-// here, and the refusal, the schema and the test all follow.
+// here, and the refusal, the schema and the tests all follow.
 var pathShapes = map[string]pathShape{
-	// The toolchain writes through whatever it is pointed at, and a path that
-	// leaves the tree is caught by leadingPaths for the same reason rm is.
+	// The toolchain writes through whatever it is pointed at, and a path that leaves
+	// the tree is caught by leadingPaths for the same reason rm is.
 	"go":                 leadingPaths,
 	"gofmt":              leadingPaths,
 	"make":               leadingPaths,
@@ -176,8 +175,8 @@ var pathShapes = map[string]pathShape{
 //
 // The list is short and the reasoning is uniform: these are the options that turn a
 // reader into something that runs a command. find is the only program with any, and
-// -delete is deliberately absent from that set. It removes files and runs nothing, so
-// it is bounded by the check on the paths it is given rather than by a refusal here. A
+// -delete is deliberately absent from that set. It removes files and runs nothing, so it
+// is bounded by the check on the paths it is given rather than by a refusal here. A
 // reader who wants it refused should have it named, and that is a question for the
 // decision maker rather than something to decide by omission.
 var refusedOptions = map[string][]string{
@@ -206,8 +205,8 @@ func isRefusedOption(program, arg string) bool {
 // asks for a pipeline learns it is not on offer rather than having its request split
 // into arguments.
 type Shell struct {
-	// Dir is the working directory a subprocess runs in. Every path argument is
-	// resolved against it and refused if it leaves.
+	// Dir is the working directory a subprocess runs in. Every path argument is resolved
+	// against it and refused if it leaves.
 	Dir string
 }
 
@@ -251,9 +250,9 @@ func (s *Shell) Describe() Schema {
 
 // shellParameters is the model-facing description of the tool.
 //
-// The list is spelled out a second time here, since this is the string a model reads
-// and it has to read as a sentence rather than as an identifier. It is held honest by a
-// test rather than by construction, because building it from the list would produce a
+// The list is spelled out a second time here, since this is the string a model reads and
+// it has to read as a sentence rather than as an identifier. It is held honest by a test
+// rather than by construction, because building it from the list would produce a
 // comma-separated identifier where a sentence belongs.
 const shellParameters = "run one of these programs in the current directory: " +
 	"go, gofmt, make, bmake, git, errcheck, gosec, govulncheck, " +
@@ -274,9 +273,9 @@ type shellArgs struct {
 // Run runs the program and returns what it produced.
 //
 // A failure to start and a failure inside the program are both reported, and both carry
-// the output the program managed to write. A tool that ran and failed has still told
-// the model something, and throwing that away would make a model retry a call whose
-// answer was already on the wire.
+// the output the program managed to write. A tool that ran and failed has still told the
+// model something, and throwing that away would make a model retry a call whose answer
+// was already on the wire.
 func (s *Shell) Run(raw json.RawMessage) Result {
 	var a shellArgs
 	if len(raw) != 0 {
@@ -314,14 +313,14 @@ func (s *Shell) Run(raw json.RawMessage) Result {
 //
 // The order is the order the failures are worth reporting in. A program that is not
 // permitted is refused by name before the filesystem is asked about it and before a
-// reader is interrupted, since a call that was never going to run is not something to
-// ask somebody about. The refusal names the list, so a model that asked for something
-// outside it learns what it may ask for.
+// reader is interrupted, since a call that was never going to run is not something to ask
+// somebody about. The refusal names the list, so a model that asked for something outside
+// it learns what it may ask for.
 //
-// An option is passed through untouched. A dash is what separates an option from a
-// path, and an argument carrying one is the flag it says it is however much it
-// resembles a file name. A non-option argument is a path only where the program's shape
-// says one is, and is otherwise passed through exactly as the model wrote it.
+// An option is passed through untouched. A dash is what separates an option from a path,
+// and an argument carrying one is the flag it says it is however much it resembles a file
+// name. A non-option argument is a path only where the program's shape says one is, and
+// is otherwise passed through exactly as the model wrote it.
 func (s *Shell) check(command string, args []string) (string, []string, error) {
 	if !shellPermittedMap[command] {
 		return "", nil, fmt.Errorf("tools: %s is not permitted: this tool runs %s",
@@ -376,8 +375,8 @@ func isPathArgument(shape pathShape, i int, args []string) bool {
 	case firstPath:
 		return i == 0
 	case finalPath:
-		// The last non-option argument, so that `grep -I pattern file` checks the
-		// file and not the pattern.
+		// The last non-option argument, so that `grep -I pattern file` checks the file
+		// and not the pattern.
 		last := -1
 		for j, arg := range args {
 			if !isOption(arg) {
@@ -389,13 +388,6 @@ func isPathArgument(shape pathShape, i int, args []string) bool {
 		return false
 	}
 }
-
-// isOption reports whether an argument is an option rather than a path.
-//
-// A dash is what separates the two, and an argument carrying one is read as the flag it
-// is however much it resembles a path. -o is not a path and -2024-01-01 is not a path
-// either, and treating either as one would refuse ordinary calls.
-func isOption(arg string) bool { return strings.HasPrefix(arg, "-") }
 
 // resolveProgram finds a permitted program by bare name through the search path.
 //
