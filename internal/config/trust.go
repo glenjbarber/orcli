@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -41,11 +40,11 @@ type Trust struct {
 	// reader rather than something to draw in a pane they are about to leave.
 	Warn func(error)
 
-	// Read and Write are the file operations. They are fields so the trust
-	// gate can be tested without a home directory, and so the caller can
-	// record the approval through its own already-open configuration file
-	// rather than by reopening it here.
-	Read  func() (Config, bool, error)
+	// Read and Write are the file operations. They are fields so the gate can
+	// be tested without a home directory, and so the caller records the
+	// approval through its own already-read configuration rather than by
+	// reopening the file here.
+	Read  func() (Config, error)
 	Write func(Config) error
 }
 
@@ -74,8 +73,12 @@ func (t Trust) EnsureTrusted(dir string) bool {
 		return false
 	}
 
-	cfg, _, err := t.Read()
-	if err != nil && !errors.Is(err, ErrNoAPIKey) {
+	cfg, err := t.Read()
+	switch {
+	case err == nil, errors.Is(err, ErrNoAPIKey):
+		// The record was read. A file without a credential still carries
+		// whatever trust it holds, and is not a reason to refuse.
+	default:
 		// The record could not be read. This is not fatal here: the question
 		// below is still worth asking, and an approval that cannot be written
 		// is reported rather than treated as a refusal.
@@ -107,9 +110,9 @@ func (t Trust) ask(dir string) bool {
 		return false
 	}
 
-	// The directory is quoted rather than printed bare. A path is a thing a
-	// reader is about to agree to, and a path with a space or a control
-	// character in it is one they would not recognize in a prompt.
+	// The directory is named rather than printed bare. A path is a thing a
+	// reader is about to agree to, and a path they would not recognize in a
+	// prompt is one they should not agree to.
 	fmt.Fprintf(t.Out, "orcli wants to run in %s, and may run programs there.\n", dir)
 	fmt.Fprint(t.Out, "Trust this directory? [y/N] ")
 
@@ -131,8 +134,8 @@ func (t Trust) ask(dir string) bool {
 
 // trusted reports whether dir is already in the list.
 //
-// The comparison is on the cleaned absolute path. A list written by an earlier
-// version, or by hand, may carry a trailing separator or a relative prefix, and
+// The comparison is on the cleaned absolute path. A list written by hand, or by
+// an earlier version, may carry a trailing separator or a relative prefix, and
 // a trust list that answers no to a directory it named is worse than one that
 // was never written.
 func trusted(list []string, dir string) bool {
@@ -160,9 +163,5 @@ func (t Trust) warn(err error) {
 // It is exposed so the caller can open the file once and pass Read and Write,
 // rather than having this package reopen it for every question.
 func TrustForHome() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "", errors.New("config: the home directory could not be determined")
-	}
-	return filepath.Join(home, ".orcli.json"), nil
+	return DefaultPath()
 }

@@ -2,7 +2,6 @@ package config
 
 import (
 	"errors"
-	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +31,7 @@ func trust(answer string, cfg Config) (*recorder, Trust) {
 		Warn: func(err error) {
 			r.warn = append(r.warn, err)
 		},
-		Read: func() (Config, bool, error) { return r.cfg, true, nil },
+		Read: func() (Config, error) { return r.cfg, nil },
 		Write: func(c Config) error {
 			if r.failWrite {
 				return errors.New("config: the record could not be written")
@@ -133,7 +132,6 @@ func TestTrustRecordsARefusal(t *testing.T) {
 func TestTrustRefusesWhenThereIsNothingToRead(t *testing.T) {
 	dir := t.TempDir()
 	r, tr := trust("", Config{})
-
 	tr.In = nil
 
 	if tr.EnsureTrusted(dir) {
@@ -182,8 +180,8 @@ func TestTrustKeepsAnApprovalItCannotRecord(t *testing.T) {
 func TestTrustReportsAReadFaultWithoutRefusing(t *testing.T) {
 	dir := t.TempDir()
 	r, tr := trust("y\n", Config{})
-	tr.Read = func() (Config, bool, error) {
-		return Config{}, false, errors.New("config: the file could not be read")
+	tr.Read = func() (Config, error) {
+		return Config{}, errors.New("config: the file could not be read")
 	}
 
 	if !tr.EnsureTrusted(dir) {
@@ -207,7 +205,6 @@ func TestTrustAsksOncePerDirectory(t *testing.T) {
 	}
 	first := r.out.String()
 
-	// A second call reads the record the first one wrote.
 	tr.In = strings.NewReader("n\n")
 	if !tr.EnsureTrusted(dir) {
 		t.Error("EnsureTrusted = false on the second run, want true: it is recorded")
@@ -275,7 +272,7 @@ func TestTrustForHomeNamesTheFile(t *testing.T) {
 func TestTrustWritesAFileTheNextLoadCanRead(t *testing.T) {
 	h := home(t)
 	path := filepath.Join(h, ".orcli.json")
-	writeConfig(t, path, `{"OPENROUTER_API_KEY":"sk-or-v1-abc"}`, 0o600)
+	writeConfig(t, path, `{"api_key":"sk-or-v1-abc"}`, 0o600)
 
 	dir := t.TempDir()
 	var out strings.Builder
@@ -285,10 +282,7 @@ func TestTrustWritesAFileTheNextLoadCanRead(t *testing.T) {
 		In:   strings.NewReader("y\n"),
 		Out:  &out,
 		Warn: func(err error) { warns = append(warns, err) },
-		Read: func() (Config, bool, error) {
-			cfg, found, err := Load()
-			return cfg, found, err
-		},
+		Read: func() (Config, error) { return Load() },
 		Write: func(cfg Config) error {
 			data, err := marshalIndent(cfg)
 			if err != nil {
@@ -305,7 +299,7 @@ func TestTrustWritesAFileTheNextLoadCanRead(t *testing.T) {
 		t.Fatalf("reported %d faults, want none: %v", len(warns), warns)
 	}
 
-	cfg, _, err := Load()
+	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -319,11 +313,12 @@ func TestTrustWritesAFileTheNextLoadCanRead(t *testing.T) {
 // in.
 //
 // The file is meant to be read by hand when something has gone wrong, so it has
-// to remain a plain JSON object with the rest of its contents intact.
+// to remain a plain JSON object with the rest of its contents intact, and the
+// mode has to stay at 0600 because the file still holds the credential.
 func TestTrustRecordsKeepTheFileParseable(t *testing.T) {
 	h := home(t)
 	path := filepath.Join(h, ".orcli.json")
-	writeConfig(t, path, `{"OPENROUTER_API_KEY":"sk-or-v1-abc","model":"some/model"}`, 0o600)
+	writeConfig(t, path, `{"api_key":"sk-or-v1-abc","model":"some/model"}`, 0o600)
 
 	dir := t.TempDir()
 	r, tr := trust("y\n", Config{APIKey: "sk-or-v1-abc", Model: "some/model"})
@@ -347,7 +342,8 @@ func TestTrustRecordsKeepTheFileParseable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if got := info.Mode().Perm(); got != fs.FileMode(0o600) {
-		t.Errorf("the file is now %04o, want 0600: a credential must not go loose", got)
+	if got := info.Mode().Perm(); got != FileMode {
+		t.Errorf("the file is now %04o, want %04o: a credential must not go loose",
+			got, FileMode)
 	}
 }
