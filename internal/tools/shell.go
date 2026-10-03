@@ -100,8 +100,8 @@ var shellPermitted = []string{
 // shellPermittedMap is the lookup form of the list.
 //
 // It is derived in a variable initialiser so it cannot drift out of step with the list
-// above. A second copy of the list, maintained by hand, is a list that is wrong
-// somewhere by the first time a program is added.
+// above. A second copy of the list, maintained by hand, is a list that is wrong the
+// first time a program is added.
 var shellPermittedMap = func() map[string]bool {
 	m := make(map[string]bool, len(shellPermitted))
 	for _, name := range shellPermitted {
@@ -198,9 +198,14 @@ func isRefusedOption(program, arg string) bool {
 //
 // It runs a program from the allowlist with an argument array. It never reaches a shell,
 // so a pipe, a redirect, and a chain are not available: those are features of a shell,
-// and offering them would mean running one. The schema says so, so a model that asks for
-// a pipeline learns it is not on offer rather than having its request split into
-// arguments.
+// and offering them to a model would mean running one. The schema says so, so a model
+// that asks for a pipeline learns it is not on offer rather than having its request split
+// into arguments.
+//
+// A call is bounded in two ways, and both are set here rather than at the call site: a
+// single command may not run past shellTimeout, and its output may not exceed outputLimit.
+// The bounds live in exec.go with the program they apply to, and this tool names the
+// deadline it wants.
 type Shell struct {
 	// Dir is the working directory a subprocess runs in. Every path argument is
 	// resolved against it and refused if it leaves.
@@ -257,14 +262,22 @@ func (s *Shell) Describe() Schema {
 // It is a function and not a constant because the list is the single source of truth. A
 // description written out beside the list is a second copy, and a second copy is wrong the
 // first time a program is added.
+//
+// The bounds are named in it rather than left for a model to discover by hitting them. A
+// model that knows a command may run for two minutes and write a mebibyte will keep a
+// large command to one program and ask for the rest separately, where a model that finds
+// the limit by having the output cut learns only that something went wrong.
 func shellDescription() string {
 	return fmt.Sprintf("run one of these %d programs in the current directory: %s. "+
 		"This is not a shell: pipes, redirects, and command chains are not available, "+
 		"and each argument is passed to the program as written. Paths are relative to "+
 		"the working directory, and an absolute path or one that leaves the tree is "+
 		"refused. A pattern is judged by the directory leading to it, so *.go is "+
-		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec. %s",
-		len(shellPermitted), permittedPrograms(), gitSubcommandDescription())
+		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec. "+
+		"one command runs for at most %s and writes at most %d bytes, and a command "+
+		"past either bound is stopped and reported rather than truncated. %s",
+		len(shellPermitted), permittedPrograms(), shellTimeout, outputLimit,
+		gitSubcommandDescription())
 }
 
 // shellArgs is the decoded body of a shell call.
@@ -283,10 +296,11 @@ type shellArgs struct {
 // outside the tree is a question about something the reader cannot see. Then the approval
 // mode, which is the only check here that can be answered yes.
 //
-// A failure to start and a failure inside the program are both reported, and both carry
-// the output the program managed to write. A tool that ran and failed has still told the
-// model something, and throwing that away would make a model retry a call whose answer
-// was already on the wire.
+// A failure to start, a failure inside the program, a program that ran past its deadline
+// and a program that wrote past the cap are all reported the same way: with whatever it
+// managed to write attached. A tool that ran and failed has still told the model
+// something, and throwing that away would make a model retry a call whose answer was
+// already on the wire.
 func (s *Shell) Run(raw json.RawMessage) Result {
 	var a shellArgs
 	if len(raw) != 0 {
@@ -328,7 +342,7 @@ func (s *Shell) Run(raw json.RawMessage) Result {
 		return Result{Err: err}
 	}
 
-	out, err := runProgram(path, args, s.Dir)
+	out, err := runProgram(path, args, s.Dir, shellTimeout)
 	if err != nil {
 		if len(out) == 0 {
 			return Result{Err: fmt.Errorf("tools: shell %s: %w", program, err)}
