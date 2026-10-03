@@ -41,5 +41,8 @@ staged/bin/
 # Local preferences and memory
 .OPENROUTER.md
 
-# Local worktree status notes
+# Worker ledgers and their locks. Both names carry no slash, so each is
+# ignored at every depth, which covers the root status.txt of a worktree and
+# the staged/status.txt beside it.
 status.txt
+status.txt.lock
