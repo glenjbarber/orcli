@@ -60,11 +60,27 @@ type Config struct {
 	// Verbosity is how much the model is asked to answer with, 0 to 6.
 	Verbosity int `json:"verbosity,omitempty"`
 
-	// Approval is the tool approval mode: ask, allow, or refuse.
+	// Approval is the session approval mode: ask, allow, or deny.
+	//
+	// It is carried as a string rather than as the Approval type, because this
+	// is the file as read and the reader is the one who may have written
+	// something that is not one of the three. The mode is parsed by ApprovalMode
+	// below, and an unparseable value is a fault rather than a fallback.
 	Approval string `json:"approval,omitempty"`
 
-	// Trusted is the list of directories that have been trusted.
+	// Trusted is the list of directories a permission ticket has been issued
+	// for. A ticket is issued once and recorded here, so a session in a
+	// directory is not asked about it again.
 	Trusted []string `json:"OPENROUTER_TRUSTED,omitempty"`
+
+	// Readable is the list of directories that may be read from outside the
+	// working directory.
+	//
+	// This is not a ticket and does not permit anything to run or to be
+	// written there. It is a read-only reach: a path resolving inside one of
+	// these can be listed and read while the working directory continues to be
+	// the only place anything is written and the only place a program is run.
+	Readable []string `json:"OPENROUTER_READABLE,omitempty"`
 }
 
 // Default is the configuration a session runs with when nothing is on disk.
@@ -80,8 +96,17 @@ func Default() Config {
 		Bell:      false,
 		Color:     false,
 		Verbosity: 0,
-		Approval:  "ask",
+		Approval:  string(ApprovalAsk),
 	}
+}
+
+// ApprovalMode is the parsed approval mode.
+//
+// It is a method rather than a field because parsing can fail, and a field would
+// have to be either a wrong answer or an error the reader has to go looking for
+// in a different place.
+func (c Config) ApprovalMode() (Approval, error) {
+	return parseApproval(c.Approval)
 }
 
 // Load reads the first configuration file found on the search order.
@@ -190,10 +215,20 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readString(value, &c.Approval)
 		case "OPENROUTER_TRUSTED":
 			err = readStrings(value, &c.Trusted)
+		case "OPENROUTER_READABLE":
+			err = readStrings(value, &c.Readable)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
+	}
+
+	// The approval mode is checked where it is read rather than at every use,
+	// so a file naming a mode this client does not know is reported as the
+	// fault it is, by name, rather than as a tool refusing something later for
+	// a reason that points nowhere near the file.
+	if _, err := parseApproval(c.Approval); err != nil {
+		return err
 	}
 	return nil
 }
@@ -225,9 +260,9 @@ func checkMode(path string) error {
 // resolve expands a leading `~` and refuses a relative result.
 //
 // XDG_CONFIG_HOME is honoured, but a relative value for it is not. The
-// specification requires an absolute path, and resolving a relative one
-// against the working directory would read a credential out of a directory
-// another account wrote.
+// specification requires an absolute path, and resolving a relative one against
+// the working directory would read a credential out of a directory another
+// account wrote.
 func resolve(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()

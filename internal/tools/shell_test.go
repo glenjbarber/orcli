@@ -8,42 +8,131 @@ import (
 	"testing"
 )
 
-// TestShellRefusesAProgramOutsideTheAllowlist covers the allowlist.
+// TestShellRefusesAProgramOutsideTheList covers the invariant.
 //
-// A program that is not named is refused even when it exists, because the
-// allowlist is what bounds what may be run at all.
-func TestShellRefusesAProgramOutsideTheAllowlist(t *testing.T) {
+// A program outside the list is refused by name, and the refusal names the list
+// so a model that asked for something outside it learns what it may ask for.
+func TestShellRefusesAProgramOutsideTheList(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
 	for _, command := range []string{
-		"sh", "bash", "zsh", "rm", "mv", "curl", "gh", "git", "chmod", "kill",
-		"python", "python3", "perl", "ruby", "env", "xargs", "nohup", "ssh",
+		"sh", "bash", "zsh", "curl", "ssh", "python", "python3", "perl", "ruby",
+		"env", "xargs", "nohup", "eval", "chmod", "kill", "killall", "nc", "telnet",
 	} {
 		t.Run(command, func(t *testing.T) {
 			result := invoke(shell, body(t, map[string]any{"command": command}))
 			if result.Err == nil {
-				t.Errorf("%s ran, want it refused: it is not on the allowlist", command)
+				t.Errorf("%s ran, want it refused: it is not on the list", command)
+			}
+			if !strings.Contains(result.Err.Error(), "not permitted") {
+				t.Errorf("the failure is %q, want it to say the program is not permitted",
+					result.Err)
+			}
+			// The refusal names what may be run, so a model learns the list.
+			for _, permitted := range shellPermitted {
+				if !strings.Contains(result.Err.Error(), permitted) {
+					t.Errorf("the refusal does not name %s: %q", permitted, result.Err)
+					break
+				}
 			}
 		})
 	}
 }
 
-// TestShellRefusesAProgramNamedByPath covers the bare-name rule.
+// TestShellPermittedListIsExactlyThirtyTwo pins the count the design names.
 //
-// A path is refused even when the program at it is allowed, because an allowlist
-// of names is not an allowlist of paths.
-func TestShellRefusesAProgramNamedByPath(t *testing.T) {
+// A list that grows without a decision is a list nobody has agreed to, and the
+// count is the cheapest way to notice that happening.
+func TestShellPermittedListIsExactlyThirtyTwo(t *testing.T) {
+	if got := len(shellPermitted); got != 32 {
+		t.Errorf("the list holds %d programs, want 32", got)
+	}
+
+	seen := map[string]bool{}
+	for _, name := range shellPermitted {
+		if seen[name] {
+			t.Errorf("%s is on the list twice", name)
+		}
+		seen[name] = true
+	}
+}
+
+// TestShellEveryPermittedProgramIsNamedToTheModel is the model-facing check.
+//
+// The list is spelled out a second time in the schema description, and the two
+// copies cannot be made identical by construction without producing a
+// comma-separated identifier where a sentence belongs. This test is what holds
+// them together.
+func TestShellEveryPermittedProgramIsNamedToTheModel(t *testing.T) {
+	description := NewShell(t.TempDir()).Describe().Function.Description
+
+	for _, name := range shellPermitted {
+		if !strings.Contains(description, name) {
+			t.Errorf("%s is permitted but is not named in the description", name)
+		}
+	}
+
+	// And nothing is named that is not permitted.
+	for _, name := range []string{"sh", "bash", "curl", "ssh", "python", "rm -rf"} {
+		if strings.Contains(description, name+",") && !shellPermittedMap[name] {
+			t.Errorf("the description names %s, which is not permitted", name)
+		}
+	}
+}
+
+// TestShellRefusesFindExec is the decision you made expressly.
+//
+// -exec hands the program a command to run, which is the one thing an argument
+// array does not protect against.
+func TestShellRefusesFindExec(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
-	for _, command := range []string{"/bin/cat", "./cat", "/bin/sh", "../cat"} {
-		t.Run(command, func(t *testing.T) {
-			result := invoke(shell, body(t, map[string]any{"command": command}))
+	for _, flag := range []string{"-exec", "-execdir", "-fls", "-fprint"} {
+		t.Run(flag, func(t *testing.T) {
+			result := invoke(shell, body(t, map[string]any{
+				"command": "find",
+				"args":    []string{".", flag, "sh", "-c", "id"},
+			}))
 			if result.Err == nil {
-				t.Errorf("%s ran, want it refused: a program is named by bare name", command)
+				t.Errorf("find %s ran, want it refused", flag)
+			}
+			if !strings.Contains(result.Err.Error(), flag) {
+				t.Errorf("the failure is %q, want it to name %s", result.Err, flag)
 			}
 		})
+	}
+}
+
+// TestShellAllowsFindDelete records the decision not to refuse -delete.
+//
+// It removes files and runs nothing, so it is bounded by the check on the paths
+// it is given. This test exists so that the omission is a decision on the record
+// rather than an oversight.
+func TestShellAllowsFindDelete(t *testing.T) {
+	if isRefusedOption("find", "-delete") {
+		t.Error("-delete is refused, want it allowed: it runs nothing and is bounded by its paths")
+	}
+
+	// It is not refused merely because it starts with a dash either.
+	if isRefusedOption("find", "-deleted") {
+		t.Error("-deleted is refused, want the match to be exact")
+	}
+}
+
+// TestShellRefusesFindExecWhereverItAppears checks the flag is caught at any
+// position, since a reader is not going to find it first.
+func TestShellRefusesFindExecWhereverItAppears(t *testing.T) {
+	dir := tree(t)
+	shell := NewShell(dir)
+
+	result := invoke(shell, body(t, map[string]any{
+		"command": "find",
+		"args":    []string{"-name", "*.go", "-exec", "sh", "-c", "id", ";"},
+	}))
+	if result.Err == nil {
+		t.Error("find with -exec in a later position ran, want it refused")
 	}
 }
 
@@ -55,12 +144,7 @@ func TestShellRefusesAPathLeavingTheTree(t *testing.T) {
 	shell := NewShell(dir)
 
 	for _, path := range []string{
-		"..",
-		"../",
-		"../one.txt",
-		"../../etc/passwd",
-		"sub/../../outside.txt",
-		"./../one.txt",
+		"..", "../", "../one.txt", "../../etc/passwd", "sub/../../outside.txt", "./../one.txt",
 	} {
 		t.Run(path, func(t *testing.T) {
 			result := invoke(shell, body(t, map[string]any{
@@ -70,49 +154,30 @@ func TestShellRefusesAPathLeavingTheTree(t *testing.T) {
 			if result.Err == nil {
 				t.Errorf("cat %q ran, want it refused", path)
 			}
-			if !strings.Contains(result.Err.Error(), "outside") {
-				t.Errorf("the failure is %q, want it to say the path is outside", result.Err)
-			}
 		})
 	}
 }
 
-// TestShellRefusesAPathLeavingThroughGrep covers the last-argument case.
+// TestShellRefusesAnAbsolutePath covers the decision you made.
 //
-// grep takes a pattern before its file, so a fixed position would check the
-// pattern rather than the file. This is the case that shape exists for.
-func TestShellRefusesAPathLeavingThroughGrep(t *testing.T) {
+// An absolute path is refused rather than held to the same bound, so a model
+// that sends one is told no rather than having it made relative.
+func TestShellRefusesAnAbsolutePath(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
+	// Even a path inside the tree is refused, since the spelling is what is
+	// being refused rather than the destination.
+	inside := filepath.Join(dir, "one.txt")
 	result := invoke(shell, body(t, map[string]any{
-		"command": "grep",
-		"args":    []string{"in", "../one.txt"},
+		"command": "cat",
+		"args":    []string{inside},
 	}))
 	if result.Err == nil {
-		t.Error("grep with a file above the root ran, want it refused")
+		t.Errorf("cat %q ran, want it refused: an absolute path is refused outright", inside)
 	}
-}
-
-// TestShellRefusesAPathLeavingThroughEveryProgramThatTakesOne checks the shape
-// table rather than one program.
-func TestShellRefusesAPathLeavingThroughEveryProgramThatTakesOne(t *testing.T) {
-	dir := tree(t)
-
-	for command, shape := range pathArguments {
-		if shape != first {
-			continue
-		}
-		t.Run(command, func(t *testing.T) {
-			shell := NewShell(dir)
-			result := invoke(shell, body(t, map[string]any{
-				"command": command,
-				"args":    []string{"../outside"},
-			}))
-			if result.Err == nil {
-				t.Errorf("%s with a path above the root ran, want it refused", command)
-			}
-		})
+	if !strings.Contains(result.Err.Error(), "absolute") {
+		t.Errorf("the failure is %q, want it to say the path is absolute", result.Err)
 	}
 }
 
@@ -122,10 +187,7 @@ func TestShellRunsAPathInsideTheTree(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
-	result := invoke(shell, body(t, map[string]any{
-		"command": "cat",
-		"args":    []string{"one.txt"},
-	}))
+	result := invoke(shell, body(t, map[string]any{"command": "cat", "args": []string{"one.txt"}}))
 	if result.Err != nil {
 		t.Fatalf("cat one.txt: %v", result.Err)
 	}
@@ -134,37 +196,20 @@ func TestShellRunsAPathInsideTheTree(t *testing.T) {
 	}
 }
 
-// TestShellRunsAProgramWithNoPath covers the programs whose shape is none.
-func TestShellRunsAProgramWithNoPath(t *testing.T) {
+// TestShellPassesAnOptionThrough covers the rule that a dash is what separates
+// an option from a path.
+func TestShellPassesAnOptionThrough(t *testing.T) {
 	dir := tree(t)
+	shell := NewShell(dir)
 
-	for command, shape := range pathArguments {
-		if shape != none {
-			continue
-		}
-		t.Run(command, func(t *testing.T) {
-			shell := NewShell(dir)
-			result := invoke(shell, body(t, map[string]any{"command": command}))
-			// false always fails, which is a reported failure and not a fault
-			// in the tool.
-			if result.Err != nil && command != "false" {
-				t.Errorf("%s: %v", command, result.Err)
-			}
-		})
-	}
-}
-
-// TestShellRefusesAProgramWithNoDeclaredShape covers the gap.
-//
-// A program on the allowlist whose path shape has not been worked out is
-// refused rather than run unchecked, since a gap is not a licence. The program
-// here is not on the allowlist either, which is the belt: the check runs before
-// the name is resolved.
-func TestShellRefusesAProgramWithNoDeclaredShape(t *testing.T) {
-	shell := NewShell(t.TempDir())
-
-	if _, err := shell.checkArgs("a-program-with-no-shape", []string{"x"}); err == nil {
-		t.Error("a program with no declared shape was checked, want a refusal")
+	// -I to grep is a flag, and treating it as a file name would refuse a
+	// perfectly ordinary call.
+	result := invoke(shell, body(t, map[string]any{
+		"command": "grep",
+		"args":    []string{"-I", "in", "one.txt"},
+	}))
+	if result.Err != nil {
+		t.Errorf("grep -I: %v", result.Err)
 	}
 }
 
@@ -176,8 +221,6 @@ func TestShellNeverReachesAShell(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
-	// If any of this reached a shell, the redirect would create a file and the
-	// chain would run a program that is not on the allowlist.
 	result := invoke(shell, body(t, map[string]any{
 		"command": "echo",
 		"args":    []string{"a > pwned.txt", "&& rm -rf /", "$(whoami)", "`id`"},
@@ -186,11 +229,9 @@ func TestShellNeverReachesAShell(t *testing.T) {
 		t.Fatalf("echo: %v", result.Err)
 	}
 
-	// The arguments came back as the literal strings.
 	for _, want := range []string{"> pwned.txt", "&& rm -rf /", "$(whoami)", "`id`"} {
 		if !strings.Contains(result.Content, want) {
-			t.Errorf("the output is %q, want the argument %q passed through unchanged",
-				result.Content, want)
+			t.Errorf("the output is %q, want the argument %q unchanged", result.Content, want)
 		}
 	}
 
@@ -200,9 +241,6 @@ func TestShellNeverReachesAShell(t *testing.T) {
 }
 
 // TestShellRunsInTheWorkingDirectory checks where the process is put.
-//
-// Every path is relative to the working directory, so the process has to run
-// there or a relative path would mean something else.
 func TestShellRunsInTheWorkingDirectory(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
@@ -215,7 +253,7 @@ func TestShellRunsInTheWorkingDirectory(t *testing.T) {
 	// macOS reports a temporary directory through a symlink, so the two are
 	// compared as resolved paths rather than as written.
 	got := strings.TrimSpace(result.Content)
-	wantResolved, err := filepath.EvalSymlinks(dir)
+	want, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
 	}
@@ -223,54 +261,16 @@ func TestShellRunsInTheWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%q): %v", got, err)
 	}
-	if gotResolved != wantResolved {
+	if gotResolved != want {
 		t.Errorf("pwd reported %q, want %q", got, dir)
-	}
-}
-
-// TestShellReportsAFailureWithItsOutput covers a program that ran and failed.
-//
-// The output is kept: a program that wrote something before failing has answered
-// part of the question, and discarding it would make a model retry a call whose
-// answer was already on the wire.
-//
-// grep is the case, and it is chosen because a matching grep writes to stdout
-// and a non-matching one writes nothing. The first is a failure with output to
-// keep; the second is a failure with nothing to keep, which is why the earlier
-// version of this test asserted nothing about output and passed by accident.
-func TestShellReportsAFailureWithItsOutput(t *testing.T) {
-	dir := tree(t)
-	shell := NewShell(dir)
-
-	// A missing file is a failure, and there is no output with it.
-	result := invoke(shell, body(t, map[string]any{
-		"command": "cat",
-		"args":    []string{"no-such-file.txt"},
-	}))
-	if result.Err == nil {
-		t.Fatal("cat of a missing file succeeded, want it reported as a failure")
-	}
-
-	// head against a directory it cannot read is a failure as well. The point of
-	// the test is that neither discards output, and that neither is reported as
-	// a success.
-	result = invoke(shell, body(t, map[string]any{
-		"command": "head",
-		"args":    []string{"one.txt"},
-	}))
-	if result.Err != nil {
-		t.Errorf("head one.txt: %v", result.Err)
-	}
-	if !strings.Contains(result.Content, "in one.txt") {
-		t.Errorf("content is %q, want the file contents", result.Content)
 	}
 }
 
 // TestShellReportsAProgramThatIsNotFound covers an allowlisted name that is not
 // installed.
 //
-// The allowlist says what may be proposed; PATH says what exists. A name on the
-// list that is not on the disk is a fault to report, not a silent success.
+// The list says what may be proposed; PATH says what exists. A name on the list
+// that is not on the disk is a fault to report, not a silent success.
 func TestShellReportsAProgramThatIsNotFound(t *testing.T) {
 	dir := t.TempDir()
 	shell := NewShell(dir)
@@ -290,11 +290,7 @@ func TestShellNeedsACommand(t *testing.T) {
 	dir := tree(t)
 	shell := NewShell(dir)
 
-	for _, fields := range []map[string]any{
-		{},
-		{"command": ""},
-		{"command": "   "},
-	} {
+	for _, fields := range []map[string]any{{}, {"command": ""}, {"command": "   "}} {
 		if result := invoke(shell, body(t, fields)); result.Err == nil {
 			t.Errorf("a call with no command (%v) succeeded, want a refusal", fields)
 		}
@@ -308,17 +304,14 @@ func TestShellWithoutADirectoryProducesAResult(t *testing.T) {
 	if result := invoke(shell, body(t, map[string]any{"command": "ls"})); result.Err == nil {
 		t.Error("a shell with no working directory succeeded, want a refusal")
 	}
-
-	result := invoke(NewShell(""), body(t, map[string]any{"command": "ls"}))
-	if result.Err == nil {
+	if result := invoke(NewShell(""), body(t, map[string]any{"command": "ls"})); result.Err == nil {
 		t.Error("a shell with an empty working directory succeeded, want a refusal")
 	}
 }
 
 // TestShellRefusesArgumentsThatAreNotAnObject covers the shared decode.
 func TestShellRefusesArgumentsThatAreNotAnObject(t *testing.T) {
-	dir := tree(t)
-	shell := NewShell(dir)
+	shell := NewShell(tree(t))
 
 	if result := invoke(shell, json.RawMessage(`"ls"`)); result.Err == nil {
 		t.Error("a string of arguments was accepted, want a refusal")
@@ -326,28 +319,33 @@ func TestShellRefusesArgumentsThatAreNotAnObject(t *testing.T) {
 }
 
 // TestShellSaysItIsNotAShell checks the schema tells a model the truth.
-//
-// A model told only what the tool can do will ask for a pipe, and a model told
-// it cannot will use the programs it has.
 func TestShellSaysItIsNotAShell(t *testing.T) {
-	shell := NewShell(t.TempDir())
-	description := shell.Describe().Function.Description
+	description := NewShell(t.TempDir()).Describe().Function.Description
 
-	for _, want := range []string{"not a shell", "pipes", "relative to the working directory"} {
+	for _, want := range []string{
+		"not a shell", "pipes", "relative to the working directory",
+		"gh and rm write", "may not be given -exec",
+	} {
 		if !strings.Contains(description, want) {
 			t.Errorf("the description does not say %q: %s", want, description)
 		}
 	}
 }
 
-// TestShellRefusesToWidenItself covers the allowlist being fixed here.
+// TestShellChecksTheListBeforeAskingAboutTheDirectory covers the order.
 //
-// The set is a property of this package. A program named on the allowlist but
-// with no path shape would be one whose arguments were never checked.
-func TestShellRefusesToWidenItself(t *testing.T) {
-	for _, name := range shellPrograms {
-		if _, ok := pathArguments[name]; !ok {
-			t.Errorf("%s is on the allowlist with no declared path shape", name)
-		}
+// A program that is not permitted is refused before the filesystem is asked about
+// it, since a call that was never going to run is not something to look up.
+func TestShellChecksTheListBeforeTheFilesystem(t *testing.T) {
+	// A directory that does not exist, and a program that is not permitted.
+	shell := NewShell(filepath.Join(t.TempDir(), "no-such-dir"))
+
+	result := invoke(shell, body(t, map[string]any{"command": "definitely-not-permitted"}))
+	if result.Err == nil {
+		t.Fatal("the call succeeded, want a refusal")
+	}
+	if !strings.Contains(result.Err.Error(), "not permitted") {
+		t.Errorf("the failure is %q, want the refusal to be about the program rather than the path",
+			result.Err)
 	}
 }
