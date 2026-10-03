@@ -42,7 +42,13 @@ type chunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *usageWire `json:"usage"`
+
+	// Usage is held raw and decoded on its own, and that is the whole point of
+	// it being raw. The endpoint regularly sends a count in a shape this client
+	// cannot read, and a decode that failed over it would take the reply text
+	// sitting in the same payload with it. Accounting is worth less than the
+	// words beside it.
+	Usage json.RawMessage `json:"usage"`
 }
 
 // toolFragment is one piece of a tool call as the stream carries it.
@@ -241,7 +247,9 @@ func (c *Client) handleChunk(onEvent func(Event), acc *assembler, reason *string
 		}
 	}
 
-	if u := ch.Usage.usage(); u != nil {
+	// The accounting is read after the reply has been reported, and a figure
+	// that cannot be read costs the accounting alone.
+	if u := decodeUsage(ch.Usage); u != nil {
 		onEvent(Event{Kind: EventUsage, Usage: u})
 	}
 
@@ -258,6 +266,25 @@ func (c *Client) deliver(acc *assembler, onEvent func(Event)) {
 
 // doneMarker is the payload that ends a stream.
 const doneMarker = "[DONE]"
+
+// decodeUsage reads the accounting, and reports nothing rather than failing
+// when it cannot.
+//
+// A payload carrying no accounting decodes to nothing, and so does a payload
+// carrying accounting in a shape this client cannot read. The second case is why
+// this is separate from the reply: a figure this client cannot parse must not
+// cost the words beside it, and a session with no cost for one response is a
+// session with an inexact total, which the ledger already knows how to say.
+func decodeUsage(raw json.RawMessage) *Usage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var u usageWire
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return nil
+	}
+	return u.usage()
+}
 
 // usageWire is the accounting as the endpoint writes it.
 //
