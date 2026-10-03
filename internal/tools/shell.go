@@ -41,8 +41,8 @@ const (
 // It is declared once and every other form is derived from it, so the list a refusal
 // names, the map a lookup consults, and the schema a model is shown cannot drift apart.
 //
-// The order groups the build tools first, then the readers, then the writers. It is
-// not sorted, because the declaration is the thing a reader reads, and a model shown a
+// The order groups the build tools first, then the readers, then the writers. It is not
+// sorted, because the declaration is the thing a reader reads, and a model shown a
 // refusal looks for the name it wanted near what it already knows.
 //
 // Every name resolves by bare name through the path search. That is what makes the list
@@ -173,9 +173,9 @@ var pathShapes = map[string]pathShape{
 // The list is short and the reasoning is uniform: these are the options that turn a
 // reader into something that runs a command. find is the only program with any, and
 // -delete is deliberately absent from that set. It removes files and runs nothing, so it
-// is bounded by the check on the paths it is given rather than by a refusal here. A
-// reader who wants it refused should have it named, and that is a question for the
-// decision maker rather than something to decide by omission.
+// is bounded by the check on the paths it is given rather than by a refusal here. A reader
+// who wants it refused should have it named, and that is a question for the decision
+// maker rather than something to decide by omission.
 var refusedOptions = map[string][]string{
 	"find": {"-exec", "-execdir", "-fls", "-fprint"},
 }
@@ -255,16 +255,16 @@ func (s *Shell) Describe() Schema {
 // shellDescription renders the model-facing description from the list.
 //
 // It is a function and not a constant because the list is the single source of truth. A
-// description written out beside the list is a second copy, and a second copy is wrong
-// the first time a program is added.
+// description written out beside the list is a second copy, and a second copy is wrong the
+// first time a program is added.
 func shellDescription() string {
 	return fmt.Sprintf("run one of these %d programs in the current directory: %s. "+
 		"This is not a shell: pipes, redirects, and command chains are not available, "+
 		"and each argument is passed to the program as written. Paths are relative to "+
 		"the working directory, and an absolute path or one that leaves the tree is "+
 		"refused. A pattern is judged by the directory leading to it, so *.go is "+
-		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec.",
-		len(shellPermitted), permittedPrograms())
+		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec. %s",
+		len(shellPermitted), permittedPrograms(), gitSubcommandDescription())
 }
 
 // shellArgs is the decoded body of a shell call.
@@ -280,8 +280,8 @@ type shellArgs struct {
 // not something to interrupt a reader about: a model asking for curl gets an instant
 // answer and does not make the reader close a question box to learn that nothing was
 // going to run. Then the arguments, since a question naming a command that would reach
-// outside the tree is a question about something the reader cannot see. Then the
-// approval mode, which is the only check here that can be answered yes.
+// outside the tree is a question about something the reader cannot see. Then the approval
+// mode, which is the only check here that can be answered yes.
 //
 // A failure to start and a failure inside the program are both reported, and both carry
 // the output the program managed to write. A tool that ran and failed has still told the
@@ -370,8 +370,8 @@ func permitted(program string) (string, error) {
 		ErrRefused, program, permittedPrograms())
 }
 
-// checkArgs refuses an option that program may not be given, and resolves every
-// argument the program's shape says is a path.
+// checkArgs refuses an option or a marker its program may not be given, and resolves
+// every argument the program's shape says is a path.
 //
 // An option is passed through untouched. A dash is what separates an option from a path,
 // and an argument carrying one is the flag it says it is however much it resembles a
@@ -379,19 +379,33 @@ func permitted(program string) (string, error) {
 // and is otherwise passed through exactly as the model wrote it.
 //
 // A path carrying a wildcard is judged by the directory leading to the wildcard and
-// handed to the program unchanged, since no shell is read and the program is what
-// expands it. Every other path is resolved against the working directory and refused if
-// it leaves.
+// handed to the program unchanged, since no shell is read and the program is what expands
+// it. Every other path is resolved against the working directory and refused if it
+// leaves.
 func (s *Shell) checkArgs(command string, args []string) ([]string, error) {
 	shape, known := pathShapes[command]
 	if !known {
 		return nil, fmt.Errorf("%w: %s has no declared path shape", ErrRefused, command)
 	}
 
+	// git is checked against its own allowlist as well, since it is on the shell
+	// list and the subcommand would otherwise be reachable only by asking the
+	// shell rather than the git tool.
+	if command == "git" {
+		if err := gitThroughShell(args); err != nil {
+			return nil, err
+		}
+	}
+
 	out := make([]string, 0, len(args))
 	for i, arg := range args {
 		if isRefusedOption(command, arg) {
 			return nil, fmt.Errorf("%w: %s may not be given %s", ErrRefused, command, arg)
+		}
+		if marker, refused := isRefusedMarker(command, arg); refused {
+			return nil, fmt.Errorf("%w: %s may not be given an argument carrying %q, "+
+				"which is how this program runs something or writes a file of its own",
+				ErrRefused, command, marker)
 		}
 		if !isPathArgument(shape, i, args) {
 			out = append(out, arg)
