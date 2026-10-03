@@ -47,3 +47,7 @@ staged/bin/
 .orcli.log.lock
 DESIGN-NOTES.md
 staged/*.md
+
+# Local design and workflow records. A bare name, so a worker's own copy is
+# covered at any depth, beside the files it belongs to.
+.orcli-design/
