@@ -130,7 +130,7 @@ func (s *Store) Save(session Session) (string, error) {
 
 // writeInto puts the session into a database at path.
 func writeInto(path string, session Session) error {
-	d, err := open(path)
+	d, err := create(path)
 	if err != nil {
 		return err
 	}
