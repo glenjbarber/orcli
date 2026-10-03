@@ -2,16 +2,9 @@ package tools
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 )
-
-// ErrRefused is returned when a call is refused rather than failing.
-//
-// It is a refusal and not a fault: a model asked for something it may not have is told
-// so and carries on, which is different from a program that ran and failed.
-var ErrRefused = errors.New("tools: refused")
 
 // pathShape says how a program finds its path arguments.
 //
@@ -24,17 +17,18 @@ type pathShape int
 
 const (
 	// noPaths: the program takes no path at all. Every argument is passed through
-	// exactly as the model wrote it. ls, pwd and ps are the cases, and echo is the case
-	// that makes the distinction matter: echo prints its arguments, so resolving one as
-	// a path would replace the text the model wrote with a directory it did not name.
+	// exactly as the model wrote it. ls, pwd and ps are the cases, and echo is the
+	// case that makes the distinction matter: echo prints its arguments, so resolving
+	// one as a path would replace the text the model wrote with a directory it did
+	// not name.
 	noPaths pathShape = iota
 
 	// leadingPaths: every argument that is not an option is a path. This is the
 	// conservative shape and it belongs to the writers: cat, rm and the rest.
 	leadingPaths
 
-	// firstPath: the first argument is a path. find and wc are the cases, where a later
-	// argument is a pattern or a flag rather than a file.
+	// firstPath: the first argument is a path. find and wc are the cases, where a
+	// later argument is a pattern or a flag rather than a file.
 	firstPath
 
 	// finalPath: the last non-option argument is a path, and the rest are patterns or
@@ -44,22 +38,25 @@ const (
 
 // shellPermitted is the programs the shell tool may run.
 //
-// The list is a list of names, resolved by bare name through PATH, and it is fixed here
-// rather than read from the configuration file. What a program may do is a property of
-// this package; what a reader is asked before it happens is decided by the interface,
-// and neither can widen the other.
+// It is declared once and every other form is derived from it, so the list a refusal
+// names, the map a lookup consults, and the schema a model is shown cannot drift apart.
 //
-// The order groups the build tools first, then the readers, then the writers. It is not
-// sorted, because the declaration is the thing a reader reads, and a model shown a
+// The order groups the build tools first, then the readers, then the writers. It is
+// not sorted, because the declaration is the thing a reader reads, and a model shown a
 // refusal looks for the name it wanted near what it already knows.
+//
+// Every name resolves by bare name through the path search. That is what makes the list
+// portable rather than pinned to one host, and it is also what a reader should know
+// before approving one: the program that runs is whichever binary of that name the
+// session reaches first.
 //
 // gh and rm are on the list for the opposite reason to the readers above, and the reason
 // is that they write. A model repairing a tree needs to remove what a build left behind,
 // and a model working on a repository needs to read and act on a pull request. What
-// bounds them is not a rule of their own: a name on this list bounds what may be
-// proposed and nothing more, since every call is still put to the reader, and the
-// arguments go to the program as an array, so there is no pipe, redirect or chain by
-// which one could reach a program not named here.
+// bounds them is the approval mode and the argument checks, not a rule of their own: a
+// name on this list bounds what may be proposed and nothing more, and the arguments go
+// to the program as an array, so there is no pipe, redirect or chain by which one could
+// reach a program not named here.
 var shellPermitted = []string{
 	// Build and toolchain.
 	"go",
@@ -126,9 +123,9 @@ func permittedPrograms() string { return strings.Join(shellPermitted, ", ") }
 // run a program whose arguments nobody has thought about.
 //
 // This is the one table a person adding a program has to touch, alongside the list
-// itself and the description below. Both are single points of change rather than
-// knowledge spread through the code: add the name to shellPermitted, give it a shape
-// here, and the refusal, the schema and the tests all follow.
+// itself. Both are single points of change rather than knowledge spread through the
+// code: add the name to shellPermitted, give it a shape here, and the refusal, the
+// schema and the tests all follow.
 var pathShapes = map[string]pathShape{
 	// The toolchain writes through whatever it is pointed at, and a path that leaves
 	// the tree is caught by leadingPaths for the same reason rm is.
@@ -199,20 +196,26 @@ func isRefusedOption(program, arg string) bool {
 
 // Shell is the shell tool, contained by comparison rather than by a descriptor.
 //
-// It runs a program from the allowlist with an argument array. It never reaches a
-// shell, so a pipe, a redirect, and a chain are not available: those are features of a
-// shell, and offering them would mean running one. The schema says so, so a model that
-// asks for a pipeline learns it is not on offer rather than having its request split
-// into arguments.
+// It runs a program from the allowlist with an argument array. It never reaches a shell,
+// so a pipe, a redirect, and a chain are not available: those are features of a shell,
+// and offering them would mean running one. The schema says so, so a model that asks for
+// a pipeline learns it is not on offer rather than having its request split into
+// arguments.
 type Shell struct {
-	// Dir is the working directory a subprocess runs in. Every path argument is resolved
-	// against it and refused if it leaves.
+	// Dir is the working directory a subprocess runs in. Every path argument is
+	// resolved against it and refused if it leaves.
 	Dir string
+
+	// Approval is the mode the reader has set: ask, allow, or deny.
+	//
+	// It is carried here so the checks and the question are in one place, and it is
+	// consulted before anything runs rather than after.
+	Approval string
 }
 
-// NewShell returns a shell tool contained by dir.
+// NewShell returns a shell tool contained by dir, in the asking mode.
 func NewShell(dir string) *Shell {
-	return &Shell{Dir: dir}
+	return &Shell{Dir: dir, Approval: ApprovalAsk}
 }
 
 // Name returns the tool name.
@@ -220,15 +223,16 @@ func (s *Shell) Name() string { return "shell" }
 
 // Describe returns the schema.
 //
-// The description says plainly that this is not a shell and that a pipeline is not
-// available. A model told only what the tool can do will ask for a pipe, and a model
-// told it cannot will use the programs it has.
+// The description is built from the list rather than written out beside it, so a program
+// added to the list cannot be missing from what a model is told. A model told only what
+// the tool can do will ask for a pipe, and a model told it cannot will use the programs
+// it has.
 func (s *Shell) Describe() Schema {
 	return Schema{
 		Type: "function",
 		Function: FunctionSpec{
 			Name:        "shell",
-			Description: shellParameters,
+			Description: shellDescription(),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -248,21 +252,20 @@ func (s *Shell) Describe() Schema {
 	}
 }
 
-// shellParameters is the model-facing description of the tool.
+// shellDescription renders the model-facing description from the list.
 //
-// The list is spelled out a second time here, since this is the string a model reads and
-// it has to read as a sentence rather than as an identifier. It is held honest by a test
-// rather than by construction, because building it from the list would produce a
-// comma-separated identifier where a sentence belongs.
-const shellParameters = "run one of these programs in the current directory: " +
-	"go, gofmt, make, bmake, git, errcheck, gosec, govulncheck, " +
-	"protoc-gen-go, protoc-gen-go-grpc, staticcheck, ls, cat, pwd, echo, grep, " +
-	"rg, find, wc, head, tail, sed, awk, stat, file, diff, hexdump, od, jq, " +
-	"ps, gh, rm. " +
-	"This is not a shell: pipes, redirects, and command chains are not available, " +
-	"and each argument is passed to the program as written. Paths are relative to the " +
-	"working directory, and a path outside it, or an absolute path, is refused. " +
-	"gh and rm write, and find may not be given -exec."
+// It is a function and not a constant because the list is the single source of truth. A
+// description written out beside the list is a second copy, and a second copy is wrong
+// the first time a program is added.
+func shellDescription() string {
+	return fmt.Sprintf("run one of these %d programs in the current directory: %s. "+
+		"This is not a shell: pipes, redirects, and command chains are not available, "+
+		"and each argument is passed to the program as written. Paths are relative to "+
+		"the working directory, and an absolute path or one that leaves the tree is "+
+		"refused. A pattern is judged by the directory leading to it, so *.go is "+
+		"allowed and ../*.go is not. gh and rm write, and find may not be given -exec.",
+		len(shellPermitted), permittedPrograms())
+}
 
 // shellArgs is the decoded body of a shell call.
 type shellArgs struct {
@@ -271,6 +274,14 @@ type shellArgs struct {
 }
 
 // Run runs the program and returns what it produced.
+//
+// The order of the checks is the order the failures are worth reporting in. The program
+// is settled against the list first, because a program that would be refused outright is
+// not something to interrupt a reader about: a model asking for curl gets an instant
+// answer and does not make the reader close a question box to learn that nothing was
+// going to run. Then the arguments, since a question naming a command that would reach
+// outside the tree is a question about something the reader cannot see. Then the
+// approval mode, which is the only check here that can be answered yes.
 //
 // A failure to start and a failure inside the program are both reported, and both carry
 // the output the program managed to write. A tool that ran and failed has still told the
@@ -290,72 +301,117 @@ func (s *Shell) Run(raw json.RawMessage) Result {
 		return Result{Err: fmt.Errorf("tools: shell: no working directory is open")}
 	}
 
-	program, args, err := s.check(a.Command, a.Args)
+	program, err := permitted(a.Command)
 	if err != nil {
 		return Result{Err: err}
 	}
 
-	out, err := runProgram(program, args, s.Dir)
+	args, err := s.checkArgs(program, a.Args)
+	if err != nil {
+		return Result{Err: err}
+	}
+
+	mode, err := s.approval()
+	if err != nil {
+		return Result{Err: err}
+	}
+	if mode == ApprovalDeny {
+		return Result{Err: &ApprovalError{
+			Program: program,
+			Mode:    ApprovalDeny,
+			Reason:  "the reader has set the mode to deny",
+		}}
+	}
+
+	path, err := resolveProgram(program)
+	if err != nil {
+		return Result{Err: err}
+	}
+
+	out, err := runProgram(path, args, s.Dir)
 	if err != nil {
 		if len(out) == 0 {
-			return Result{Err: fmt.Errorf("tools: shell %s: %w", a.Command, err)}
+			return Result{Err: fmt.Errorf("tools: shell %s: %w", program, err)}
 		}
 		return Result{
 			Content: string(out),
-			Err:     fmt.Errorf("tools: shell %s: %w", a.Command, err),
+			Err:     fmt.Errorf("tools: shell %s: %w", program, err),
 		}
 	}
 	return Result{Content: string(out)}
 }
 
-// check refuses a program outside the list, an option that program may not be given,
-// and an argument that leaves the working directory.
+// approval returns the mode the reader has set, and reports one that is not a mode.
 //
-// The order is the order the failures are worth reporting in. A program that is not
-// permitted is refused by name before the filesystem is asked about it and before a
-// reader is interrupted, since a call that was never going to run is not something to ask
-// somebody about. The refusal names the list, so a model that asked for something outside
-// it learns what it may ask for.
-//
-// An option is passed through untouched. A dash is what separates an option from a path,
-// and an argument carrying one is the flag it says it is however much it resembles a file
-// name. A non-option argument is a path only where the program's shape says one is, and
-// is otherwise passed through exactly as the model wrote it.
-func (s *Shell) check(command string, args []string) (string, []string, error) {
-	if !shellPermittedMap[command] {
-		return "", nil, fmt.Errorf("tools: %s is not permitted: this tool runs %s",
-			command, permittedPrograms())
-	}
-
-	for _, arg := range args {
-		if isRefusedOption(command, arg) {
-			return "", nil, fmt.Errorf("%w: %s may not be given %s", ErrRefused, command, arg)
+// An unset mode is refused rather than treated as ask. A session that never read a
+// configuration is a session that cannot say what it would do, and defaulting to the
+// asking mode would make a missing file look like a deliberate choice.
+func (s *Shell) approval() (string, error) {
+	if s.Approval == "" {
+		return "", &ApprovalError{
+			Reason: fmt.Sprintf("no approval mode is set, so the reader is asked; "+
+				"it is one of %s", approvalModeNames()),
 		}
 	}
+	mode, err := parseApproval(s.Approval)
+	if err != nil {
+		return "", &ApprovalError{Mode: s.Approval, Reason: err.Error()}
+	}
+	return mode, nil
+}
 
+// permitted reports whether a program is on the list, and names the list in the
+// refusal so a model learns what it may ask for.
+func permitted(program string) (string, error) {
+	if shellPermittedMap[program] {
+		return program, nil
+	}
+	return "", fmt.Errorf("%w: %s is not permitted: this tool runs %s",
+		ErrRefused, program, permittedPrograms())
+}
+
+// checkArgs refuses an option that program may not be given, and resolves every
+// argument the program's shape says is a path.
+//
+// An option is passed through untouched. A dash is what separates an option from a path,
+// and an argument carrying one is the flag it says it is however much it resembles a
+// file name. A non-option argument is a path only where the program's shape says one is,
+// and is otherwise passed through exactly as the model wrote it.
+//
+// A path carrying a wildcard is judged by the directory leading to the wildcard and
+// handed to the program unchanged, since no shell is read and the program is what
+// expands it. Every other path is resolved against the working directory and refused if
+// it leaves.
+func (s *Shell) checkArgs(command string, args []string) ([]string, error) {
 	shape, known := pathShapes[command]
 	if !known {
-		return "", nil, fmt.Errorf("%w: %s has no declared path shape", ErrRefused, command)
-	}
-
-	program, err := resolveProgram(command)
-	if err != nil {
-		return "", nil, err
+		return nil, fmt.Errorf("%w: %s has no declared path shape", ErrRefused, command)
 	}
 
 	out := make([]string, 0, len(args))
 	for i, arg := range args {
+		if isRefusedOption(command, arg) {
+			return nil, fmt.Errorf("%w: %s may not be given %s", ErrRefused, command, arg)
+		}
 		if !isPathArgument(shape, i, args) {
 			out = append(out, arg)
 			continue
 		}
+		if _, _, wild := cutWildcard(arg); wild {
+			pattern, err := checksWildcard(s.Dir, arg)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, pattern)
+			continue
+		}
 		resolved, err := containment(s.Dir, arg)
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
 		out = append(out, resolved)
 	}
-	return program, out, nil
+	return out, nil
 }
 
 // isPathArgument reports whether the argument at position i is a path.
@@ -396,6 +452,10 @@ func isPathArgument(shape pathShape, i int, args []string) bool {
 // portable rather than pinned to one host, and a decision maker should know that the
 // program which runs is whichever binary of that name the session reaches first.
 func resolveProgram(name string) (string, error) {
+	if strings.ContainsAny(name, "/\\") {
+		return "", fmt.Errorf("%w: %s names a path, and a program is named by bare name",
+			ErrRefused, name)
+	}
 	path, err := lookPath(name)
 	if err != nil {
 		return "", fmt.Errorf("tools: %s was not found on PATH: %w", name, err)
