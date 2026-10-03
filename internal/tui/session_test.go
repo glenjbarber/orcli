@@ -36,7 +36,7 @@ func TestNewSessionIsIdle(t *testing.T) {
 
 // TestReadyRefusesNoModel covers the check that lives in one place. Every caller that
 // starts a turn asks this rather than looking at the model, so a session cannot let
-// one path send a request with no model while another refuses it.
+// one path send a request with no model while another refuse it.
 func TestReadyRefusesNoModel(t *testing.T) {
 	s := New(Options{})
 	if err := s.Ready(); !errors.Is(err, ErrNoModel) {
@@ -182,8 +182,8 @@ func TestRowsAtCoversEveryRowOfALevel(t *testing.T) {
 
 	s.log.Append(Row{Text: "the main question", Level: 0, Kind: KindQuestion})
 	s.log.Append(Row{Text: "the main answer", Level: 0, Kind: KindReply})
-	s.log.Append(Row{Text: "a delegate question", Level: 3, Kind: KindQuestion})
-	s.log.Append(Row{Text: "a delegate answer", Level: 3, Kind: KindReply})
+	s.log.Append(Row{Text: "a thread question", Level: 3, Kind: KindQuestion})
+	s.log.Append(Row{Text: "a thread answer", Level: 3, Kind: KindReply})
 
 	got := s.RowsAt(3)
 	if len(got) != 2 {
@@ -196,39 +196,14 @@ func TestRowsAtCoversEveryRowOfALevel(t *testing.T) {
 	}
 }
 
-// TestRowsAtAnAbsentLevelIsEmpty rather than an error. A reader typing a level that
-// is not there should be told there is nothing there, not that the command was wrong.
+// TestRowsAtAnAbsentLevelIsEmpty rather than an error, since RowsAt is the raw view
+// and CopyLevel is the one that reports what a level was.
 func TestRowsAtAnAbsentLevelIsEmpty(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 	s.log.Append(Row{Text: "a row", Level: 0})
 
-	if got := s.RowsAt(9); len(got) != 0 {
-		t.Errorf("level 9 gave %d rows, want none", len(got))
-	}
-}
-
-// TestLevelsAreOrderedByValue covers the list a reader types from. It is ordered by
-// value rather than by first appearance, so it does not reorder as a turn runs.
-//
-// Level 0 is always present: the opening banner carries it, and a session whose main
-// conversation has not yet asked anything still has a level 0 to copy.
-func TestLevelsAreOrderedByValue(t *testing.T) {
-	s := New(Options{Model: "some/model"})
-
-	s.log.Append(Row{Text: "a", Level: 7})
-	s.log.Append(Row{Text: "b", Level: 1})
-	s.log.Append(Row{Text: "c", Level: 4})
-	s.log.Append(Row{Text: "d", Level: 4})
-
-	got := s.Levels()
-	want := []int{0, 1, 4, 7}
-	if len(got) != len(want) {
-		t.Fatalf("Levels gave %v, want %v", got, want)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Fatalf("Levels gave %v, want %v", got, want)
-		}
+	if got := len(s.RowsAt(9)); got != 0 {
+		t.Errorf("level 9 gave %d rows, want none", got)
 	}
 }
 
@@ -277,6 +252,39 @@ func TestConcurrentTurnsAndNotices(t *testing.T) {
 	// 1 opening row, 500 answers, 500 notices.
 	if got, want := s.Log().Len(), 1001; got != want {
 		t.Errorf("the log holds %d rows, want %d", got, want)
+	}
+}
+
+// TestConcurrentLevelsAndRows covers the two locks separately. The levels table has
+// its own, since a level is asked about while a turn is running and holding the state
+// lock for that would block the painter.
+func TestConcurrentLevelsAndRows(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if _, err := s.OpenLevel(0, "a thread"); err != nil {
+				t.Errorf("OpenLevel: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			s.Deliver("an answer", 0)
+		}
+	}()
+
+	wg.Wait()
+
+	// 200 threads on top of the root.
+	if got, want := len(s.Levels()), 201; got != want {
+		t.Errorf("the session has %d levels, want %d", got, want)
 	}
 }
 
