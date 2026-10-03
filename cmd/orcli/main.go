@@ -1,3 +1,13 @@
+// Package main is the orcli entry point.
+//
+// The order of run is the startup contract, and it is the order DESIGN.md sets
+// out: parse the flags, read the bootstrap document if one was named, install the
+// default configuration, load it, settle the approval mode, resolve the working
+// directory, ask about that directory, and report.
+//
+// stdin, stdout and stderr are parameters rather than the process streams, so the
+// whole of startup is testable without a terminal. A test that needs a terminal to
+// check a flag message is a test that does not get written.
 package main
 
 import (
@@ -8,52 +18,39 @@ import (
 	"os"
 
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/tui"
 )
 
 // version is the build identity.
 //
-// It is a variable rather than a constant so a build can set it with -ldflags,
-// and it is reported by `orcli version` and by every startup report. A build
-// that cannot be told apart from another is a build nobody can report a fault
-// against.
+// It is a variable rather than a constant so a build can set it with -ldflags, and
+// it is reported by `orcli version` and by every startup report. A build that cannot
+// be told apart from another is a build nobody can report a fault against.
 var version = "0.0.0-dev"
 
 // gate is the trust question, as a variable rather than a call.
 //
-// This is the seam a test stands in, and it is also what keeps the wiring
-// visible in one place rather than spread through run. See ensureTrusted for
-// what it does and writeTrust for how an answer is recorded.
+// This is the seam a test stands in, and it is also what keeps the wiring visible
+// in one place rather than spread through run. See ensureTrusted for what it does
+// and writeTrust for how an answer is recorded.
 var gate = ensureTrusted
-
-// streamsAreTerminal reports whether both streams are terminals.
-//
-// It is a variable for the same reason gate is: a test needs to decide the answer
-// without a terminal, and the real answer comes from a termios read that is
-// build-tagged per platform and therefore not reachable from a test run on any
-// one of them.
-var streamsAreTerminal = func(stdin io.Reader, stdout io.Writer) bool { return false }
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		// The interface is not open at this point, so a failure here has nowhere
-		// else to go. The message is on stderr because a reader who ran the
-		// program and got a failure has not asked for anything to be written to
-		// stdout.
+		// else to go. The message is on stderr because a reader who ran the program
+		// and got a failure has not asked for anything to be written to stdout.
 		fmt.Fprintln(os.Stderr, "orcli:", err)
 		os.Exit(1)
 	}
 }
 
 // run is the startup contract, and the order of it is the contract.
-//
-// stdin, stdout and stderr are parameters rather than the process streams so the
-// whole of startup is testable without a terminal. A test that needs a terminal
-// to check a flag message is a test that does not get written.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("orcli", flag.ContinueOnError)
 	// Output is discarded rather than set to stderr: the flag package would then
-	// print the usage and the error, and the caller below prints one message. A
-	// bad flag reported twice is a reader looking for the second one.
+	// print the usage and the error, and the caller below prints one message. A bad
+	// flag reported twice is a reader looking for the second one.
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 
@@ -90,17 +87,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	// The bootstrap document is named by the reader and cannot be read. It is
 	// reported before the configuration, since a document that is wrong is worth
-	// knowing about before being asked anything, and it is read exactly once so
-	// the document that was validated is the one a session is handed.
+	// knowing about before being asked anything, and it is read exactly once so the
+	// document that was validated is the one a session is handed.
 	if *bootstrap != "" {
 		if err := readable(*bootstrap); err != nil {
 			return fmt.Errorf("read the bootstrap document: %w", err)
 		}
 	}
 
-	// A missing configuration file is installed before it is loaded, so the
-	// report a first-time reader gets names a file that exists rather than one
-	// they have to create themselves.
+	// A missing configuration file is installed before it is loaded, so the report
+	// a first-time reader gets names a file that exists rather than one they have to
+	// create themselves.
 	if err := config.InstallDefault(); err != nil {
 		return err
 	}
@@ -109,23 +106,22 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	switch {
 	case err == nil:
 	case errors.Is(err, config.ErrNoAPIKey), errors.Is(err, config.ErrNotFound):
-		// Neither absence stops startup. An interface that refuses to open
-		// leaves nothing on screen to explain why, and the remedy for both is a
-		// key in a file the reader already knows the path of.
+		// Neither absence stops startup. An interface that refuses to open leaves
+		// nothing on screen to explain why, and the remedy for both is a key in a
+		// file the reader already knows the path of.
 		cfg = config.Default()
 	default:
 		// Everything else is a fault: a bad mode, a malformed body, a directory
-		// where the file should be. A file holding a credential that another
-		// account can read has already leaked, and that is worth refusing to
-		// start over.
+		// where the file should be. A file holding a credential that another account
+		// can read has already leaked, and that is worth refusing to start over.
 		return err
 	}
 
 	approval, err := cfg.ApprovalMode()
 	if err != nil {
-		// The file named a mode this client does not know. Substituting a
-		// default would do something other than what the reader wrote, so it is
-		// reported by name and startup stops.
+		// The file named a mode this client does not know. Substituting a default
+		// would do something other than what the reader wrote, so it is reported by
+		// name and startup stops.
 		return err
 	}
 
@@ -146,19 +142,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		WorkingDir: workDir,
 	}
 
-	// A refusal is not a failure. A reader who does not want to approve a
-	// directory can still use the interface; it has no tools, since a tool acts
-	// on their behalf and this directory is not theirs.
+	// A refusal is not a failure. A reader who does not want to approve a directory
+	// can still use the interface; it has no tools, since a tool acts on their
+	// behalf and this directory is not theirs.
 	s.HasTools = gate(workDir, cfg, stdin, stdout, stderr)
 
-	// The check for a terminal is kept even though the interface is not built,
-	// because it is the reason a redirected run behaves differently and a reader
-	// who redirects this program deserves to be told rather than to be handed a
-	// report they did not ask for.
-	if !streamsAreTerminal(stdin, stdout) {
-		fmt.Fprintln(stderr,
-			"orcli: stdin and stdout must both be terminals to open the interface")
+	// The check is kept because it is why a redirected run behaves differently, and
+	// a reader who redirects this program deserves to be told rather than handed
+	// escape sequences in their pipe. It is the real termios read rather than a
+	// stub, since a stub that always says no tells a reader at a terminal that
+	// their terminal is not one.
+	if !tui.StreamsAreTerminal(stdin, stdout) {
+		fmt.Fprintf(stderr, "orcli: %v\n", tui.ErrNoTerminal)
 	}
+
 	printSession(stdout, s)
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout,
@@ -199,9 +196,9 @@ func printSession(w io.Writer, s session) {
 
 // credential reports whether a credential is present, and never what it is.
 //
-// The figure itself is never written to a diagnostic in this program. Whether it
-// is present is the only thing a startup report has any business carrying, since
-// every line of it ends up in terminal scrollback.
+// The figure itself is never written to a diagnostic in this program. Whether it is
+// present is the only thing a startup report has any business carrying, since every
+// line of it ends up in terminal scrollback.
 func credential(key string) string {
 	switch {
 	case key == "":
@@ -215,12 +212,12 @@ func credential(key string) string {
 //
 // It is a thin wrapper rather than a direct call, because the wiring is what this
 // file is for: the reader and the writer are supplied here so the record goes
-// through the configuration's own named writers, and nothing outside
-// internal/config writes bytes to a file holding a credential.
+// through the configuration's own named writers, and nothing outside internal/config
+// writes bytes to a file holding a credential.
 //
-// A directory already listed is not asked about again. A refusal returns false
-// and records nothing, since an empty line, a key pressed for another reason and
-// a non-interactive reader are all the same answer, which is no.
+// A directory already listed is not asked about again. A refusal returns false and
+// records nothing, since an empty line, a key pressed for another reason and a
+// non-interactive reader are all the same answer, which is no.
 func ensureTrusted(dir string, cfg config.Config, stdin io.Reader, stdout, stderr io.Writer) bool {
 	t := config.Trust{
 		In:    stdin,
@@ -234,9 +231,9 @@ func ensureTrusted(dir string, cfg config.Config, stdin io.Reader, stdout, stder
 
 // writeTrust records the trusted directories in the configuration file.
 //
-// The path is resolved here rather than inside internal/config so a caller can
-// see which file is being written, and the edit is delegated so the byte-level
-// work stays with the package that owns the file.
+// The path is resolved here rather than inside internal/config so a caller can see
+// which file is being written, and the edit is delegated so the byte-level work
+// stays with the package that owns the file.
 func writeTrust(cfg config.Config) error {
 	path, err := config.DefaultPath()
 	if err != nil {
@@ -279,18 +276,18 @@ func subcommand(name string, _ []string, stdout io.Writer) error {
 		printUsage(stdout)
 		return nil
 	default:
-		// An unknown name is refused by name rather than treated as a prompt,
-		// since a script that passed the wrong word has a bug in it that running
-		// an interactive session would hide.
+		// An unknown name is refused by name rather than treated as a prompt, since
+		// a script that passed the wrong word has a bug in it that running an
+		// interactive session would hide.
 		return fmt.Errorf("unknown command %q: the commands are version and help", name)
 	}
 }
 
 // printUsage writes the usage.
 //
-// It is written out rather than taken from the flag set, since the flag set
-// prints to a discarded writer and a usage generated from the parser would grow a
-// flag nobody was meant to be offered.
+// It is written out rather than taken from the flag set, since the flag set prints
+// to a discarded writer and a usage generated from the parser would grow a flag
+// nobody was meant to be offered.
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `orcli is a terminal client for the OpenRouter API.
 
