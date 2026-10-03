@@ -10,12 +10,40 @@ parsing for `--bootstrap` and `--mouse`).
 The project is pre-release. `PORTVERSION` is `0.0.0-dev`, and no release has
 been scoped.
 
+## Status
+
+The project is at the beginning. The API client is written and tested; the
+interface, tools, configuration, persistence, panes and compaction are not.
+
+Implemented:
+
+| Package | Contents |
+| --- | --- |
+| `internal/openrouter` | HTTP client, SSE stream parser, wire types |
+
+Not yet written:
+
+| Package | Contents |
+| --- | --- |
+| `cmd/orcli` | main package: flags, trust gate, wiring |
+| `internal/bootstrap` | `--bootstrap` documents and symlink resolution |
+| `internal/complete` | Tab completion engine |
+| `internal/config` | JSON configuration, colour writer, trusted directories |
+| `internal/saved` | SQLite session store, autosave naming |
+| `internal/tools` | tool execution: filesystem, git, shell |
+| `internal/tui` | the interface: rendering, input, session, panes |
+
+There is no `cmd/orcli` yet, so no binary is produced by `make build`.
+
 ## Design overview
 
 A full account of the design lives in `DESIGN.md`. It is written from the code
 and the shape of its history, and it records what the system is and how its
 parts fit, where `AGENTS.md` records why individual decisions were taken. The
 summary below is a short orientation, not a substitute.
+
+**Where the packages below are not yet in the tree, they are the design as
+recorded, not a description of code that exists.**
 
 ### Packages
 
@@ -118,6 +146,9 @@ rather than arrival order, since the index is the only field every fragment
 carries. Usage and cost are pointers, because a reported zero and an absent value
 are different.
 
+This is the one package that exists. The behavior described here is implemented
+in `internal/openrouter`.
+
 ### Configuration
 
 JSON, because the standard library has no YAML parser and a configuration file is
@@ -149,22 +180,32 @@ The recurring shape: a missing precondition is an ordinary message rather than a
 refusal, so the interface still opens and reports it; a dangerous precondition is
 a hard failure; a failure with partial success keeps the partial; a cancellation
 the reader asked for is not a fault; and every diagnostic is bounded and
-credential-filtered, because it is shown in the pane and ends up in the terminal
+credential-filtered, because it is shown in a pane and ends up in the terminal
 scrollback.
 
 ## Build
 
-The design records a `Makefile` written in the syntax common to BSD make and GNU
-make, and a `make crossbuild` target that compiles and vets every supported
-target, which exists because the terminal layer names ioctl requests that differ
-between the BSD family and System V and nothing else would notice.
+The `Makefile` is written in the syntax common to BSD make and GNU make, and
+repetition is done with a shell loop rather than a make loop so the file parses
+the same way under both. Every artifact is written under `build/`, and the
+binary is `build/orcli`.
 
-## Build status
+```
+make build      build the binary into build/orcli
+make test       run the suite
+make check      run the suite under the race detector
+make lint       gofmt check and go vet
+make crossbuild compile and vet every supported target
+```
 
-The repository at present holds documentation only. The `DESIGN.md` document was
-written from a code tree that is not yet part of this repository, so the packages,
-commands, and targets described above are the design as recorded, not a
-description of code currently in the tree.
+`crossbuild` covers darwin, linux, freebsd, openbsd and netbsd on amd64 and
+arm64, with `CGO_ENABLED=0`. DragonFly is absent because the SQLite driver
+cannot be built for it, and Windows is absent because the bootstrap loader
+compares devices through `syscall.Stat_t`.
+
+The binary is not produced yet, because there is no `cmd/orcli` in the tree. The
+build target reports that rather than failing, so the library packages still
+build and vet.
 
 ## License
 
