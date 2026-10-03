@@ -10,7 +10,12 @@ import (
 	"testing"
 )
 
-// store returns a store pointed at a temporary directory, using the stub driver.
+// store returns a store pointed at a temporary directory, using the stub driver, with
+// the stub reporting every session as present.
+//
+// The stub cannot create files, so a test that loads has to say the file is there. Doing
+// it here rather than in each test keeps that detail out of the tests that are about
+// something else.
 func store(t *testing.T) *Store {
 	t.Helper()
 
@@ -26,6 +31,21 @@ func store(t *testing.T) *Store {
 		t.Fatalf("Open: %v", err)
 	}
 	return s
+}
+
+// present tells the stub that a named session exists, and returns the path it would
+// be at.
+func present(t *testing.T, s *Store, name string) string {
+	t.Helper()
+
+	path, err := s.Path(name)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("stub"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
 }
 
 // sample is a session with one of everything, so a round trip can be checked against
@@ -90,8 +110,8 @@ func TestSaveWritesTheSchemaVersion(t *testing.T) {
 // TestSaveRecordsTheMetadataInAFixedOrder covers the file being reproducible.
 //
 // The metadata is written in a fixed order rather than by ranging a map, so a file
-// written twice has the same rows in the same order. A file differing only in row
-// order is a file two sessions disagree about.
+// written twice has the same rows in the same order. A file differing only in row order
+// is a file two sessions disagree about.
 func TestSaveRecordsTheMetadataInAFixedOrder(t *testing.T) {
 	s := store(t)
 	if _, err := s.Save(sample()); err != nil {
@@ -174,8 +194,8 @@ func TestSaveWritesTheRolesInOrder(t *testing.T) {
 
 // TestSaveStoresNoEnvelopeForAnOrdinaryTurn covers the space a later field needs.
 //
-// An ordinary turn stores no envelope at all rather than an empty one, so a column
-// added later has somewhere to go without migrating the files already written.
+// An ordinary turn stores no envelope at all rather than an empty one, so a column added
+// later has somewhere to go without migrating the files already written.
 func TestSaveStoresNoEnvelopeForAnOrdinaryTurn(t *testing.T) {
 	s := store(t)
 
@@ -280,6 +300,7 @@ func TestSaveRefusesANameThatWouldEscape(t *testing.T) {
 // called anything, which is a wrong answer rather than a missing one.
 func TestLoadRefusesALaterVersion(t *testing.T) {
 	s := store(t)
+	present(t, s, "later")
 	stub.meta = map[string]string{"version": "9", "model": "m"}
 
 	if _, err := s.Load("later"); !errors.Is(err, ErrFutureVersion) {
@@ -293,6 +314,7 @@ func TestLoadRefusesALaterVersion(t *testing.T) {
 // wrote it and which is reading it.
 func TestLoadNamesBothVersions(t *testing.T) {
 	s := store(t)
+	present(t, s, "later")
 	stub.meta = map[string]string{"version": "9"}
 
 	_, err := s.Load("later")
@@ -309,6 +331,7 @@ func TestLoadNamesBothVersions(t *testing.T) {
 // TestLoadReadsAnOlderVersion covers the file written before the column was added.
 func TestLoadReadsAnOlderVersion(t *testing.T) {
 	s := store(t)
+	present(t, s, "older")
 	stub.meta = map[string]string{"model": "m"}
 
 	if _, err := s.Load("older"); err != nil {
@@ -319,6 +342,7 @@ func TestLoadReadsAnOlderVersion(t *testing.T) {
 // TestLoadReadsTheTurnsBack covers the round trip.
 func TestLoadReadsTheTurnsBack(t *testing.T) {
 	s := store(t)
+	present(t, s, "work")
 	stub.rows = [][]driver.Value{
 		{"system", "instructions", nil, nil, nil},
 		{"user", "read one.txt", nil, nil, nil},
@@ -363,6 +387,7 @@ func TestLoadReadsTheTurnsBack(t *testing.T) {
 // TestLoadTreatsAZeroAsAZero covers a count that really was zero.
 func TestLoadTreatsAZeroAsAZero(t *testing.T) {
 	s := store(t)
+	present(t, s, "fresh")
 	stub.meta = map[string]string{"version": "2", "total_tokens": "0"}
 
 	session, err := s.Load("fresh")
@@ -381,12 +406,6 @@ func TestLoadTreatsAZeroAsAZero(t *testing.T) {
 func TestLoadReportsAnAbsentSessionAsAState(t *testing.T) {
 	s := store(t)
 
-	path, err := s.Path("nothing-here")
-	if err != nil {
-		t.Fatalf("Path: %v", err)
-	}
-	stub.missing[path] = true
-
 	if _, err := s.Load("nothing-here"); !errors.Is(err, ErrNoStore) {
 		t.Errorf("Load returned %v, want ErrNoStore", err)
 	}
@@ -395,6 +414,7 @@ func TestLoadReportsAnAbsentSessionAsAState(t *testing.T) {
 // TestLoadReportsAnUnreadableFileAsAFault covers the other half.
 func TestLoadReportsAnUnreadableFileAsAFault(t *testing.T) {
 	s := store(t)
+	present(t, s, "broken")
 	stub.failOpen = true
 
 	_, err := s.Load("broken")
@@ -409,6 +429,7 @@ func TestLoadReportsAnUnreadableFileAsAFault(t *testing.T) {
 // TestLoadReportsAnUnreadableEnvelope covers a file written badly by something else.
 func TestLoadReportsAnUnreadableEnvelope(t *testing.T) {
 	s := store(t)
+	present(t, s, "broken-envelope")
 	stub.meta = map[string]string{"version": "2"}
 	stub.rows = [][]driver.Value{
 		{"assistant", "", nil, nil, `{not an envelope`},
