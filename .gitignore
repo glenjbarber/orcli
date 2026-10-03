@@ -41,8 +41,9 @@ staged/bin/
 # Local preferences and memory
 .OPENROUTER.md
 
-# Worker ledgers and their locks. Both names carry no slash, so each is
-# ignored at every depth, which covers the root status.txt of a worktree and
-# the staged/status.txt beside it.
-status.txt
-status.txt.lock
+# The work log and its lock, at the root and named with the program rather
+# than with the ledger convention above. Local observation only, like those two.
+.orcli.log
+.orcli.log.lock
+DESIGN-NOTES.md
+staged/*.md
