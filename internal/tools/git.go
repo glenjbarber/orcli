@@ -168,6 +168,10 @@ func refusedGitOption(subcommand, arg string) (string, bool) {
 // It runs a subcommand from the allowlist with an argument array and never reaches a
 // shell. Every path is resolved against the working directory and refused if it leaves,
 // and a wildcard is refused by name rather than resolved.
+//
+// A call is bounded twice over: one subcommand may not run past gitTimeout, and its
+// output may not exceed outputLimit. The deadline is shorter than the shell tool's, since
+// a build legitimately takes longer than a status does.
 type Git struct {
 	// Dir is the working directory a subprocess runs in.
 	Dir string
@@ -230,8 +234,10 @@ func gitDescription() string {
 		"This is not a shell: pipes, redirects, and command chains are not available, "+
 		"and each argument is passed to git as written. Paths are relative to the "+
 		"working directory, and a path outside it, or an absolute path, is refused. A "+
-		"wildcard is refused rather than expanded. These subcommands are refused: %s.",
-		len(gitPermitted), permittedSubcommands(), strings.Join(refused, ", "))
+		"wildcard is refused rather than expanded. One subcommand is killed at %s, and "+
+		"its output is bounded at %d bytes. These subcommands are refused: %s.",
+		len(gitPermitted), permittedSubcommands(), gitTimeout, outputLimit,
+		strings.Join(refused, ", "))
 }
 
 // sortStrings sorts in place, so a refusal names subcommands in a settled order.
@@ -260,7 +266,8 @@ type gitArgs struct {
 //
 // A failure inside git is reported with whatever output it managed to write, since git
 // explains most of its own failures and throwing that away would make a model retry a
-// call whose answer was already on the wire.
+// call whose answer was already on the wire. So are a subcommand killed at its deadline
+// and one whose output passed the cap.
 func (g *Git) Run(raw json.RawMessage) Result {
 	var a gitArgs
 	if len(raw) != 0 {
@@ -293,7 +300,7 @@ func (g *Git) Run(raw json.RawMessage) Result {
 		}}
 	}
 
-	out, err := runProgram(program, args, g.Dir)
+	out, err := runProgram(program, args, g.Dir, gitTimeout)
 	if err != nil {
 		if len(out) == 0 {
 			return Result{Err: fmt.Errorf("tools: git %s: %w", sub, err)}
