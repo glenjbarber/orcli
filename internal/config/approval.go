@@ -10,9 +10,12 @@ import (
 //
 // It is a mode and not a per-call answer, and the difference matters: a mode is
 // set once for a session and answers every call the file rules do not, while a
-// per-call answer settles one call and is forgotten. A grant meant to last is
-// a rule in the permissions file, and this is the session preference that the
-// rules are layered over.
+// per-call answer settles one call and is forgotten. A grant meant to last is a
+// rule in the permissions file, and this is the session preference the rules are
+// layered over.
+//
+// The mode is checked before a program is resolved and before anything runs, so
+// deny refuses a call without a program ever being looked up on the path.
 type Approval string
 
 // The three modes.
@@ -25,26 +28,25 @@ const (
 	// the only mode that asks.
 	ApprovalAsk Approval = "ask"
 
-	// ApprovalAllow runs every call without asking. It widens nothing: a
-	// program that is not permitted is still refused by name before this mode
-	// is consulted, so allowing says nothing about what may be run and only
-	// about what happens to what has been proposed.
+	// ApprovalAllow runs every call without asking. It widens nothing: a program
+	// that is not permitted is still refused by name before this mode is
+	// consulted, so allowing says nothing about what may be run and only about
+	// what happens to what has been proposed.
 	ApprovalAllow Approval = "allow"
 
-	// ApprovalDeny refuses every call without asking. A reader who sets this
-	// gets a session with no tools and no questions, which is a legitimate
-	// thing to want and is not the same as a reader who is not trusted: trust
-	// is about a directory, and this is about a session.
+	// ApprovalDeny refuses every call without asking. A reader who sets this gets
+	// a session with no tools and no questions, which is a legitimate thing to
+	// want and is not the same as a reader who is not trusted: trust is about a
+	// directory, and this is about a session.
 	ApprovalDeny Approval = "deny"
 )
 
 // ErrBadApproval is returned when the file names a mode that is not one of the
 // three.
 //
-// It is a fault rather than a fallback. A file written by hand naming a mode
-// this client does not know is a file a reader meant something by, and
-// substituting a default would silently do something other than what they
-// wrote.
+// It is a fault rather than a fallback. A file written by hand naming a mode this
+// client does not know is a file a reader meant something by, and substituting a
+// default would silently do something other than what they wrote.
 var ErrBadApproval = errors.New("config: the approval mode must be ask, allow, or deny")
 
 // ApprovalModes is the set of modes, in the order they are offered to a reader.
@@ -54,11 +56,15 @@ var ErrBadApproval = errors.New("config: the approval mode must be ask, allow, o
 // want and the safest option belongs first.
 var ApprovalModes = []Approval{ApprovalAsk, ApprovalAllow, ApprovalDeny}
 
-// parseApproval reads a mode out of the configuration file.
+// ParseApproval reads a mode out of the configuration file.
+//
+// It is exported because the tools package has to check a mode that came from
+// somewhere other than this file, such as a command-line argument, and a caller
+// that checks it differently is a caller with two answers to one question.
 //
 // An empty value is ask, since a file that does not mention the mode is a file
 // written before the mode existed, and asking is what it did then.
-func parseApproval(s string) (Approval, error) {
+func ParseApproval(s string) (Approval, error) {
 	switch Approval(strings.ToLower(strings.TrimSpace(s))) {
 	case "":
 		return ApprovalAsk, nil
@@ -73,11 +79,10 @@ func parseApproval(s string) (Approval, error) {
 	}
 }
 
+// parseApproval is the internal spelling, for the readers inside this package.
+func parseApproval(s string) (Approval, error) { return ParseApproval(s) }
+
 // Records reports whether a mode is one of the three.
-//
-// It is exported because a caller that has a mode from somewhere other than the
-// file, such as a command-line argument, has to check it the same way rather
-// than assuming.
 func (a Approval) Records() bool {
 	switch a {
 	case ApprovalAsk, ApprovalAllow, ApprovalDeny:

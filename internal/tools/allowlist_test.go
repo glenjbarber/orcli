@@ -7,9 +7,9 @@ import (
 
 // TestEveryPermittedProgramHasAShape is what makes the list expandable.
 //
-// A person adding a program touches three places: the list, the shape table, and
-// the description. A program on the list with no shape would have its arguments
-// checked against nothing, so this test refuses that rather than trusting it.
+// A person adding a program touches two places: the list and the shape table. A
+// program on the list with no shape would have its arguments checked against nothing,
+// so this test refuses that rather than trusting it.
 func TestEveryPermittedProgramHasAShape(t *testing.T) {
 	for _, name := range shellPermitted {
 		if _, ok := pathShapes[name]; !ok {
@@ -20,8 +20,8 @@ func TestEveryPermittedProgramHasAShape(t *testing.T) {
 
 // TestNoShapeWithoutAPermittedProgram checks the other direction.
 //
-// A shape for a program that is not permitted is either a typo or a program
-// someone meant to add and did not, and both are worth finding.
+// A shape for a program that is not permitted is either a typo or a program someone
+// meant to add and did not, and both are worth finding.
 func TestNoShapeWithoutAPermittedProgram(t *testing.T) {
 	for name := range pathShapes {
 		if !shellPermittedMap[name] {
@@ -30,8 +30,8 @@ func TestNoShapeWithoutAPermittedProgram(t *testing.T) {
 	}
 }
 
-// TestThePermittedMapMatchesTheList holds the derived form to the declaration.
-func TestThePermittedMapMatchesTheList(t *testing.T) {
+// TestTheShellPermittedMapMatchesItsList holds the derived form to the declaration.
+func TestTheShellPermittedMapMatchesItsList(t *testing.T) {
 	if len(shellPermittedMap) != len(shellPermitted) {
 		t.Errorf("the map holds %d names, the list holds %d",
 			len(shellPermittedMap), len(shellPermitted))
@@ -43,11 +43,29 @@ func TestThePermittedMapMatchesTheList(t *testing.T) {
 	}
 }
 
+// TestTheDescriptionIsBuiltFromTheList is what keeps the two from drifting.
+//
+// The description a model reads is rendered from the list rather than written out
+// beside it, so a program added to the list cannot be missing from it. This test is
+// the belt to that braces: it checks the rendering actually names every program.
+func TestTheDescriptionIsBuiltFromTheList(t *testing.T) {
+	description := NewShell(t.TempDir()).Describe().Function.Description
+
+	for _, name := range shellPermitted {
+		if !strings.Contains(description, name) {
+			t.Errorf("%s is permitted but is not named in the description", name)
+		}
+	}
+	if !strings.Contains(description, "not a shell") {
+		t.Error("the description does not say the tool is not a shell")
+	}
+}
+
 // TestEchoTakesNoPath covers the shape that caught a real defect.
 //
-// echo prints its arguments, so resolving one as a path replaces the text a model
-// wrote with a directory it did not name. That is a change to the call rather than
-// a check on it.
+// echo prints its arguments, so resolving one as a path replaces the text a model wrote
+// with a directory it did not name. That is a change to the call rather than a check on
+// it.
 func TestEchoTakesNoPath(t *testing.T) {
 	shell := NewShell(tree(t))
 
@@ -61,7 +79,7 @@ func TestEchoTakesNoPath(t *testing.T) {
 		"hello",
 	}
 
-	_, out, err := shell.check("echo", arguments)
+	out, err := shell.checkArgs("echo", arguments)
 	if err != nil {
 		t.Fatalf("echo with shell syntax: %v", err)
 	}
@@ -73,15 +91,13 @@ func TestEchoTakesNoPath(t *testing.T) {
 	}
 }
 
-// TestAPatternIsNotARewrittenPath covers grep, whose file is not its first
-// argument.
+// TestAPatternIsNotARewrittenPath covers grep, whose file is not its first argument.
 //
 // A pattern is not a path, and resolving one would replace it with a directory.
 func TestAPatternIsNotARewrittenPath(t *testing.T) {
 	shell := NewShell(tree(t))
 
-	arguments := []string{"-I", "in one.txt", "one.txt"}
-	_, out, err := shell.check("grep", arguments)
+	out, err := shell.checkArgs("grep", []string{"-I", "in one.txt", "one.txt"})
 	if err != nil {
 		t.Fatalf("grep: %v", err)
 	}
@@ -97,31 +113,46 @@ func TestAPatternIsNotARewrittenPath(t *testing.T) {
 	}
 }
 
-// TestFindChecksOnlyItsFirstArgument covers the shape that keeps a pattern from
-// being rewritten.
+// TestAPatternWithNoDirectoryIsJudgedWhereItExpands covers cutWildcard.
 //
-// find takes a directory and then patterns and flags, and only the directory is a
-// path. Resolving the rest would refuse ordinary calls, since a pattern like *.go
-// names something that has not been resolved yet.
-func TestFindChecksOnlyItsFirstArgument(t *testing.T) {
+// *.go is judged against the directory it will be expanded in and is allowed, since
+// that is the ordinary form a shell would expand. A pattern with no directory in
+// front of it yields an empty head, which resolves to the working directory, so it is
+// not refused.
+func TestAPatternWithNoDirectoryIsJudgedWhereItExpands(t *testing.T) {
 	shell := NewShell(tree(t))
 
-	arguments := []string{".", "-name", "*.go", "-delete"}
-	_, out, err := shell.check("find", arguments)
+	out, err := shell.checkArgs("find", []string{".", "*.go"})
 	if err != nil {
-		t.Fatalf("find: %v", err)
+		t.Errorf("find . *.go was refused: %v", err)
 	}
+	if len(out) == 2 && out[1] != "*.go" {
+		t.Errorf("the pattern became %q, want it unchanged", out[1])
+	}
+}
 
-	if out[1] != "-name" || out[2] != "*.go" || out[3] != "-delete" {
-		t.Errorf("the arguments after the first became %v, want them unchanged", out[1:])
+// TestAPatternLeavingTheTreeIsRefused covers the same rule from the other side.
+//
+// ../*.go names a directory that is not in the tree, so it is refused. Cleaning it
+// would produce ../*.go as a path, which is a different thing from the files a shell
+// would have matched.
+func TestAPatternLeavingTheTreeIsRefused(t *testing.T) {
+	shell := NewShell(tree(t))
+
+	for _, pattern := range []string{"../*.go", "../../etc/*", "sub/../../*"} {
+		t.Run(pattern, func(t *testing.T) {
+			if _, err := shell.checkArgs("find", []string{pattern}); err == nil {
+				t.Errorf("find %q was accepted, want it refused", pattern)
+			}
+		})
 	}
 }
 
 // TestRefusedOptionsAreCaughtAtAnyPosition covers a reader not finding it first.
 //
-// The refused option is placed after the directory find needs, so the position
-// under test is the position the flag was written to rather than an overwrite of
-// the directory by the test itself.
+// The refused option is placed after the directory find needs, so the position under
+// test is the position the flag was written to rather than an overwrite of the
+// directory by the test itself.
 func TestRefusedOptionsAreCaughtAtAnyPosition(t *testing.T) {
 	shell := NewShell(tree(t))
 
@@ -129,18 +160,18 @@ func TestRefusedOptionsAreCaughtAtAnyPosition(t *testing.T) {
 		arguments := []string{".", "-name", "*.go", "-exec", "sh", "-c", "id", ";"}
 		arguments[at] = "-exec"
 
-		if _, _, err := shell.check("find", arguments); err == nil {
+		if _, err := shell.checkArgs("find", arguments); err == nil {
 			t.Errorf("-exec at position %d was accepted, want it refused", at)
 		}
 	}
 }
 
-// TestRefusedOptionIsCaughtBeforeTheFirstArgument covers a find given the flag
-// with no directory at all, which is a malformed call that still must not run.
+// TestRefusedOptionIsCaughtBeforeTheFirstArgument covers a find given the flag with no
+// directory at all, which is a malformed call that still must not run.
 func TestRefusedOptionIsCaughtBeforeTheFirstArgument(t *testing.T) {
 	shell := NewShell(tree(t))
 
-	if _, _, err := shell.check("find", []string{"-exec", "sh", "-c", "id", ";"}); err == nil {
+	if _, err := shell.checkArgs("find", []string{"-exec", "sh", "-c", "id", ";"}); err == nil {
 		t.Error("find -exec with no directory was accepted, want it refused")
 	}
 }
@@ -162,7 +193,7 @@ func TestAPermittedProgramWithNoShapeIsRefused(t *testing.T) {
 	delete(pathShapes, name)
 	t.Cleanup(func() { pathShapes[name] = shape })
 
-	if _, _, err := shell.check(name, []string{"x"}); err == nil {
+	if _, err := shell.checkArgs(name, []string{"x"}); err == nil {
 		t.Errorf("%s ran with no declared shape, want it refused", name)
 	}
 }
