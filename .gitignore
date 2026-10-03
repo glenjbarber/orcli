@@ -40,3 +40,6 @@ staged/bin/
 
 # Local preferences and memory
 .OPENROUTER.md
+
+# Local worktree status notes
+status.txt
