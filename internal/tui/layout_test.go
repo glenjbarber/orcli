@@ -1,253 +1,316 @@
 package tui
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// TestTheStackIsFiveRows is the layout the reader settled, from the top of the stack
-// downward: the rule, the prompt row, a blank, the top bar, and the bottom bar.
+// hue is one hue as a single comparable value, so a test can compare two of them.
 //
-// Read from the bottom of the screen upward: the two bars, a blank, the prompt row, and
-// the rule. There is no rule at the bottom, since a footer that ends in a rule is a closed
-// box and this one sits against the bottom edge where the shell prompt will be when the
-// program exits.
+// Go will not compare a three-value call directly, and a sweep assertion needs to say that
+// two hues are or are not the same colour, so the three channels are folded into one number.
+func hue(h float64) int {
+	r, g, b := hueRGB(h)
+	return int(r)<<16 | int(g)<<8 | int(b)
+}
+
+// TestTheFrameIsTwentyRows is the layout the reader settled: every row of the terminal
+// carries a status field in the first column and a log row beside it.
 //
-// The prompt row carries either the prompt and the reader's own text or the figure and
-// the state word, never both.
-func TestTheStackIsFiveRows(t *testing.T) {
-	const width = 80
-	screen, out := drawnAt(24, width)
+// Twenty is the six rows the stack had plus fourteen beside them, and a twenty row terminal
+// is filled on the height. The count is a ceiling rather than a figure, so a terminal taller
+// than twenty draws twenty and the rest of the screen belongs to the terminal.
+func TestTheFrameIsTwentyRows(t *testing.T) {
+	for _, height := range []int{20, 24, 40} {
+		if got, want := screenRows(height), StatusFields; got != want {
+			t.Errorf("on a %d row terminal the frame is %d rows, want %d", height, got, want)
+		}
+	}
+}
 
-	DrawStack(screen, Bar{
-		Top:    "Status: idle",
-		Bottom: "Provider: openrouter.ai",
-		Field:  "please read the new preferences in foo.md",
-	}, plainPalette())
+// TestAShortTerminalDrawsWhatItHas covers the floor. A terminal shorter than the field list
+// draws every row it has and takes the fields from the top, so what is shed is the bottom of
+// the list and the prompt row is still there.
+func TestAShortTerminalDrawsWhatItHas(t *testing.T) {
+	if got, want := screenRows(9), 9; got != want {
+		t.Errorf("a nine row terminal draws %d rows, want %d", got, want)
+	}
+	if got, want := screenRows(3), 3; got != want {
+		t.Errorf("a three row terminal draws %d rows, want %d", got, want)
+	}
+	if got := screenRows(0); got != 0 {
+		t.Errorf("a terminal with no rows draws %d", got)
+	}
+}
 
-	lines := stackRowsOnly(out.String())
-	if got, want := len(lines), 5; got != want {
-		t.Fatalf("the stack is %d rows, want %d:\n%s", got, want, out.String())
+// TestThePromptRowIsTheLastRow covers where the caret is put. The prompt row is the last row
+// the frame draws, so on a twenty row terminal it is row twenty and on a short one it is the
+// last row the screen has. Either way it is the last row drawn, which is what puts the caret
+// where a reader expects to find it without being told the frame's height.
+func TestThePromptRowIsTheLastRow(t *testing.T) {
+	for _, height := range []int{20, 24, 40} {
+		screen, _ := drawnAt(height, 80)
+		if got, want := promptScreenRow(screen), StatusFields; got != want {
+			t.Errorf("on a %d row terminal the prompt row is %d, want %d", height, got, want)
+		}
 	}
 
-	for i, want := range []struct {
-		name   string
-		has    string
-		blank  bool
-		isRule bool
-	}{
-		{name: "the rule", isRule: true},
-		{name: "the prompt row", has: "root@localhost $ "},
-		{name: "the blank row", blank: true},
-		{name: "the top bar", has: "Status:"},
-		{name: "the bottom bar", has: "Provider:"},
+	screen, _ := drawnAt(9, 80)
+	if got := promptScreenRow(screen); got != 9 {
+		t.Errorf("on a nine row terminal the prompt row is %d, want the bottom row 9", got)
+	}
+}
+
+// TestEveryFieldIsOneCharacter covers the reader's decision that a field is one column. A
+// field that cannot say what it means in one character says nothing, and every glyph below
+// is a letter a reader can read rather than a figure a reader has to learn.
+//
+// The state field is the one exception and is named: it is the field a reader watches second
+// by second, and a state spelled `idle` is a state rather than an `i` a reader has to learn.
+func TestEveryFieldIsOneCharacter(t *testing.T) {
+	var s Status
+	s[fieldCwd] = "."
+	s[fieldProvider] = "o"
+	s[fieldModel] = "m"
+	s[fieldKey] = "k"
+	s[fieldFigure] = "w"
+	s[fieldApproval] = "a"
+	s[fieldCognito] = "n"
+	s[fieldColor] = "c"
+	s[fieldMouse] = "-"
+	s[fieldCopy] = "y"
+	s[fieldPane] = "0"
+	s[fieldHeld] = "9"
+	s[fieldFolded] = "0"
+
+	for i, got := range s {
+		if i == fieldState {
+			continue
+		}
+		if DisplayWidth(got) > 1 {
+			t.Errorf("field %d is %q, want one character or less", i, got)
+		}
+	}
+}
+
+// TestTheFrameCarriesTheLogBesideIt covers the arrangement the reader asked for. Every row
+// carries a field in the first column and a log row beside it, and a row written last appears
+// just above the prompt so everything moves up rather than appearing at the top.
+func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
+	screen, out := drawnAt(20, 80)
+
+	var s Status
+	s[fieldCwd] = "."
+	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
+
+	DrawStack(screen, stackLines(Bar{Status: s}, rows, 20, plainPalette()), plainPalette())
+
+	got := stripSequences(out.String())
+	if !strings.Contains(got, "the newest row") {
+		t.Errorf("the newest log row is not on the screen:\n%q", got)
+	}
+	if !strings.Contains(got, "orcli, a log and nothing else yet") {
+		t.Errorf("the oldest log row is not on the screen:\n%q", got)
+	}
+}
+
+// TestTheLogIsNewestBesideThePrompt covers the direction of the scroll. A row arriving
+// appears above the prompt and everything above it moves up, which is what the reader asked
+// the log to do, rather than appearing at the top where a reader is not looking.
+func TestTheLogIsNewestBesideThePrompt(t *testing.T) {
+	var s Status
+	rows := []Row{{Text: "first"}, {Text: "second"}, {Text: "third"}}
+
+	frame := stackLines(Bar{Status: s}, rows, 20, plainPalette())
+
+	if got := frame[len(frame)-2].log; got != "third" {
+		t.Errorf("the row above the prompt is %q, want the newest log row %q", got, "third")
+	}
+	if got := frame[len(frame)-3].log; got != "second" {
+		t.Errorf("the row above that is %q, want %q", got, "second")
+	}
+}
+
+// TestTheLogFillsUpward covers the case where the log is longer than the frame. The newest
+// rows fill the rows from the bottom upward and the oldest are off the screen, so a reader
+// scrolling back finds them in the terminal's own scrollback rather than on the screen.
+func TestTheLogFillsUpward(t *testing.T) {
+	var s Status
+	log := make([]Row, 40)
+	for i := range log {
+		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
+	}
+
+	frame := stackLines(Bar{Status: s}, log, 20, plainPalette())
+
+	if got := frame[len(frame)-2].log; got != "row 39" {
+		t.Errorf("the newest row is %q, want row 39", got)
+	}
+	if got := frame[0].log; got != "row 21" {
+		t.Errorf("the topmost row is %q, want row 21 and nineteen above it", got)
+	}
+}
+
+// TestThePromptRowCarriesTheFieldNotALogRow covers the one row that is not a field and a
+// log row. The prompt row carries the reader's own text, and a prompt with a log row behind it
+// is a prompt the reader cannot read.
+func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
+	screen, out := drawnAt(20, 80)
+
+	var s Status
+	s[fieldState] = string(StateIdle)
+	rows := []Row{{Text: "a log row"}}
+
+	DrawStack(screen, stackLines(Bar{Status: s, Field: "a question"}, rows, 20, plainPalette()),
+		plainPalette())
+
+	got := stripSequences(out.String())
+	if !strings.Contains(got, "root@localhost $ a question") {
+		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
+	}
+}
+
+// TestTheCaretIsNotMovedBackwards covers the reader's decision. The row is addressed with a
+// cursor-position sequence and the column is reached by advancing forward from it, so the
+// caret never travels up through the frame to find the row it belongs to.
+func TestTheCaretIsNotMovedBackwards(t *testing.T) {
+	screen, out := drawnAt(20, 80)
+
+	l := &interfaceLoop{
+		session: New(Options{Model: "stealth/space-bunny-alpha"}),
+		screen:  screen,
+	}
+	l.editor.Reset()
+	l.editor.Insert('a')
+	l.placeCaret()
+
+	got := out.String()
+	if strings.Contains(got, "\x1b[1A") {
+		t.Errorf("the caret was moved up through the frame:\n%q", got)
+	}
+	if !strings.HasPrefix(got, escapePosition(promptScreenRow(screen), 1)) {
+		t.Errorf("the caret is not placed on the prompt row by position:\n%q", got)
+	}
+	if !strings.Contains(got, "\x1b[") || !strings.Contains(got, "C") {
+		t.Errorf("the caret column is not reached by advancing forward:\n%q", got)
+	}
+}
+
+// TestTheCaretFollowsThePromptAndTheText covers the column. The caret is after the prompt
+// and after what the reader typed, counted in display columns, so a field holding a wide
+// character does not put the caret inside a glyph.
+func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
+	screen, out := drawnAt(20, 80)
+
+	l := &interfaceLoop{
+		session: New(Options{Model: "stealth/space-bunny-alpha"}),
+		screen:  screen,
+	}
+	l.editor.Reset()
+	l.editor.Insert('a')
+	l.placeCaret()
+
+	want := escapePosition(promptScreenRow(screen), 1) +
+		"\r\x1b[" + strconv.Itoa(DisplayWidth(Prompt)+1) + "C"
+	if got := out.String(); got != want {
+		t.Errorf("the caret is not after the prompt and the typed text:\ngot  %q\nwant %q",
+			got, want)
+	}
+}
+
+// TestSameFooterExceptField covers the test that keeps a keystroke from rewriting the frame.
+// Every field has to move when anything in it changes; a change to the field does not, since
+// the field is on the prompt row and that row is rewritten where it stands. The figure field's
+// sweep is part of its text, so a turn running and a keystroke arriving together redraw the
+// frame, which is what is wanted.
+func TestSameFooterExceptField(t *testing.T) {
+	base := Bar{Status: Status{fieldState: "idle"}, Field: ""}
+
+	typed := base
+	typed.Field = "a question"
+	if !sameFooterExceptField(base, typed) {
+		t.Error("a keystroke was taken as a change to the whole frame")
+	}
+
+	for _, change := range []func(*Bar){
+		func(b *Bar) { b.Status[fieldCwd] = "/" },
+		func(b *Bar) { b.Status[fieldSession] = "2" },
+		func(b *Bar) { b.Status[fieldProvider] = "x" },
+		func(b *Bar) { b.Status[fieldFigure] = "w" },
+		func(b *Bar) { b.Status[fieldHeld] = "9" },
 	} {
-		line := lines[i]
-		switch {
-		case want.blank && line != "":
-			t.Errorf("%s is %q, want it blank", want.name, line)
-		case want.isRule && !isRuleRow(line, width):
-			t.Errorf("%s is %q, want a rule across %d columns", want.name, line, width)
-		case want.has != "" && !strings.Contains(line, want.has):
-			t.Errorf("%s does not carry %q: %q", want.name, want.has, line)
-		}
-	}
-
-	if got := lines[1]; !strings.Contains(got, "please read the new preferences") {
-		t.Errorf("the prompt row does not carry what was typed: %q", got)
-	}
-}
-
-// TestThePromptRowCarriesTheFigureInPlaceOfThePrompt covers the reader's decision. The
-// `root@localhost $ ` text is dropped while a turn runs and the figure takes its place,
-// on the same row, so a reader watching a turn start does not find their field has moved
-// upwards.
-func TestThePromptRowCarriesTheFigureInPlaceOfThePrompt(t *testing.T) {
-	figure := strings.Repeat(" ", TwiddleIndent) + Twiddle(0) + "  working"
-
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{Field: "a question", Twiddle: figure}, plainPalette())
-
-	lines := stackRowsOnly(out.String())
-	row := lines[1]
-
-	if strings.Contains(row, "root@localhost") {
-		t.Errorf("the prompt row carries the prompt and the figure at once: %q", row)
-	}
-	if !strings.Contains(row, Twiddle(0)) {
-		t.Errorf("the prompt row does not carry the figure: %q", row)
-	}
-	if !strings.Contains(row, "working") {
-		t.Errorf("the prompt row does not carry the state word: %q", row)
-	}
-	if !strings.HasPrefix(row, strings.Repeat(" ", TwiddleIndent)) {
-		t.Errorf("the figure is not indented by %d: %q", TwiddleIndent, row)
-	}
-}
-
-// TestTheRuleSpansTheWidth covers the reader's decision that a rule is a divider rather
-// than a left border. A rule is as wide as the terminal, counted in display columns,
-// because the figure is three bytes to the column and a byte count would draw a rule a
-// third of the width it should be.
-func TestTheRuleSpansTheWidth(t *testing.T) {
-	for _, width := range []int{1, 2, 7, 80, 130} {
-		screen, out := drawnAt(24, width)
-		DrawStack(screen, Bar{}, plainPalette())
-
-		rules := 0
-		for _, line := range stackRowsOnly(out.String()) {
-			if !strings.HasPrefix(line, rule) {
-				continue
-			}
-			rules++
-			if got := DisplayWidth(line); got != width {
-				t.Errorf("at %d columns the rule is %d wide, want %d", width, got, width)
-			}
-		}
-		if rules != 1 {
-			t.Errorf("at %d columns there are %d rules, want 1:\n%s",
-				width, rules, out.String())
+		next := base
+		change(&next)
+		if sameFooterExceptField(base, next) {
+			t.Errorf("a change to %q was taken as only the field", next)
 		}
 	}
 }
 
-// TestAShortTerminalKeepsThePrompt covers the floor. A terminal too short for the whole
-// stack keeps the prompt row and the blank under it, since a reader who cannot type cannot
-// use the interface.
-//
-// This is a floor rather than a ladder. Which rows are shed on the way down, and in what
-// order, is the reader's decision and is not settled.
-func TestAShortTerminalKeepsThePrompt(t *testing.T) {
-	screen, out := drawnAt(3, 80)
-	DrawStack(screen, Bar{Bottom: "Provider: -", Field: "a question"}, plainPalette())
-
-	got := out.String()
-	if !strings.Contains(got, "a question") {
-		t.Errorf("a three row terminal lost the prompt: %q", got)
+// TestTheSweepTurnsAlongTheRow covers the colour pattern on the figure. The hue advances one
+// degree per column along the row and thirty-six per step, so the pattern reads as something
+// travelling rather than as one colour changing.
+func TestTheSweepTurnsAlongTheRow(t *testing.T) {
+	// Two adjacent columns carry adjacent hues, so the pattern is horizontal rather than
+	// one figure in one colour.
+	if hue(0) == hue(1) {
+		t.Error("adjacent columns of the sweep carry the same colour")
 	}
-	if strings.Contains(got, "Provider:") {
-		t.Errorf("a three row terminal kept a bar it had no room for: %q", got)
+
+	// Ten steps is a full turn, since thirty-six degrees a step is a tenth of 360.
+	if hue(float64(10*sweepStepDegrees)) != hue(0) {
+		t.Error("ten steps of the sweep is not a full turn")
 	}
-}
 
-// TestTheStackDoesNotChangeHeight covers the reason the prompt row carries the figure
-// rather than a row of its own appearing. A footer that grows when a turn starts is a
-// footer that moves the field under the reader's hands.
-func TestTheStackDoesNotChangeHeight(t *testing.T) {
-	quiet, out := drawnAt(24, 80)
-	DrawStack(quiet, Bar{
-		Bottom: "Provider: openrouter.ai",
-		Field:  "a question",
-	}, plainPalette())
-	idle := len(stackRowsOnly(out.String()))
+	// The three primaries land, and no channel reaches zero at any step: a channel at zero
+	// is a dark band crossing the row rather than a hue turning.
+	for _, deg := range []float64{0, 120, 240} {
+		r, g, b := hueRGB(deg)
+		if r == 0 && g == 0 && b == 0 {
+			t.Errorf("hue %v renders as black", deg)
+		}
+	}
+	for step := range 40 {
+		r, g, b := hueRGB(float64(sweepStepDegrees * step))
+		if r == 0 || g == 0 || b == 0 {
+			t.Errorf("step %d puts a channel at zero: %d %d %d", step, r, g, b)
+		}
+	}
 
-	busy, other := drawnAt(24, 80)
-	DrawStack(busy, Bar{
-		Bottom:  "Provider: openrouter.ai",
-		Field:   "a question",
-		Twiddle: strings.Repeat(" ", TwiddleIndent) + "  working",
-	}, plainPalette())
-	running := len(stackRowsOnly(other.String()))
-
-	if idle != running {
-		t.Errorf("the stack is %d rows when idle and %d while running, want the same",
-			idle, running)
+	// The text is written with one colour per character, so a word of n characters is n
+	// colour sequences, and the words survive the colouring.
+	const word = "working"
+	swept := SweepText(word, 0)
+	if n := strings.Count(swept, "\x1b[38;2;"); n != len([]rune(word)) {
+		t.Errorf("the sweep wrote %d colours for %d characters", n, len([]rune(word)))
+	}
+	if got := stripSequences(swept); got != word {
+		t.Errorf("the words did not survive the sweep: %q", got)
 	}
 }
 
-// TestAKeystrokeDoesNotRewriteTheFooter covers the fault that made typing advance the
-// screen. The field is part of the footer, so a footer compared whole is different on
-// every keystroke, and drawing it whole each time appends another copy of itself. A change
-// to the field alone has to rewrite one row.
-func TestAKeystrokeDoesNotRewriteTheFooter(t *testing.T) {
-	old := Bar{Top: "Status: idle", Bottom: "Session 1", Field: ""}
-	next := Bar{Top: "Status: idle", Bottom: "Session 1", Field: "a"}
+// TestSweepStatusColoursOnlyTheValue covers the splice. The value is found by the literal
+// prefix so the colour lands on the Status value and not on the rest of the bar, and a bar
+// that does not begin that way is returned unchanged rather than swept in the wrong place.
+func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
+	bar := RenderTop("working", "3", "18,400", "2,104", "916", "$0.0181", "$4.82")
 
-	if !sameFooterExceptField(old, next) {
-		t.Errorf("a change to the field alone was not recognised as one")
+	got := sweepStatus(bar, "working", 0)
+	if !strings.Contains(got, "\x1b[38;2;") {
+		t.Errorf("the Status value was not swept: %q", got)
+	}
+	if words := stripSequences(got); words != bar {
+		t.Errorf("the bar's words changed:\ngot  %q\nwant %q", words, bar)
+	}
+	if !strings.HasSuffix(got, "| Credits: $4.82") {
+		t.Errorf("the sweep ran past the Status value: %q", got)
 	}
 
-	// A change to a bar or to the figure is not a keystroke, and the rows around the
-	// prompt row have to move with it.
-	moved := Bar{Top: "Status: working", Bottom: "Session 1", Field: "a"}
-	if sameFooterExceptField(old, moved) {
-		t.Errorf("a change to the top bar was taken for a keystroke")
-	}
-	figured := Bar{Top: "Status: idle", Bottom: "Session 1", Twiddle: "working"}
-	if sameFooterExceptField(old, figured) {
-		t.Errorf("a change to the figure was taken for a keystroke")
-	}
-}
-
-// TestThePromptRowIsRewrittenInPlace covers the one-row redraw a keystroke uses. It has to
-// clear the row before writing it, since a question replaced by a shorter one would
-// otherwise leave the tail of the old one on screen beside the new.
-func TestThePromptRowIsRewrittenInPlace(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	palette := plainPalette()
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "m"}),
-		screen:  screen,
-	}
-	l.editor.Insert('a')
-	l.drawPromptRow(Bar{Field: l.fieldRow()}, palette)
-
-	got := out.String()
-	if !strings.Contains(got, escapeEraseLine) {
-		t.Errorf("the row was not cleared before being written: %q", got)
-	}
-	if !strings.Contains(got, "root@localhost $ a") {
-		t.Errorf("the row does not carry the prompt and the typed text: %q", got)
-	}
-
-	// One line ending, since one row was written. A draw of the whole footer would
-	// have written five.
-	if n := strings.Count(got, "\r\n"); n != 1 {
-		t.Errorf("the redraw wrote %d rows, want 1:\n%q", n, got)
-	}
-}
-
-// TestTheCaretIsNotPlacedWhileATurnRuns covers the row carrying the figure. There is no
-// text to type into, so a caret placed there would be a caret on a row the reader is not
-// typing into, and one row off from the prompt.
-func TestTheCaretIsNotPlacedWhileATurnRuns(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "m"}),
-		screen:  screen,
-	}
-	l.editor.Insert('a')
-
-	l.placeCaret(true)
-
-	if got := out.String(); got != "" {
-		t.Errorf("a caret was placed on a row carrying the figure: %q", got)
-	}
-}
-
-// TestTheCaretFollowsTheTypedText covers the ordinary case, and the column arithmetic that
-// puts it after the reader's own text rather than at the end of the prompt.
-func TestTheCaretFollowsTheTypedText(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "m"}),
-		screen:  screen,
-	}
-	l.editor.Insert('a')
-
-	l.placeCaret(false)
-
-	got := out.String()
-	if !strings.HasPrefix(got, "\r") {
-		t.Errorf("the caret did not return to the start of the row: %q", got)
-	}
-
-	// Column is the prompt plus what was typed, both measured in display columns.
-	want := DisplayWidth(Prompt) + 1
-	if !strings.Contains(got, "\x1b["+itoa(want)+"C") {
-		t.Errorf("the caret is not after the prompt and the typed text:\n%q", got)
+	// A bar whose first field is not the Status value is left alone.
+	other := RenderBottom("Session 1", true, false, "openrouter.ai", "m", "3", "ask")
+	if got := sweepStatus(other, "working", 0); got != other {
+		t.Errorf("a bar that is not the top bar was swept: %q", got)
 	}
 }

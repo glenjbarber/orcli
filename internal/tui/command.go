@@ -60,11 +60,11 @@ type Command struct {
 //
 // Both are filled in `init`, and that is a constraint rather than a style. The help
 // renderer reaches this table, so a variable initialiser reaching the help would form
-// an initialisation cycle, which Go reports at compile time. The two are filled in
-// the same function for a second reason: a package-level initialiser runs before
-// `init`, so a `byName` written as a variable initialiser would be built from an
-// empty table and every lookup would miss. Both facts are worth writing down, since
-// the second produces a table that is silently empty rather than a build failure.
+// an initialisation cycle, which Go reports at compile time. The two are filled in the
+// same function for a second reason: a package-level initialiser runs before `init`, so
+// a `byName` written as a variable initialiser would be built from an empty table and
+// every lookup would miss. Both facts are worth writing down, since the second produces
+// a table that is silently empty rather than a build failure.
 var (
 	commands []Command
 	byName   map[string]*Command
@@ -231,6 +231,7 @@ func init() {
 			Name:    "tools",
 			Summary: "list the tools the model is given, and the root they are in",
 		},
+		testCommand,
 		{
 			Name:    "quit",
 			Summary: "leave the interface",
@@ -254,6 +255,29 @@ func init() {
 		}
 	}
 }
+
+// testCommand is the `/test` entry in the table.
+//
+// It is a development command that lists a directory the way ls does and writes the
+// listing where a reply from the model is written, so a reader can fill the log with rows
+// whose number and length they chose and watch where the frame puts them.
+//
+// It carries no credential, reaches no network, and asks the model nothing, which is what
+// makes it useful for a frame test: the rows it produces are the same every run, so what
+// moves on screen moved because of the drawing and not because of a model.
+var testCommand = Command{
+	Name:    "test",
+	Args:    "DIR",
+	Summary: "list a directory, for testing how the frame draws",
+}
+
+// TestCommand returns the `/test` entry.
+//
+// It is a function rather than a field read from the table for the reason
+// AttributeCommand has: the entry is built in its own file and registered in command.go's
+// init, and this says which value is meant without making a caller depend on a table a
+// reader can be looking at.
+func TestCommand() Command { return testCommand }
 
 // Lookup returns the command a typed name answers to, and whether it does.
 //
