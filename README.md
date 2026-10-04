@@ -1,5 +1,19 @@
 # orcli
 
+![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
+
+![Architecture](https://img.shields.io/badge/arch-amd64-blue)
+![Architecture](https://img.shields.io/badge/arch-arm64-blue)
+![Architecture](https://img.shields.io/badge/arch-aarch64-blue)
+
+[![License](https://img.shields.io/github/license/glenjbarber/orcli?color=blue)](LICENSE)
+
+![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/orcli)
+[![Go Reference](https://pkg.go.dev/badge/github.com/glenjbarber/orcli.svg)](https://pkg.go.dev/github.com/glenjbarber/orcli)
+
+![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/orcli)
+[![Go CI](https://github.com/glenjbarber/orcli/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/orcli/actions/workflows/go-ci.yml)
+
 A terminal client for the [OpenRouter.ai](https://openrouter.ai) API.
 
 `orcli` is built around one substantial feature: an interactive, full-screen chat
