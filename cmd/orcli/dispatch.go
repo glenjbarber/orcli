@@ -35,6 +35,14 @@ type dispatcher struct {
 	// build one over a file it wrote.
 	cfg config.Config
 
+	// session is the interface's own session, so `/model` can change the model the
+	// next turn is sent with rather than only the one written to the file.
+	//
+	// It is a pointer rather than a value because the session is the thing the
+	// interface is drawing and a command changing what it is answering with has to
+	// change that, not a copy of it.
+	session *tui.Session
+
 	// commands is the table, built once at construction.
 	commands map[string]handler
 
@@ -63,6 +71,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.cloudflare(ctx, args)
 		},
+		"model": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.model(args)
+		},
 		"test": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.test(args)
 		},
@@ -73,13 +84,33 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 	return d
 }
 
+// withSession hands the dispatcher the interface's own session.
+//
+// It is a separate call rather than a field set at construction, since the dispatcher
+// is built before the session is handed to the interface and the two are wired
+// together in openInterface. A dispatcher with no session can still run the commands
+// that do not touch one, which is what a test over /cloudflare does.
+func (d *dispatcher) withSession(s *tui.Session) { d.session = s }
+
+// model is the handler for `/model`.
+//
+// It chooses a model, goes back to the one before it, and reports both when asked
+// with no argument. See modelHandler for the four cases and why they are told apart
+// before anything is written.
+func (d *dispatcher) model(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/model needs an open interface")
+	}
+	return modelHandler(d.session, args)
+}
+
 // Run executes a typed line.
 //
 // A command the dispatcher does not have is reported by name, and the two cases are
-// told apart. The table in internal/tui lists thirty names and this build implements
-// three, so a reader who typed /copy is told the name is in the table and this build
-// does not run it, rather than being told there is no such command: those are
-// different faults and a reader told the second goes looking for a typo.
+// told apart. The table in internal/tui lists thirty-nine names and this build
+// implements four, so a reader who typed /copy is told the name is in the table and
+// this build does not run it, rather than being told there is no such command: those
+// are different faults and a reader told the second goes looking for a typo.
 //
 // A line that is not a command is not this function's business. The loop sends a
 // question to the model and a command here, and a dispatcher that also answered

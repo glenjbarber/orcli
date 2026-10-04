@@ -81,10 +81,10 @@ func init() {
 			Summary: "print the version",
 		},
 		{
-			Name:    "connect",
-			Summary: "test the connection and report the key",
-		},
-		{
+			// The connection is automatic and the probe is the reader's own first
+			// question, so there is no command that tests it. An entry with no body
+			// is one a reader types and is refused, which reads worse than a name
+			// that is not there at all.
 			Name:    "key",
 			Summary: "report the usage against the key",
 		},
@@ -129,7 +129,7 @@ func init() {
 		},
 		{
 			Name:    "verbosity",
-			Args:    "0-6",
+			Args:    "0-5",
 			Summary: "how much the model is asked to answer with",
 		},
 		{

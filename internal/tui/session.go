@@ -1,3 +1,29 @@
+// Package tui draws the interface.
+//
+// Nothing here exists yet. This file holds the log, which is the part of the
+// frame every other decision hangs off: a downward-scrolling sequence of rows
+// written into the normal screen buffer, the way `brew` reports a run. The header,
+// the pane and the fixed input block are gone, so the log is what the reader
+// reads, what `/copy` copies, and what `/search` searches.
+//
+// # Why a log rather than a frame
+//
+// The frame that preceded this one was redrawn whole at every repaint, which is
+// what a fixed layout needs and the wrong model for output that arrives over
+// minutes. A model answering a question one tool call at a time produces rows that
+// belong in the order they happened, and a reader who scrolls back to compare two
+// tool results is reading history rather than a viewport.
+//
+// The cost of a log is that the reader's own scrollback is where the transcript
+// lives, so the client must stop taking it: the alternate screen is given up, and
+// what was on the screen before the client started comes back when it stops.
+//
+// # What this file is not
+//
+// It is not the whole package. The palette, the line editor, the terminal control,
+// the session and the command table are separate concerns with their own
+// decisions, and the design record at DESIGN-NOTES.md describes where each of them
+// is headed.
 package tui
 
 import (
@@ -79,10 +105,10 @@ const (
 	ApprovalDeny Approval = "deny"
 )
 
-// Session owns the log, the levels and the state the footer stack reports.
+// Session owns the log, the levels and the state the frame reports.
 //
 // It is the thing a Run drives, and it is deliberately small: the log, the levels,
-// the workers, the four states, and the counters the bars show. Everything with a
+// the workers, the four states, and the counters the frame draws. Everything with a
 // decision in it, the terminal control, the line editor, the palette and the command
 // table, is a separate concern with its own file, and a session that grew all of them
 // would be the one file that decides everything.
@@ -153,7 +179,35 @@ func New(opts Options) *Session {
 func (s *Session) Log() *Log { return &s.log }
 
 // Options returns what the session was built with.
+//
+// It is a copy rather than the field, so a caller cannot reach into the session's
+// own options and change what a turn is sent as.
 func (s *Session) Options() Options { return s.opts }
+
+// SetModel changes the model a turn is sent to.
+//
+// It is a method rather than a caller reaching into the options, since a command
+// that wrote the model to the file and left the session answering with the old one
+// would leave the frame drawing one model and the reader being answered by another.
+// The two are one decision and this is where it is kept.
+//
+// It is taken under the session lock for the reason the state is: a command runs on
+// the input goroutine and a turn reads the model on the request goroutine, and the
+// two would otherwise be reaching for the same field without a lock between them.
+//
+// An empty model is refused rather than stored, since an empty model is a session
+// that cannot ask anything and a caller storing one has a bug in it rather than a
+// reader who asked for it.
+func (s *Session) SetModel(model string) error {
+	if model == "" {
+		return ErrNoModel
+	}
+
+	s.mu.Lock()
+	s.opts.Model = model
+	s.mu.Unlock()
+	return nil
+}
 
 // State reports what the client is doing, and any detail worth showing beside it.
 //
@@ -177,8 +231,8 @@ func (s *Session) State() (State, string) {
 // can walk away.
 func (s *Session) SetState(state State, detail string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.state, s.detail = state, detail
+	s.mu.Unlock()
 }
 
 // ErrNoModel reports a turn that has nothing to send.
@@ -195,6 +249,9 @@ var ErrNoModel = errors.New("no model is chosen, so there is nothing to ask")
 // one path send a request with no model and another refuse it is a session where the
 // reader finds out by reading an error from the endpoint.
 func (s *Session) Ready() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if s.opts.Model == "" {
 		return ErrNoModel
 	}
