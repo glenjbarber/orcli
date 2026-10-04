@@ -1,0 +1,54 @@
+Module: 0
+Worker ID: 0
+Merged: started
+Status: cursor placement decided, every paint, and it is a record not a merge
+
+# Decision: the cursor is placed on the prompt row on every paint
+
+Chosen at the reader's request to take the recommendation, over placing it once at
+entry and repairing it in the twiddle.
+
+## The choice
+
+`Run` ends every frame with an explicit move to the prompt row. The design record
+for terminal input already says the client draws no caret of its own and places
+the terminal one on the prompt row on every paint, so this settles a design that
+was written before the drawing merged rather than opening one.
+
+## Why every paint and not once at entry
+
+`DrawTwiddle` in `internal/tui/stack.go` moves the cursor up one row, erases that
+row and writes the figure, so a twiddle step leaves the terminal cursor one row
+above the prompt. Placing the cursor once at entry therefore only holds if
+something puts it back, and the something would be the twiddle.
+
+Placing on every paint is right for the reason that the frame already redraws the
+whole stack on each paint, so one more sequence on a redraw that rewrites nine
+rows is not the thing that costs. It is also right for the reason that it holds by
+construction: a resize that does not repaint, a log row written in place, or a
+row added later that redraws itself, all leave the cursor where they should leave
+it rather than leaving a repair to be remembered.
+
+Placing once at entry and repairing in the twiddle is cheaper and keeps the
+placement decision in the one place that can disturb it, but it makes every
+future in-place redraw responsible for putting the cursor back, which is a duty
+nobody has asked for and that a later unit would have to be told about.
+
+## What this does not settle
+
+The input unit still owes the line editor, the key reader and the interrupt
+triggers. This decision is what the editor places the cursor in, since an editor
+drawing its own caret would contradict it, and it is a constraint on the editor
+rather than an implementation of it.
+
+## Where it goes
+
+`.orcli-design/design-terminal-input.md` already records it under `## Raw mode`,
+so no design file changes. A worker picking up the input unit reads that section
+and this entry, and the code follows.
+
+## Unverified
+
+Nothing here was run against a terminal. Whether the placement sequence behaves on
+a real screen is not settled by a test, and a frame that leaves the cursor in the
+wrong row would not be caught by one.
