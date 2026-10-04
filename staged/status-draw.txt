@@ -1,0 +1,68 @@
+Module: 0
+Worker ID: 0
+Merged: started
+Status: drawing the log on feature/tui-run-draw
+
+# Design: Run draws the log
+
+Recorded at the start of the work, from the spec in the root `.orcli.log`.
+Branch `feature/tui-run-draw`, off `3fb7032`. Implementation, documentation and
+tests as separate commits in that order.
+
+## What exists and what is missing
+
+`internal/tui` holds every part of the frame and none of the frame. In the tree:
+`log.go` the append-only rows, `session.go` the session and its four states,
+`levels.go` the retired thread identities, `worker.go` a background worker,
+`diff.go` a diff block coloured without its text changing, `width.go` the column
+measurement, `palette.go` `color.go` `ground.go` the palette and its two role
+tables, `command.go` the table and its completer, `alias.go`, `twiddle.go`, and
+the termios files behind `terminal.go`.
+
+None of it draws. `Palette.Sequence` returns bytes nothing asks for, `Twiddle`
+returns a figure nothing places, and `DisplayWidth` measures a row nothing has
+written down. This unit is the first caller of all three.
+
+## What this unit is
+
+`Run` takes the terminal, draws the log downward into the normal screen buffer
+in the order rows were written, holds the footer stack at the bottom, and returns
+when the session ends.
+
+The scroll region is the piece with no precedent: DECSTBM set on entry and
+recomputed on every resize, with the log clipped to rows `1..H-stackRows`. Nothing
+in the tree has set a scroll region, and the resize path that would recompute it
+is new too. `terminal.go` has no size query, so one is needed and it is a
+`TIOCGWINSZ` alongside the termios read that is already there.
+
+## Decisions taken here rather than left open
+
+**The twiddle row is redrawn in place; nothing else is.** The spec calls it the
+only in-place redraw, and keeping that true means the twiddle row is the one row
+that is written rather than appended. It sits directly above the prompt, and the
+scroll region ends below the stack.
+
+**Colour off writes no palette sequence at all.** `Palette.Sequence` already
+returns the empty string when the palette is off, so this falls out of asking the
+palette rather than of a check here.
+
+**A row is folded and cut before it is written, not after.** `DisplayWidth` and
+`CutColumnFromEnd` are the two calls, and a row that comes out of them is what goes
+to the terminal, so the bytes a reader sees and the bytes a copy produces are the
+same measurement.
+
+**The hint row is left out.** Its contents are undecided and the spec says not to
+invent entries, so the stack draws the prompt, the two bars and the rules and
+leaves a gap for the hint row that a later unit fills. Better a stack with a gap
+than one with invented text in it.
+
+**Short terminals drop the twiddle first, then the hint, then the bars.** The
+prompt is held to the end, since a reader who cannot type cannot use the
+interface.
+
+## What is not in this unit
+
+The line editor and the input loop, since `Run` returns when the session ends and
+nothing reads keys yet. `/pause`, whose premise is the alternate screen this
+removes. The `Status` field's interaction with the twiddle, which the spec leaves
+open.
