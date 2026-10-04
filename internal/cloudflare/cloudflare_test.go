@@ -196,81 +196,78 @@ func TestANilClientFiltersNothing(t *testing.T) {
 	}
 }
 
-// TestParseArgsReadsFlagsBothWays covers the two spellings a reader types, since a
-// parser that accepted one would refuse the other for no reason a reader can see.
-//
-// The text is what the command receives after the sub-command name has been
-// stripped, so the first word here is the action rather than a further group.
-func TestParseArgsReadsFlagsBothWays(t *testing.T) {
-	known := map[string]bool{"name": true, "content": true}
+// dnsKnown is the flag table the tests parse against. It is the same set the
+// dispatcher uses, so a flag the tests exercise is one a reader can type.
+var dnsKnown = map[string]bool{
+	"zone": true, "name": true, "type": true,
+	"content": true, "ttl": true, "record-id": true, "proxied": true,
+}
 
-	a, err := parseArgs("add --name app.example.com --content=203.0.113.42", known)
+// TestParseDNSReadsFlagsBothWays covers the two spellings a reader types, since a
+// parser that accepted one would refuse the other for no reason a reader can see.
+func TestParseDNSReadsFlagsBothWays(t *testing.T) {
+	a, err := ParseDNS("add", "--name app.example.com --content=203.0.113.42", dnsKnown)
 	if err != nil {
-		t.Fatalf("parseArgs: %v", err)
+		t.Fatalf("ParseDNS: %v", err)
 	}
-	if a.sub != "add" {
-		t.Errorf("the action is %q, want add", a.sub)
+	if a.Verb != "add" {
+		t.Errorf("the action is %q, want add", a.Verb)
 	}
-	if got := a.set["name"]; got != "app.example.com" {
+	if got, _ := a.Get("name"); got != "app.example.com" {
 		t.Errorf("--name is %q", got)
 	}
-	if got := a.set["content"]; got != "203.0.113.42" {
+	if got, _ := a.Get("content"); got != "203.0.113.42" {
 		t.Errorf("--content is %q", got)
 	}
 }
 
-// TestParseArgsRefusesAnUnknownFlag is the case where ignoring it would leave a
+// TestParseDNSRefusesAnUnknownFlag is the case where ignoring it would leave a
 // reader believing they had set something they had not.
-func TestParseArgsRefusesAnUnknownFlag(t *testing.T) {
-	known := map[string]bool{"name": true}
-
-	_, err := parseArgs("add --name app.example.com --ttl 300", known)
+func TestParseDNSRefusesAnUnknownFlag(t *testing.T) {
+	_, err := ParseDNS("add", "--name app.example.com --weight 5", dnsKnown)
 	if err == nil {
 		t.Fatal("an unknown flag was accepted")
 	}
-	if !strings.Contains(err.Error(), "--ttl") {
+	if !strings.Contains(err.Error(), "--weight") {
 		t.Errorf("the refusal is %q, want it to name the flag", err)
 	}
 }
 
-// TestParseArgsRefusesAFlagWithNoValue covers an empty value being sent to the
+// TestParseDNSRefusesAFlagWithNoValue covers an empty value being sent to the
 // endpoint as though the reader had asked for it.
-func TestParseArgsRefusesAFlagWithNoValue(t *testing.T) {
-	known := map[string]bool{"name": true}
-
-	if _, err := parseArgs("add --name", known); err == nil {
+func TestParseDNSRefusesAFlagWithNoValue(t *testing.T) {
+	if _, err := ParseDNS("add", "--name", dnsKnown); err == nil {
 		t.Fatal("a flag with no value was accepted")
 	}
 }
 
-// TestParseArgsRefusesAFlagFollowedByAnotherFlag. A value is taken from the next
-// field whatever it looks like, so a name beginning with two dashes is a name a
-// reader typed rather than a missing value.
-func TestParseArgsRefusesAFlagFollowedByAnotherFlag(t *testing.T) {
-	known := map[string]bool{"name": true, "ttl": true}
-
-	if _, err := parseArgs("add --name app --ttl", known); err == nil {
+// TestParseDNSRefusesAFlagFollowedByAnotherFlag covers a value being taken from
+// the next field whatever it looks like, so a name beginning with two dashes is a
+// name a reader typed rather than a missing value.
+func TestParseDNSRefusesAFlagFollowedByAnotherFlag(t *testing.T) {
+	if _, err := ParseDNS("add", "--name app --ttl", dnsKnown); err == nil {
 		t.Fatal("a trailing flag with no value was accepted")
 	}
 }
 
-// TestParseArgsNeedsAnAction covers an empty argument text.
-func TestParseArgsNeedsAnAction(t *testing.T) {
-	if _, err := parseArgs("   ", map[string]bool{}); err != ErrUnknownSub {
-		t.Errorf("an empty argument text returned %v, want ErrUnknownSub", err)
+// TestParseDNSNeedsAVerb covers an empty verb.
+func TestParseDNSNeedsAVerb(t *testing.T) {
+	if _, err := ParseDNS("  ", "", dnsKnown); err != ErrUnknownSub {
+		t.Errorf("an empty verb returned %v, want ErrUnknownSub", err)
 	}
 }
 
 // TestRequireNamesTheMissingFlag covers the message a reader gets when they typed
 // the sub-command and forgot the value.
 func TestRequireNamesTheMissingFlag(t *testing.T) {
-	a := args{sub: "add", set: map[string]string{}}
-
-	_, err := a.require("content")
-	if err == nil {
-		t.Fatal("a missing flag was accepted")
+	a, err := ParseDNS("add", "--zone example.com", dnsKnown)
+	if err != nil {
+		t.Fatalf("ParseDNS: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--content") {
+
+	if _, err := a.Require("content"); err == nil {
+		t.Fatal("a missing flag was accepted")
+	} else if !strings.Contains(err.Error(), "--content") {
 		t.Errorf("the refusal is %q, want it to name the flag", err)
 	}
 }
@@ -278,9 +275,9 @@ func TestRequireNamesTheMissingFlag(t *testing.T) {
 // TestRequireRefusesAnEmptyValue covers the reader who typed the flag and gave it
 // nothing.
 func TestRequireRefusesAnEmptyValue(t *testing.T) {
-	a := args{sub: "add", set: map[string]string{"content": ""}}
+	a := Args{Verb: "add", set: map[string]string{"content": ""}}
 
-	if _, err := a.require("content"); err == nil {
+	if _, err := a.Require("content"); err == nil {
 		t.Fatal("an empty value was accepted")
 	}
 }
@@ -288,9 +285,9 @@ func TestRequireRefusesAnEmptyValue(t *testing.T) {
 // TestTTLRefusesSomethingThatIsNotANumber covers a reader who typed "three hundred"
 // and would otherwise be told by the endpoint about the value rather than the flag.
 func TestTTLRefusesSomethingThatIsNotANumber(t *testing.T) {
-	a := args{sub: "add", set: map[string]string{"ttl": "three hundred"}}
+	a := Args{Verb: "add", set: map[string]string{"ttl": "three hundred"}}
 
-	if _, err := a.ttlOf(); err == nil {
+	if _, err := a.TTL(); err == nil {
 		t.Fatal("a TTL that is not a number was accepted")
 	}
 }
@@ -298,38 +295,106 @@ func TestTTLRefusesSomethingThatIsNotANumber(t *testing.T) {
 // TestTTLRefusesZero covers a reader who typed a TTL that would expire every lookup
 // the moment the record resolved.
 func TestTTLRefusesZero(t *testing.T) {
-	a := args{sub: "add", set: map[string]string{"ttl": "0"}}
+	a := Args{Verb: "add", set: map[string]string{"ttl": "0"}}
 
-	if _, err := a.ttlOf(); err == nil {
+	if _, err := a.TTL(); err == nil {
 		t.Fatal("a TTL of zero was accepted")
 	}
 }
 
 // TestTTLDefaultsToUnset covers the ordinary case: a reader who did not name one
-// gets zero here and the command applies the endpoint's own default.
+// gets zero here and the endpoint applies its own default.
 func TestTTLDefaultsToUnset(t *testing.T) {
-	a := args{sub: "add", set: map[string]string{}}
+	a := Args{Verb: "add", set: map[string]string{}}
 
-	n, err := a.ttlOf()
+	n, err := a.TTL()
 	if err != nil {
-		t.Fatalf("ttlOf: %v", err)
+		t.Fatalf("TTL: %v", err)
 	}
 	if n != 0 {
 		t.Errorf("an unset TTL came back as %d, want 0", n)
 	}
 }
 
-// TestRecordTypesAreChecked covers the list that keeps a mistyped type from
-// reaching the endpoint, where the reader would be told about the value rather
-// than the flag.
-func TestRecordTypesAreChecked(t *testing.T) {
+// TestApplyLeavesAFlagTheReaderDidNotName covers the property the whole handler
+// rests on: a reader who typed --content is saying what to change and is not saying
+// the TTL becomes zero.
+func TestApplyLeavesAFlagTheReaderDidNotName(t *testing.T) {
+	a, err := ParseDNS("edit", "--content 203.0.113.42", dnsKnown)
+	if err != nil {
+		t.Fatalf("ParseDNS: %v", err)
+	}
+
+	r := Record{Type: "A", Name: "app.example.com", Content: "198.51.100.7", TTL: 300, Proxied: true}
+	if err := a.Apply(&r); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if r.Content != "203.0.113.42" {
+		t.Errorf("the content came back as %q", r.Content)
+	}
+	if r.TTL != 300 {
+		t.Errorf("the TTL became %d, and the reader did not name it", r.TTL)
+	}
+	if !r.Proxied {
+		t.Error("proxied was cleared, and the reader did not name it")
+	}
+}
+
+// TestApplyRefusesATypeThisClientDoesNotKnow covers the check that keeps a mistyped
+// type from reaching the endpoint, where the reader would be told about the value
+// rather than the flag.
+func TestApplyRefusesATypeThisClientDoesNotKnow(t *testing.T) {
+	a, err := ParseDNS("add", "--type CNMAE", dnsKnown)
+	if err != nil {
+		t.Fatalf("ParseDNS: %v", err)
+	}
+
+	r := Record{}
+	if err := a.Apply(&r); err == nil {
+		t.Fatal("a type this client does not know was accepted")
+	}
+}
+
+// TestApplyRefusesAProxiedThatIsNotOnOrOff covers the same case for a boolean the
+// reader mistyped.
+func TestApplyRefusesAProxiedThatIsNotOnOrOff(t *testing.T) {
+	a, err := ParseDNS("add", "--proxied perhaps", dnsKnown)
+	if err != nil {
+		t.Fatalf("ParseDNS: %v", err)
+	}
+
+	if err := a.Apply(&Record{}); err == nil {
+		t.Fatal("a proxied that is neither on nor off was accepted")
+	}
+}
+
+// TestActionMapsTheThreeWrites covers the mapping the handler relies on, including
+// that a read is no action at all rather than a creation.
+func TestActionMapsTheThreeWrites(t *testing.T) {
+	for verb, want := range map[string]Action{
+		"add": AddRecord, "edit": EditRecord, "delete": DeleteRecord,
+	} {
+		a, err := ParseDNS(verb, "", dnsKnown)
+		if err != nil {
+			t.Fatalf("ParseDNS %s: %v", verb, err)
+		}
+		if got := a.Action(); got != want {
+			t.Errorf("%s is %v, want %v", verb, got, want)
+		}
+	}
+}
+
+// TestTypeKnown pins the list against a type that is not one, since a check that
+// accepted everything would pass every test above.
+func TestTypeKnown(t *testing.T) {
 	for _, name := range []string{"A", "AAAA", "CNAME", "TXT", "MX"} {
-		if !recordTypes[name] {
+		if !TypeKnown(name) {
 			t.Errorf("%s is not in the list of accepted types", name)
 		}
 	}
 	for _, name := range []string{"CNMAE", "a", "SOA"} {
-		if recordTypes[name] {
+		if TypeKnown(name) {
 			t.Errorf("%s is accepted, and it is not a type this client names", name)
 		}
 	}

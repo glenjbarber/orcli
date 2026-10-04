@@ -96,6 +96,18 @@ type Config struct {
 	// these can be listed and read while the working directory continues to be
 	// the only place anything is written and the only place a program is run.
 	Readable []string `json:"OPENROUTER_READABLE,omitempty"`
+
+	// Cloudflare is the block holding what the Cloudflare commands need.
+	//
+	// It is a block rather than a flat member so a further provider is added the
+	// same way, and it is a pointer so the block can be absent: a reader who has
+	// never typed /cloudflare has a file with no cloudflare member in it at all,
+	// rather than one carrying an empty block nobody wrote.
+	//
+	// It holds its own bytes rather than a decoded struct, so a member this
+	// client does not name survives a read and a write untouched. See
+	// cloudflare.go for why that matters in a file holding a credential.
+	Cloudflare *Cloudflare `json:"cloudflare,omitempty"`
 }
 
 // Default is the configuration a session runs with when nothing is on disk.
@@ -235,6 +247,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readStrings(value, &c.Trusted)
 		case "OPENROUTER_READABLE":
 			err = readStrings(value, &c.Readable)
+		case cloudflareKey:
+			c.Cloudflare, err = readCloudflare(value)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
