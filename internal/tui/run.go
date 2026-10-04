@@ -22,7 +22,7 @@ import (
 // The log and the footer stack share one screen, so the terminal has to be told where the
 // log ends. That is DECSTBM, set on entry and recomputed on every resize, with the log
 // clipped to rows `1..H-stackRows`. Without it the stack would scroll away the first
-// time a row was written, and the reader would lose the prompt they are typing into.
+// time a row was written, and the reader would lose the field they are typing into.
 //
 // This is the one piece of the frame with no precedent in the tree, and the piece most
 // likely to be wrong. It lives here rather than in a screen.go of its own because a
@@ -43,7 +43,7 @@ type WindowSize struct {
 //
 // A terminal reporting nothing is one that cannot be read, and drawing a frame into it
 // produces rows nobody sees. A terminal reporting one row is one that can hold the
-// prompt and nothing else.
+// field and nothing else.
 const minSize = 1
 
 // Screen writes to a terminal and knows how large it is.
@@ -121,7 +121,7 @@ func (s *Screen) Write(text string) {
 // SetScrollRegion tells the terminal where the log ends.
 //
 // DECSTBM takes the first and last row of the region, both counted from one. The region
-// ends one row above the stack, so the log cannot scroll the prompt off the screen. A
+// ends one row above the stack, so the log cannot scroll the field off the screen. A
 // size too small for a region is left alone rather than set to something that hides the
 // log, since a wrong region is worse than none.
 func (s *Screen) SetScrollRegion(logHeight int) {
@@ -223,7 +223,20 @@ func Start(ctx context.Context, s *Session, screen *Screen, run LineRunner, ask 
 		runner:  run,
 		ask:     ask,
 		keys:    newKeyReader(os.Stdin.Fd()),
+		group:   newGroup(),
 	}
+
+	// The window watch runs for the life of the loop and not for the life of the
+	// program, since a signal arriving after the loop has gone is a write to a
+	// frame nobody is reading.
+	defer watchWindow()()
+
+	// Leaving waits for whatever was writing to the frame before the terminal is
+	// handed back, and it has to come after the raw mode restore is deferred and
+	// before the paste mode is given up, so a turn that is still drawing gets to
+	// finish while the terminal is still its own.
+	defer l.group.Close()
+
 	return l.paintAndRead(ctx)
 }
 
@@ -240,7 +253,11 @@ type interfaceLoop struct {
 	ask     AskFunc
 	keys    *keyReader
 
-	// editor is the prompt row's field.
+	// group counts the goroutines writing to the frame, and is what leaving waits
+	// for.
+	group *group
+
+	// editor is the field on the bottom row.
 	editor Editor
 
 	// mu guards cancel, which the turn's own goroutine clears while the loop reads
@@ -287,10 +304,26 @@ func (l *interfaceLoop) paintAndRead(ctx context.Context) error {
 // and a log rewritten under them is a log they cannot scroll back through. The stack
 // is redrawn whole, since it is a fixed number of rows at the bottom.
 //
-// The scroll region is set here rather than once at entry, so a resize is absorbed by
-// the next paint rather than needing a signal of its own.
+// The size is asked for here rather than only when a resize is signalled, so a
+// terminal that reports its size by some other mechanism is still drawn correctly.
+// The signal only says there is something worth asking about sooner than the next
+// keypress.
 func (l *interfaceLoop) paint() {
 	screen := l.screen
+
+	// The size is adopted before the region is set, since the region is a function
+	// of the size and setting one with the other a resize away is a region the
+	// frame does not agree with.
+	if size := SizeOf(l.keys.fd); size.Rows >= minSize && size.Cols >= minSize {
+		screen.SetSize(size)
+	} else if resized() {
+		// A terminal that answered nothing is left at the size it is rather than
+		// given a zero, since every row cut to no width is a log of empty lines
+		// with no way to tell that from a log with nothing in it.
+		screen.SetScrollRegion(logRows(screen.Height()))
+	}
+	resized()
+
 	screen.SetScrollRegion(logRows(screen.Height()))
 
 	palette := paletteOf(l.session)
@@ -308,9 +341,10 @@ func (l *interfaceLoop) paint() {
 	state, detail := l.session.State()
 
 	DrawStack(screen, Bar{
-		Top:    RenderTop(string(state)+detailSuffix(detail), "", "", "", "", "", ""),
-		Bottom: RenderBottom(opts.Provider, opts.Model, "", string(opts.Approval)),
-		Field:  l.promptRow(),
+		Top: RenderTop(string(state)+detailSuffix(detail), "", "", "", "", "", ""),
+		Bottom: RenderBottom(l.sessionName(), opts.Mouse, false,
+			opts.Provider, opts.Model, "", string(opts.Approval)),
+		Field: l.fieldRow(),
 	}, palette)
 
 	// The twiddle is the one in-place redraw, and only while a turn is running: a
@@ -325,11 +359,18 @@ func (l *interfaceLoop) paint() {
 		clearTwiddleRow(screen)
 	}
 
-	// The cursor goes back to the prompt row on every paint rather than once at
-	// entry. The twiddle moved it a row up, a resize moved it, and a paint that
-	// ended anywhere else would leave a caret in the middle of the log.
+	// The cursor goes back to the field on every paint rather than once at entry.
+	// The twiddle moved it a row up, a resize moved it, and a paint that ended
+	// anywhere else would leave a caret in the middle of the log.
 	l.placeCaret()
 }
+
+// sessionName is what the bottom bar calls the session being typed into.
+//
+// It is the conversation until /run opens another, and the numbering starts at one
+// so that "Session 1" is the first session rather than a count of sessions before
+// it.
+func (l *interfaceLoop) sessionName() string { return "Session 1" }
 
 // twiddleWord is the word beside the figure on the twiddle row.
 //
@@ -344,7 +385,7 @@ func twiddleWord(state State) string {
 	return "working"
 }
 
-// clearTwiddleRow blanks the row above the prompt.
+// clearTwiddleRow blanks the row above the field.
 //
 // It moves up and erases rather than writing a space, since the row may hold colour
 // from the figure and a space written plainly over a coloured row leaves the colour
@@ -446,7 +487,17 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 // The turn runs on its own goroutine and the loop carries on, which is the whole point
 // of a session that holds its log rather than blocking on a reply. The reader keeps
 // typing, the twiddle moves, and escape reaches the cancel below.
+//
+// The count is raised before the goroutine starts and lowered after its answer has been
+// drawn, so a reader who leaves while a turn is in flight waits for it rather than
+// handing the terminal back with a request still writing to it. A turn refused by the
+// count never started, which is why it is a refusal rather than a silent skip.
 func (l *interfaceLoop) start(ctx context.Context, question string) {
+	if err := l.group.Add(); err != nil {
+		l.session.Notice(err.Error(), 0, RoleFailure)
+		return
+	}
+
 	turnCtx, cancel := context.WithCancel(ctx)
 
 	l.mu.Lock()
@@ -454,6 +505,11 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 	l.mu.Unlock()
 
 	go func() {
+		// The count is lowered on every path out, including a panic, since a turn
+		// that took the process down does not need the count but a reader who came
+		// back would have waited for it for ever.
+		defer l.group.Done()
+
 		err := l.ask(turnCtx, question, 0)
 
 		l.mu.Lock()
@@ -505,9 +561,9 @@ func Run(s *Session, screen *Screen) error {
 	opts := s.Options()
 	state, detail := s.State()
 	DrawStack(screen, Bar{
-		Top:    RenderTop(string(state)+detailSuffix(detail), "", "", "", "", "", ""),
-		Bottom: RenderBottom(opts.Provider, opts.Model, "", string(opts.Approval)),
-		Field:  Prompt,
+		Top: RenderTop(string(state)+detailSuffix(detail), "", "", "", "", "", ""),
+		Bottom: RenderBottom("Session 1", opts.Mouse, false,
+			opts.Provider, opts.Model, "", string(opts.Approval)),
 	}, palette)
 
 	return nil

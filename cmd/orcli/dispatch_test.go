@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
@@ -56,13 +58,13 @@ func TestTheCommandIsFoundAndRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "app.example.com") {
-		t.Errorf("the list does not carry the record:\n%s", out)
+	if !strings.Contains(out.Text, "app.example.com") {
+		t.Errorf("the list does not carry the record:\n%s", out.Text)
 	}
 }
 
 // TestALineThatIsNotACommandIsNotARefusal covers the ordinary case. A question the
-// reader wants to ask is not a command, and this build has no way to ask it.
+// reader wants to ask is not a command, and the loop is what sends it to the model.
 func TestALineThatIsNotACommandIsNotARefusal(t *testing.T) {
 	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
 
@@ -70,13 +72,31 @@ func TestALineThatIsNotACommandIsNotARefusal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a question was refused: %v", err)
 	}
-	if out != "" {
-		t.Errorf("a question produced output: %q", out)
+	if out.Text != "" || out.Ask != "" || out.Quit {
+		t.Errorf("a question produced a result: %+v", out)
+	}
+}
+
+// TestQuitIsTheOneResultThatAsksTheLoopToLeave covers the flag the loop reads, since
+// a command that returned it by accident would close the interface on a reader who
+// typed something else.
+func TestQuitIsTheOneResultThatAsksTheLoopToLeave(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	out, err := d.Run(context.Background(), "/quit")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !out.Quit {
+		t.Error("/quit did not ask the loop to leave")
+	}
+	if out.Text != "" || out.Ask != "" {
+		t.Errorf("/quit produced %+v, want only the flag", out)
 	}
 }
 
 // TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne covers the case a
-// reader meets on day one: the table names thirty commands and this build runs one.
+// reader meets on day one: the table names thirty commands and this build runs two.
 func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
 
@@ -100,12 +120,12 @@ func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 // TestAWriteIsHeldAndNotApplied covers the rule the whole confirmation exists for:
 // fetching and showing is one call, and writing is a second one the reader asks for.
 func TestAWriteIsHeldAndNotApplied(t *testing.T) {
-	writes := 0
+	var writes atomic.Int64
 	d := over(t, `{"api_key":"k","cloudflare":{"api_key":"cf-key"}}`,
 		func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost, http.MethodPatch, http.MethodDelete:
-				writes++
+				writes.Add(1)
 				w.Write([]byte(`{"success":true,"result":{"id":"rec2"}}`))
 			default:
 				w.Write([]byte(zoneBody))
@@ -117,20 +137,18 @@ func TestAWriteIsHeldAndNotApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if writes != 0 {
+	if writes.Load() != 0 {
 		t.Fatalf("the write went through before the reader confirmed it")
 	}
-	if !strings.Contains(out, "-  content: 198.51.100.7") {
-		t.Errorf("the diff does not show what would go:\n%s", out)
-	}
-	if !strings.Contains(out, "+  content: 203.0.113.42") {
-		t.Errorf("the diff does not show what would come:\n%s", out)
-	}
-	if !strings.Contains(out, "/cloudflare confirm") {
-		t.Errorf("the diff is not followed by the instruction that applies it:\n%s", out)
-	}
-	if !strings.Contains(out, "   ttl: 300") {
-		t.Errorf("an unchanged field is shown as a change:\n%s", out)
+	for _, want := range []string{
+		"-  content: 198.51.100.7",
+		"+  content: 203.0.113.42",
+		"/cloudflare confirm",
+		"   ttl: 300",
+	} {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("the reply does not carry %q:\n%s", want, out.Text)
+		}
 	}
 }
 
@@ -159,8 +177,8 @@ func TestConfirmAppliesExactlyWhatWasShown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if !strings.Contains(out, "changed") {
-		t.Errorf("the confirmation did not report the change: %q", out)
+	if !strings.Contains(out.Text, "changed") {
+		t.Errorf("the confirmation did not report the change: %q", out.Text)
 	}
 	if !strings.Contains(sent, `"content":"203.0.113.42"`) {
 		t.Errorf("what was sent was not what was shown: %s", sent)
@@ -227,8 +245,8 @@ func TestAProposalThatChangesNothingIsNotHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "nothing would change") {
-		t.Errorf("the reply is %q, want it to say nothing would change", out)
+	if !strings.Contains(out.Text, "nothing would change") {
+		t.Errorf("the reply is %q, want it to say nothing would change", out.Text)
 	}
 	if d.pending != nil {
 		t.Error("a change that would change nothing was held for confirmation")
@@ -247,8 +265,8 @@ func TestACreationWhereTheRecordIsThereIsNotHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "nothing to add") {
-		t.Errorf("the reply is %q, want it to say there is nothing to add", out)
+	if !strings.Contains(out.Text, "nothing to add") {
+		t.Errorf("the reply is %q, want it to say there is nothing to add", out.Text)
 	}
 	if d.pending != nil {
 		t.Error("a duplicate creation was held for confirmation")
@@ -267,8 +285,8 @@ func TestARemovalOfNothingIsNotHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "nothing to delete") {
-		t.Errorf("the reply is %q, want it to say there is nothing to delete", out)
+	if !strings.Contains(out.Text, "nothing to delete") {
+		t.Errorf("the reply is %q, want it to say there is nothing to delete", out.Text)
 	}
 	if d.pending != nil {
 		t.Error("a deletion of nothing was held for confirmation")
@@ -304,16 +322,108 @@ func TestASecondProposalReplacesTheFirst(t *testing.T) {
 	}
 }
 
-// TestNoCredentialIsNamedRatherThanSilent covers the ordinary first-run state.
-func TestNoCredentialIsNamedRatherThanSilent(t *testing.T) {
-	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+// TestNoProviderMakesNoRequest covers the first-run state, and it is the test the
+// old one got wrong.
+//
+// The old test asserted that a call with no key reported an error naming cloudflare,
+// and passed for the wrong reason: its fixture returned an empty body, so the call was
+// made, the body failed to decode, and the decode failure happened to contain the word
+// cloudflare. Give that fixture a well-formed body and it would still have passed
+// with the request going out and no credential on it.
+//
+// So this one counts the requests. A provider that is not set up makes none at all,
+// which is the whole of the rule: there is nothing to authenticate with, and a request
+// without a key is one a third party records as a failed attempt against the reader's
+// address.
+func TestNoProviderMakesNoRequest(t *testing.T) {
+	var requests atomic.Int64
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Write([]byte(zoneBody))
+	})
 
-	_, err := d.Run(context.Background(), "/cloudflare dns list --zone example.com")
-	if err == nil {
-		t.Fatal("a call with no credential was made anyway")
+	out, err := d.Run(context.Background(), "/cloudflare dns list --zone example.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cloudflare") {
-		t.Errorf("the refusal is %q, want it to say which block is missing", err)
+
+	if got := requests.Load(); got != 0 {
+		t.Errorf("%d requests were made with no provider set up, want 0", got)
+	}
+	if out.Ask == "" && out.Text == "" {
+		t.Error("the reader was told nothing: a command that produces no result and " +
+			"no reply is one they cannot act on")
+	}
+}
+
+// TestNoProviderAsksTheModel covers the preference for a model over carried text,
+// since the configuration syntax can change and this binary cannot follow it.
+func TestNoProviderAsksTheModel(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.canAsk = func() bool { return true }
+
+	out, err := d.Run(context.Background(), "/cloudflare dns list --zone example.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Ask == "" {
+		t.Fatal("no question was sent to the model")
+	}
+
+	// The question is written into the log as a row before the answer arrives, so a
+	// question phrased for a model has to be worth a reader reading. What it has to
+	// say is the fact it is certain of and what it wants asked, since the detail is
+	// exactly what it is asking the model for.
+	for _, want := range []string{"cloudflare", "configuration file", "Tell me"} {
+		if !strings.Contains(out.Ask, want) {
+			t.Errorf("the question does not mention %q, so a reader reading it learns "+
+				"nothing:\n%s", want, out.Ask)
+		}
+	}
+}
+
+// TestNoProviderFallsBackWhenThereIsNoModel covers the case the fallback exists for.
+// A reader with no credential and no model cannot be answered by a model, and the
+// command must still produce a result rather than nothing.
+func TestNoProviderFallsBackWhenThereIsNoModel(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.canAsk = func() bool { return false }
+
+	out, err := d.Run(context.Background(), "/cloudflare dns list --zone example.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Ask != "" {
+		t.Error("a question was sent to a model that cannot answer")
+	}
+	if !strings.Contains(out.Text, "cloudflare") {
+		t.Errorf("the fallback does not name the block:\n%s", out.Text)
+	}
+}
+
+// credentialShaped is what a real key looks like in this client's own words: the
+// OpenRouter prefix followed by something, or a Cloudflare token of the length one
+// carries.
+//
+// The test is against the shape and not against one fixture, since a check for one
+// literal string is a check a writer satisfies by changing the literal.
+var credentialShaped = regexp.MustCompile(`sk-or-v1-[A-Za-z0-9_-]{8,}|cf-[A-Za-z0-9_-]{16,}`)
+
+// TestTheGuidanceCarriesNoCredential is the rule the whole shape rests on. A string in
+// a binary that looks like a key is a string a reader might paste somewhere, and a
+// placeholder cannot be.
+func TestTheGuidanceCarriesNoCredential(t *testing.T) {
+	for _, s := range []string{cloudflareAskFallback, cloudflareAsk} {
+		if m := credentialShaped.FindString(s); m != "" {
+			t.Errorf("the guidance carries a credential-shaped string %q", m)
+		}
+	}
+
+	// The fallback shows the shape, so it has to show it with something that cannot
+	// be a key in it. An ellipsis after a prefix is not a key, but a reader pasting
+	// it is pasting nothing, which is the point.
+	if !strings.Contains(cloudflareAskFallback, "YOUR-CLOUDFLARE-API-KEY") {
+		t.Error("the fallback does not show the shape with a placeholder key")
 	}
 }
 
@@ -331,8 +441,8 @@ func TestTheCredentialIsNeverInTheOutput(t *testing.T) {
 	if err != nil && strings.Contains(err.Error(), key) {
 		t.Errorf("the credential is in the error: %q", err)
 	}
-	if strings.Contains(out, key) {
-		t.Errorf("the credential is in the output: %q", out)
+	if strings.Contains(out.Text, key) {
+		t.Errorf("the credential is in the output: %q", out.Text)
 	}
 }
 
@@ -363,8 +473,8 @@ func TestAnEmptyZoneIsReportedAsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "no records") {
-		t.Errorf("the reply is %q, want it to say the zone has none", out)
+	if !strings.Contains(out.Text, "no records") {
+		t.Errorf("the reply is %q, want it to say the zone has none", out.Text)
 	}
 }
 
@@ -379,12 +489,12 @@ func TestTheUsageNamesWhatIsBuilt(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	for _, want := range []string{"dns list", "dns add", "/cloudflare confirm"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the usage does not carry %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("the usage does not carry %q:\n%s", want, out.Text)
 		}
 	}
-	if !strings.Contains(out, "not built yet") {
-		t.Errorf("the usage does not say which of the five are built:\n%s", out)
+	if !strings.Contains(out.Text, "not built yet") {
+		t.Errorf("the usage does not say which of the five are built:\n%s", out.Text)
 	}
 }
 

@@ -1,24 +1,31 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+)
 
-// The footer stack, drawn at the bottom of the screen in seven fixed rows with the
+// The footer stack, drawn at the bottom of the screen in nine fixed rows with the
 // log filling everything above it.
 //
 // The order is the one the reader settled, from the bottom of the screen upward: a
-// blank row, a separator, the bottom bar, the top bar, a separator, the prompt, and
-// the twiddle row. Everything above the twiddle row is the output area.
+// blank row, a separator, the bottom bar, the top bar, a separator, the field, the
+// twiddle, the active row, and the task row. Everything above the twiddle row is
+// the output area.
 //
 // The two bars are named by where they sit rather than by what they carry. The top
 // bar is nearer the log and holds what changes second by second; the bottom bar is
-// nearer the bottom of the screen and holds what is settled. Both drop whole fields
-// from the right when they will not fit, so the field order is the order of loss: the
-// fields on the top bar that survive longest are the ones a reader watches while a
-// turn runs.
+// nearer the bottom of the screen and holds what is settled, along with the session
+// and the two capture modes. Both drop whole entries from the right when they will
+// not fit, so the order they are given in is the order of loss.
 //
-// There is no hint row. The merged frame carried one, drawn blank with a comment
-// saying its contents were undecided, and this layout has no row for it. A row with a
-// comment about a gap in it is worse than no row.
+// The prompt is gone. There was a `root@localhost $ ` at the head of the field and it
+// is not in this layout, so the field carries only what has been typed and both it
+// and the twiddle sit at column five. A reader is typing at a known place on the
+// bottom row of the screen and does not need to be told which account they are.
+//
+// All nine rows are drawn whether or not anything is running. A footer that grows
+// when a turn starts is a footer that moves the field under the reader's hands, and
+// the one thing this frame is for is that the reader's place in it does not move.
 
 // rule is the horizontal rule between the stack's rows.
 //
@@ -26,14 +33,19 @@ import "strings"
 // a hyphen at the width of a rule leaves a visible notch every other character row.
 const rule = "─"
 
-// Prompt is what the reader's line is drawn behind.
-const Prompt = "root@localhost $ "
+// Prompt is gone.
+//
+// It is named only so a reader of this file can see that the layout is a change and
+// not an omission, and so nothing else reaches for it.
+const Prompt = ""
+
+// FieldIndent is how far in the field and the twiddle sit.
+//
+// Five columns, so the figure and the text beside it have the same left edge and a
+// reader's eye does not jump between rows to follow them.
+const FieldIndent = 5
 
 // escapeMoveUp moves the cursor up a row.
-//
-// It is a bare move with no erase of the rows it passed over, since the row it lands on
-// is cleared by whatever writes next: the twiddle clears its own, and a paint rewrites
-// the stack whole.
 const escapeMoveUp = "\x1b[1A"
 
 // escapeEraseLine clears the row the cursor is on.
@@ -43,35 +55,18 @@ const escapeMoveUp = "\x1b[1A"
 // a smear rather than a turn.
 const escapeEraseLine = "\x1b[2K"
 
-// stackHeight is how many rows the stack occupies on a terminal tall enough.
+// stackRows is how many rows the stack occupies, smallest first.
 //
-// The seven come from the layout the reader settled, from the bottom of the screen
-// upward: a blank row, a separator, the bottom bar, the top bar, a separator, the
-// prompt, and the twiddle row. Everything above the twiddle row is the log.
-//
-// It is a named constant rather than a figure at each use because the scroll region,
-// the short-terminal behaviour and the painter all have to agree about it, and three
-// places that each count the rows is three places that can disagree.
-const stackHeight = 7
-
-// stackRows is how many rows the stack occupies.
-//
-// It is as many of the seven as the terminal has room for, and not a ladder. A ladder
-// decides which rows are shed in which order, and that order is not settled, so
-// returning one row for a short terminal would be claiming a decision this does not
-// have: a three row terminal would be left with the bottom row, which is the blank one
-// at the bottom of the screen, and a reader who cannot see the prompt cannot type.
-//
-// What is settled is the count at full height and that the prompt survives, and this
-// returns exactly that much. The ladder is the unit that decides the rest.
+// The smallest is what a short terminal is left with: the field and nothing else, since a
+// reader who cannot type cannot use the interface and everything above it is a luxury.
+// Which of the nine rows are shed, and in what order, is not settled. What is settled
+// is the count, and this returns it for a terminal tall enough to hold the whole thing.
 func stackRows(height int) int {
 	switch {
-	case height >= stackHeight:
-		return stackHeight
-	case height < 1:
-		return 1
+	case height >= 9:
+		return 9
 	default:
-		return height
+		return 1
 	}
 }
 
@@ -95,13 +90,24 @@ type Bar struct {
 	// Credits.
 	Top string
 
-	// Bottom is the bottom bar, nearer the bottom of the screen: Provider, Model,
-	// Verbosity, Approval.
+	// Bottom is the bottom bar, nearer the bottom of the screen: Session, [Mouse],
+	// [Copy], Provider, Model, Approval, Verbosity.
 	Bottom string
 
-	// Field is the prompt row's text, drawn behind the editor's own field rather
-	// than beside it, since the editor holds what the reader typed and not the prompt.
+	// Field is the reader's own line, drawn at column five with no prompt in front of
+	// it.
 	Field string
+
+	// Twiddle is the figure and its state word, empty when idle.
+	Twiddle string
+
+	// Active is the row reporting what this session is doing, and is drawn whether or
+	// not that is idle.
+	Active string
+
+	// Tasks is the row reporting how many tasks are running and what the newest is
+	// doing.
+	Tasks string
 }
 
 // DrawLog writes rows downward into the normal screen buffer.
@@ -195,9 +201,6 @@ func spanBounds(span Span, length int) (int, int) {
 // fixed number of rows and rewriting all of it is cheaper than tracking which field
 // changed. The log above it is never touched, which is what lets a reader scroll back
 // through it.
-//
-// The prompt row carries the editor's field rather than the bare prompt, so the painter
-// and the editor are not two things writing one row.
 func DrawStack(w *Screen, bar Bar, palette Palette) {
 	height := w.Height()
 	if height < 1 {
@@ -207,10 +210,10 @@ func DrawStack(w *Screen, bar Bar, palette Palette) {
 	rows := stackRows(height)
 	lines := stackLines(bar, palette)
 
-	// A terminal too short for the whole stack keeps the bottom of it, since the prompt
+	// A terminal too short for the whole stack keeps the bottom of it, since the field
 	// is near the bottom and a reader who cannot see it cannot type.
 	if rows < len(lines) {
-		lines = lines[len(lines)-rows:]
+		lines = lines[:rows]
 	}
 
 	for _, line := range lines {
@@ -220,16 +223,27 @@ func DrawStack(w *Screen, bar Bar, palette Palette) {
 
 // stackLines renders the stack as rows, bottom of the screen last.
 //
-// It is a function rather than a value so the caller asks for the stack when it is
-// drawing rather than holding a value that goes stale when a figure changes.
+// stackLines renders the stack as rows, in screen order.
+//
+// The first row returned is the top of the stack and the last is the bottom of the
+// screen, because DrawStack writes downward and the terminal puts the first line it
+// receives where the cursor is. The blank row is therefore last, since it is the bottom
+// row of the screen.
+//
+// The approved render reads, from the bottom of the screen upward: a blank row, a
+// separator, the bottom bar, the top bar, a separator, the field, the twiddle, the active
+// row, and the task row. Writing that order as written would put the blank row at the top
+// and the task row at the bottom, which is the frame upside down.
 func stackLines(bar Bar, palette Palette) []string {
 	return []string{
-		"",
+		chromeLine(palette, indent(bar.Tasks)),
+		chromeLine(palette, indent(bar.Active)),
+		chromeLine(palette, indent(bar.Twiddle)),
+		chromeLine(palette, indent(bar.Field)),
 		rule,
-		chromeLine(palette, bar.Bottom),
 		chromeLine(palette, bar.Top),
+		chromeLine(palette, bar.Bottom),
 		rule,
-		chromeLine(palette, bar.Field),
 		"",
 	}
 }
@@ -249,9 +263,9 @@ func chromeLine(p Palette, line string) string {
 // DrawTwiddle writes the twiddle row in place.
 //
 // It is the only thing in the frame that redraws rather than appends, so it moves the
-// cursor up one row to the row directly above the prompt, which is where the twiddle
-// row is in this layout, and writes there. Every other row is written once and left
-// alone, which is what makes the reader's own scrollback the transcript.
+// cursor up one row to the row directly above the field, which is where the twiddle row
+// is in this layout, and writes there. Every other row is written once and left alone,
+// which is what makes the reader's own scrollback the transcript.
 //
 // The step rather than the time is the caller's, since the session owns when a frame is
 // due and a function that read the clock itself would be a second thing that has to agree
@@ -264,7 +278,7 @@ func DrawTwiddle(w *Screen, palette Palette, step int, state string) {
 		return
 	}
 	w.Write(escapeMoveUp + escapeEraseLine)
-	w.Write(TwiddleHue(step) + Twiddle(step) + "  " + state + palette.Reset())
+	w.Write(indent(TwiddleHue(step)+Twiddle(step)+"  "+state) + palette.Reset())
 }
 
 // Field is one bar field, a name and a figure.
@@ -305,78 +319,4 @@ func joinWithin(parts []string, sep string, width int) string {
 		parts = parts[:len(parts)-1]
 	}
 	return strings.Join(parts, sep)
-}
-
-// RenderTop renders the top bar, the one nearer the log.
-//
-// The field order is the order of loss, and it is the reverse of what the merged frame
-// did with Status: the fields that change second by second are the ones that survive a
-// narrow bar longest, and Status is last to go for exactly that reason. Context, In,
-// Out, Cost and Credits are carried by nothing yet, so they render as a dash until a
-// caller has a figure for them.
-func RenderTop(status, reasoning, contextUsed, in, out, cost, credits string) string {
-	return RenderBar([]Field{
-		{Name: "Status", Value: status},
-		{Name: "Reasoning", Value: reasoning},
-		{Name: "Context", Value: contextUsed},
-		{Name: "In", Value: in},
-		{Name: "Out", Value: out},
-		{Name: "Cost", Value: cost},
-		{Name: "Credits", Value: credits},
-	}, 0)
-}
-
-// RenderBottom renders the bottom bar, the one nearer the bottom of the screen.
-//
-// The order of loss is Verbosity, Approval, Model, Provider. Approval is ahead of
-// Verbosity for the reason it was moved there: it says whether programs run without
-// asking, and it is not the first thing a narrow bar should lose.
-func RenderBottom(provider, model, verbosity, approval string) string {
-	return RenderBar([]Field{
-		{Name: "Provider", Value: provider},
-		{Name: "Model", Value: model},
-		{Name: "Verbosity", Value: verbosity},
-		{Name: "Approval", Value: approval},
-	}, 0)
-}
-
-// RenderProvider renders the bottom bar from the figures a session reports.
-//
-// It is kept as a name a caller already uses, and it renders the bottom bar rather than
-// the bar the merged frame called Provider: the bar nearest the bottom of the screen is
-// the one that names the provider, and the field order on it is the one the reader
-// settled.
-func RenderProvider(provider, model, verbosity, approval string) string {
-	return RenderBottom(provider, model, verbosity, approval)
-}
-
-// RenderStatus renders the top bar from the figures a session reports.
-//
-// The state carries the detail as a note beside it rather than as a fifth field, since
-// a bar that grows a comma is a bar no reader can scan.
-func RenderStatus(status, reasoning, contextUsed, in, out, cost, credits string) string {
-	return RenderTop(status, reasoning, contextUsed, in, out, cost, credits)
-}
-
-// detailSuffix renders the note beside a state.
-//
-// It is a parenthesised note rather than a fifth field, since a bar that grows a comma is
-// a bar no reader can scan, and a state spelled `paused, buffered 12` is a state rather
-// than a state and a note.
-func detailSuffix(detail string) string {
-	if detail == "" {
-		return ""
-	}
-	return " (" + detail + ")"
-}
-
-// orNone renders an empty string as a dash.
-//
-// A field with no value is a dash rather than nothing, so the bar holds its shape as
-// values arrive and a reader scanning it is not reading a row whose columns move.
-func orNone(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

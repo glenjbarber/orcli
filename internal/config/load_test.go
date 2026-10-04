@@ -40,7 +40,7 @@ func TestParseReadsEveryNamedField(t *testing.T) {
 		"color": true,
 		"verbosity": 3,
 		"approval": "allow",
-		"OPENROUTER_TRUSTED": ["/home/a/project", "/home/a/other"]
+		"ORCLI_TRUSTED": ["/home/a/project", "/home/a/other"]
 	}`, FileMode)
 
 	cfg, err := Parse([]byte(`{
@@ -52,7 +52,7 @@ func TestParseReadsEveryNamedField(t *testing.T) {
 		"color": true,
 		"verbosity": 3,
 		"approval": "allow",
-		"OPENROUTER_TRUSTED": ["/home/a/project", "/home/a/other"]
+		"ORCLI_TRUSTED": ["/home/a/project", "/home/a/other"]
 	}`), path)
 	if err != nil {
 		t.Fatalf("Parse returned %v, want nil", err)
@@ -103,10 +103,10 @@ func TestParseIgnoresUnknownKeys(t *testing.T) {
 // A reader who wrote `"model": null` meant no model, not a broken file.
 func TestParseTreatsNullAsAbsent(t *testing.T) {
 	path := write(t, t.TempDir(), "orcli.json",
-		`{"api_key":"k","model":null,"color":null,"OPENROUTER_TRUSTED":null}`, FileMode)
+		`{"api_key":"k","model":null,"color":null,"ORCLI_TRUSTED":null}`, FileMode)
 
 	cfg, err := Parse([]byte(
-		`{"api_key":"k","model":null,"color":null,"OPENROUTER_TRUSTED":null}`), path)
+		`{"api_key":"k","model":null,"color":null,"ORCLI_TRUSTED":null}`), path)
 	if err != nil {
 		t.Fatalf("Parse returned %v, want nil", err)
 	}
@@ -257,8 +257,8 @@ func TestParseRefusesAWronglyTypedField(t *testing.T) {
 	for _, body := range []string{
 		`{"api_key":"k","color":"yes"}`,
 		`{"api_key":"k","verbosity":"not a number"}`,
-		`{"api_key":"k","OPENROUTER_TRUSTED":"a string"}`,
-		`{"api_key":"k","OPENROUTER_TRUSTED":[1,2]}`,
+		`{"api_key":"k","ORCLI_TRUSTED":"a string"}`,
+		`{"api_key":"k","ORCLI_TRUSTED":[1,2]}`,
 		`{"api_key":123}`,
 	} {
 		path := write(t, t.TempDir(), "orcli.json", body, FileMode)
