@@ -46,3 +46,12 @@ func fileIsTerminal(stream any) bool {
 // reader who piped this on purpose needs to be told that was the problem and not
 // that the program is broken.
 var ErrNoTerminal = errors.New("stdin and stdout must both be terminals")
+
+// ErrNoSize reports a terminal that answered a size query with nothing.
+//
+// SizeOf returns a zero WindowSize rather than a figure it made up, since a size
+// that reads as zero is not a size. A caller that drew a frame into it would be
+// drawing rows nobody can see, and a reader would see a program that appeared to
+// do nothing. The error is named here rather than built by each caller so the
+// message says the same thing wherever the query came up empty.
+var ErrNoSize = errors.New("the terminal reported no size")

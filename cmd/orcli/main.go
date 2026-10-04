@@ -3,7 +3,7 @@
 // The order of run is the startup contract, and it is the order DESIGN.md sets
 // out: parse the flags, read the bootstrap document if one was named, install the
 // default configuration, load it, settle the approval mode, resolve the working
-// directory, ask about that directory, and report.
+// directory, ask about that directory, open the frame, and report.
 //
 // stdin, stdout and stderr are parameters rather than the process streams, so the
 // whole of startup is testable without a terminal. A test that needs a terminal to
@@ -34,6 +34,30 @@ var version = "0.0.0-dev"
 // in one place rather than spread through run. See ensureTrusted for what it does
 // and writeTrust for how an answer is recorded.
 var gate = ensureTrusted
+
+// draw is the frame being opened, as a variable rather than a call.
+//
+// It is the same seam as gate, for the same reason and with the same cost: opening
+// the frame is a call into a terminal, and a test that cannot stand in for it is a
+// test that can only run on a machine with a terminal attached. Naming the call
+// here keeps the wiring visible and lets a test draw into a buffer.
+//
+// See openFrame for why the frame is opened only when the streams are terminals and
+// the terminal reported a size.
+var draw = openFrame
+
+// tuiStreamsAreTerminal is the terminal check, as a variable rather than a call.
+//
+// It is a seam for the same reason draw is one, and it is a second seam rather than
+// a folding of the first because the two answer different questions: this one asks
+// whether the streams are terminals at all, and openFrame asks whether there is a
+// descriptor and a size to draw on. A test that stood in for both would not be
+// testing that the frame is opened when the reader is at a terminal, since the whole
+// condition would be the stand-in.
+//
+// The real check is a termios read in internal/tui, and it is what runs outside a
+// test.
+var tuiStreamsAreTerminal = tui.StreamsAreTerminal
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -147,19 +171,28 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// behalf and this directory is not theirs.
 	s.HasTools = gate(workDir, cfg, stdin, stdout, stderr)
 
-	// The check is kept because it is why a redirected run behaves differently, and
-	// a reader who redirects this program deserves to be told rather than handed
-	// escape sequences in their pipe. It is the real termios read rather than a
-	// stub, since a stub that always says no tells a reader at a terminal that
-	// their terminal is not one.
-	if !tui.StreamsAreTerminal(stdin, stdout) {
+	// The frame is opened here, between the trust question and the report, so the
+	// directory the reader just answered about is the one the session carries.
+	//
+	// A redirected run is told why rather than drawn on. The interface writes escape
+	// sequences, and a reader who piped this on purpose would get noise in their
+	// pipe rather than a transcript. The check is a real termios read rather than a
+	// stub, since a stub that always says no tells a reader at a terminal that their
+	// terminal is not one.
+	if tuiStreamsAreTerminal(stdin, stdout) {
+		if err := draw(s.tuiSession(), stdout); err != nil {
+			return err
+		}
+		fmt.Fprintln(stderr,
+			"The frame is drawn. Nothing reads keys yet, so the log is all there is.")
+	} else {
 		fmt.Fprintf(stderr, "orcli: %v\n", tui.ErrNoTerminal)
 	}
 
 	printSession(stdout, s)
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout,
-		"The interface is not built yet. internal/tui holds the log and nothing else.")
+		"The interface is not built yet. Nothing reads keys and no turn is sent.")
 	return nil
 }
 
@@ -176,6 +209,74 @@ type session struct {
 	Color      bool
 	Bootstrap  string
 	WorkingDir string
+}
+
+// tuiSession builds the interface's own session from what startup resolved.
+//
+// The translation is here rather than in internal/tui because the interface does
+// not read a configuration file: it takes an Options value, and something has to
+// decide what the answers to the startup questions become. Keeping it in main is
+// what lets the interface take a value instead of reaching back for a file that
+// holds a credential.
+//
+// The approval mode is converted rather than cast. They are two types that spell the
+// same three modes, and a cast would let a future fourth through as an empty string
+// the bars would print as a blank field.
+//
+// Cognito is not carried across, since the marker is a file beside the configuration
+// rather than a member of it, and there is no field on Config to copy from. Nothing
+// reads the marker yet, so the mode arrives as off rather than as a decision the
+// reader did not make.
+func (s session) tuiSession() *tui.Session {
+	opts := tui.Options{
+		APIKey:     s.Config.APIKey,
+		Model:      s.Config.Model,
+		Provider:   s.Config.Provider,
+		Approval:   tuiApproval(s.Approval),
+		WorkingDir: s.WorkingDir,
+		Color:      s.Color,
+		Bell:       s.Bell,
+		Mouse:      s.Mouse,
+	}
+	return tui.New(opts)
+}
+
+// tuiApproval converts one approval mode to the other.
+//
+// The mapping is total over the three modes and empty over anything else, so a mode
+// this build has not heard of arrives at the interface as ask rather than as a blank
+// field. Ask is the mode that still asks, which is the right thing to fall back to
+// when this program does not know what it was told.
+func tuiApproval(mode config.Approval) tui.Approval {
+	switch mode {
+	case config.ApprovalAllow:
+		return tui.ApprovalAllow
+	case config.ApprovalDeny:
+		return tui.ApprovalDeny
+	default:
+		return tui.ApprovalAsk
+	}
+}
+
+// openFrame draws the log and the footer stack onto a terminal.
+//
+// The size is read here rather than inside internal/tui because the descriptor is the
+// caller's: this is the program that opened stdout, so this is the program that can
+// name it. A terminal that reports no size is reported rather than drawn into, since
+// every row would be cut to no width and the reader would see a screen of empty lines
+// and no way to tell that from a log with nothing in it.
+func openFrame(s *tui.Session, stdout io.Writer) error {
+	out, ok := stdout.(*os.File)
+	if !ok {
+		return tui.ErrNoTerminal
+	}
+
+	size := tui.SizeOf(out.Fd())
+	if size.Rows < 1 || size.Cols < 1 {
+		return fmt.Errorf("read the terminal size: %w", tui.ErrNoSize)
+	}
+
+	return tui.Run(s, tui.NewScreen(out, size))
 }
 
 // printSession reports a session as plain text.
