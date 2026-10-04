@@ -1,0 +1,91 @@
+Module: 0
+Worker ID: 0
+Merged: started
+Status: paste folds for display, the remainder is expanded by a command
+
+# Decision: a long paste is folded for display and expanded by a command
+
+Chosen at the reader's request, over writing the paste into the log as rows above
+the prompt and over refusing a paste too long to show.
+
+## The choice
+
+A paste containing one or more newlines is **one prompt**, with the newlines
+embedded in it rather than each line becoming its own submission. A paste too long
+to show is folded for display and **the full content is sent unchanged**.
+
+The prompt row carries the folded head plus a count of what is held, and a command
+expands the remainder into the log, where the reader can read it and select it. The
+prompt row stays quiet and the log is left for the conversation rather than for
+what was typed.
+
+## Why a count and a command over the log
+
+The log is the transcript of a session, and a paste is something the reader typed
+rather than something that was said to them. Filling it with text the reader just
+pasted puts a reader who scrolls back through a session reading their own input
+again, and it is the one thing in the log that is not part of the conversation.
+
+Writing it into the log as rows above the prompt would have needed nothing new,
+which was the reason to prefer it. It is not the right one, since the same reader
+scrolling back is the one who would read those rows, and the prompt row is where a
+reader looks when they want to see what they are about to send.
+
+The command is what makes the remainder reviewable, since the head alone would
+show a reader who pasted something long and unexpected a head and a count with
+nothing between them. The command shows the remainder in the log at the reader's
+request, and nothing about the prompt row changes when it runs.
+
+A refusal would have been the third shape, and it is wrong for the reason
+`AGENTS.md` holds: a call always produces a result. A paste the reader asked for
+refused because it is long would be a refusal of work they asked for, on a ground
+that has nothing to do with whether the paste is safe.
+
+## What this settles for the input unit
+
+- Bracketed paste is turned on when the interface starts and off when it exits,
+  since there is no screen any more to bracket it. The mode belongs to the
+  terminal, so the exit is what the ordering protects.
+- A paste with newlines is one prompt, not several submissions.
+- A paste too long for the prompt row is folded, and the head plus a count is what
+  the prompt row carries.
+
+## Folded, not cut
+
+A line longer than the terminal is **folded at a column**, not cut from the tail.
+The reader sees the whole line at their terminal width and selects it without wrap
+columns coming along.
+
+This is settled now rather than left to the unit that adds the command, since it
+is a change to how every row reaches the log rather than a decision about one
+command. A pasted line of code is what a reader pastes, and it is what they need
+to select and copy whole; a row cut from the tail loses the end of a line that was
+never too long to be shown, and a row hard-wrapped at the width leaves the wrap
+columns in the selection.
+
+The measurement already exists in `internal/tui/width.go`, which counts display
+columns and handles East Asian wide characters and combining marks, so folding
+uses it rather than counting bytes.
+
+## What this does not change
+
+`CutColumnFromEnd` stays. It is what keeps the log and the screen agreeing about
+what was said, and a model reply that runs past the terminal is still cut rather
+than folded, since a fold would rewrite a reply into several rows and a reader
+reading the log would see a sentence that was never written that way.
+
+The fold applies to what the reader is about to send: a pasted line, and the
+remainder the expanding command writes. It does not apply to the transcript.
+
+## The command
+
+The command that expands the remainder is its own unit, since a reader who pasted
+something long needs it only when they pasted something long, and building it with
+the input unit makes a unit whose subject is input carry a command the interface
+cannot use without input. Its name is not settled.
+
+## Unverified
+
+Nothing here was run against a terminal. Whether the folded head and count read
+correctly on a real prompt row is not settled by a test, and whether a folded
+remainder selects cleanly is not either.

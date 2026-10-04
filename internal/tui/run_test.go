@@ -234,14 +234,59 @@ func TestASpanPastTheCutIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheStackHoldsThePromptAtTheBottom covers the order. The prompt is the last row, since
-// a reader who cannot see it cannot type, and the log ends above the stack.
-func TestTheStackHoldsThePromptAtTheBottom(t *testing.T) {
+// TestTheStackIsSevenRows is the layout the reader settled, from the bottom of the screen
+// upward: a blank row, a separator, the bottom bar, the top bar, a separator, the prompt,
+// and the twiddle row. There is no hint row.
+func TestTheStackIsSevenRows(t *testing.T) {
 	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{Provider: "Provider: - | Model: -"}, plainPalette())
 
-	if got := out.String(); !strings.HasSuffix(got, Prompt+"\r\n") {
-		t.Errorf("the prompt is not the last row of the stack: %q", got)
+	DrawStack(screen, Bar{
+		Top:    "Status: idle",
+		Bottom: "Provider: openrouter.ai",
+		Field:  Prompt,
+	}, plainPalette())
+
+	lines := stackRowsOnly(out.String())
+	if got, want := len(lines), 7; got != want {
+		t.Fatalf("the stack is %d rows, want %d:\n%s", got, want, out.String())
+	}
+
+	if lines[0] != "" {
+		t.Errorf("the bottom row is %q, want it blank", lines[0])
+	}
+	if lines[1] != rule {
+		t.Errorf("the second row from the bottom is %q, want a separator", lines[1])
+	}
+	if !strings.Contains(lines[2], "Provider:") {
+		t.Errorf("the bottom bar is not third from the bottom: %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "Status:") {
+		t.Errorf("the top bar is not fourth from the bottom: %q", lines[3])
+	}
+	if lines[4] != rule {
+		t.Errorf("the fifth row from the bottom is %q, want a separator", lines[4])
+	}
+	if lines[5] != Prompt {
+		t.Errorf("the prompt is not sixth from the bottom: %q", lines[5])
+	}
+	if lines[6] != "" {
+		t.Errorf("the twiddle row is %q, want it blank when idle", lines[6])
+	}
+}
+
+// TestThePromptIsNotTheLastRow covers the same layout from the other side. The reader
+// settled the order from the bottom of the screen up, and the prompt being the last row is
+// the reading the first draft of this got wrong.
+func TestThePromptIsNotTheLastRow(t *testing.T) {
+	screen, out := drawnAt(24, 80)
+	DrawStack(screen, Bar{Field: Prompt}, plainPalette())
+
+	lines := stackRowsOnly(out.String())
+	if len(lines) < 7 {
+		t.Fatalf("the stack has %d rows, want 7", len(lines))
+	}
+	if strings.HasSuffix(out.String(), Prompt+"\r\n") {
+		t.Errorf("the prompt is the last row of the stack:\n%s", out.String())
 	}
 }
 
@@ -249,12 +294,12 @@ func TestTheStackHoldsThePromptAtTheBottom(t *testing.T) {
 // region has to end where the stack begins, or the first row written scrolls the prompt
 // off the screen.
 //
-// Twenty-four rows with a nine row stack leaves fifteen for the log.
+// Forty rows with a seven row stack leaves thirty-three for the log.
 func TestTheScrollRegionEndsAboveTheStack(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	screen.SetScrollRegion(logRows(24))
+	screen, out := drawnAt(40, 80)
+	screen.SetScrollRegion(logRows(40))
 
-	if got, want := out.String(), "\x1b[1;15r"; got != want {
+	if got, want := out.String(), "\x1b[1;33r"; got != want {
 		t.Errorf("the scroll region is %q, want %q", got, want)
 	}
 }
@@ -262,22 +307,20 @@ func TestTheScrollRegionEndsAboveTheStack(t *testing.T) {
 // TestTheScrollRegionFollowsAResize covers the recomputation. A region left at the old
 // size clips the log to a height the screen no longer has, which is a log that stops
 // growing with no way to see why.
-//
-// Twelve rows still takes the nine row stack, so the log takes the three above it.
 func TestTheScrollRegionFollowsAResize(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	screen.SetSize(WindowSize{Rows: 12, Cols: 80})
+	screen, out := drawnAt(40, 80)
+	screen.SetSize(WindowSize{Rows: 20, Cols: 80})
 
-	if got, want := out.String(), "\x1b[1;3r"; !strings.HasSuffix(got, want) {
+	if got, want := out.String(), "\x1b[1;13r"; !strings.HasSuffix(got, want) {
 		t.Errorf("after a resize the region is %q, want it to end with %q", got, want)
 	}
 }
 
-// TestAShortTerminalKeepsThePrompt covers the replacement for the degradation ladder that
-// went with the frame. The prompt is held to the end; everything else goes first.
+// TestAShortTerminalKeepsThePrompt covers the one thing the ladder has to guarantee. The
+// prompt is held to the end; everything else goes first.
 func TestAShortTerminalKeepsThePrompt(t *testing.T) {
 	screen, out := drawnAt(3, 80)
-	DrawStack(screen, Bar{Provider: "Provider: -"}, plainPalette())
+	DrawStack(screen, Bar{Bottom: "Provider: -", Field: Prompt}, plainPalette())
 
 	got := out.String()
 	if !strings.Contains(got, Prompt) {
@@ -293,7 +336,7 @@ func TestAShortTerminalKeepsThePrompt(t *testing.T) {
 // drawn over the last one leaves a smear rather than a turn.
 func TestTheTwiddleMovesInPlace(t *testing.T) {
 	screen, out := drawnAt(24, 80)
-	DrawTwiddle(screen, plainPalette(), 0)
+	DrawTwiddle(screen, plainPalette(), 0, "thinking")
 
 	got := out.String()
 	if !strings.Contains(got, escapeMoveUp) {
@@ -304,6 +347,30 @@ func TestTheTwiddleMovesInPlace(t *testing.T) {
 	}
 	if !strings.Contains(got, Twiddle(0)) {
 		t.Errorf("the figure was not written: %q", got)
+	}
+}
+
+// TestTheTwiddleCarriesTheStateWord covers the second half of the twiddle row. The word is
+// a visual echo of the Status field on the top bar, so a reader watching the figure knows
+// what it is reporting without a second thing to learn.
+func TestTheTwiddleCarriesTheStateWord(t *testing.T) {
+	screen, out := drawnAt(24, 80)
+	DrawTwiddle(screen, plainPalette(), 0, "thinking")
+
+	if got := out.String(); !strings.Contains(got, "  thinking") {
+		t.Errorf("the state word is not beside the figure: %q", got)
+	}
+}
+
+// TestTheTwiddleWritesNothingWhenIdle covers the blank row. A figure that is not moving is
+// a figure a reader has to learn to ignore, so nothing is written at all rather than a
+// stopped figure.
+func TestTheTwiddleWritesNothingWhenIdle(t *testing.T) {
+	screen, out := drawnAt(24, 80)
+	DrawTwiddle(screen, plainPalette(), 0, "")
+
+	if got := out.String(); got != "" {
+		t.Errorf("an idle twiddle wrote %q, want nothing", got)
 	}
 }
 
@@ -336,7 +403,7 @@ func TestARunRefusesWhatItCannotDraw(t *testing.T) {
 // TestARunWritesTheLogAndTheStack covers the ordinary path end to end, since Run is the one
 // call a program makes and nothing else exercises it.
 func TestARunWritesTheLogAndTheStack(t *testing.T) {
-	screen, out := drawnAt(24, 80)
+	screen, out := drawnAt(40, 80)
 	s := New(Options{Model: "stealth/space-bunny-alpha", Provider: "openrouter.ai"})
 
 	if err := Run(s, screen); err != nil {
@@ -351,12 +418,12 @@ func TestARunWritesTheLogAndTheStack(t *testing.T) {
 		t.Errorf("the stack was not written:\n%s", got)
 	}
 	if !strings.Contains(got, "openrouter.ai") {
-		t.Errorf("the Provider bar is missing:\n%s", got)
+		t.Errorf("the bottom bar is missing:\n%s", got)
 	}
 	if !strings.Contains(got, string(StateIdle)) {
 		t.Errorf("the Status field is missing the state:\n%s", got)
 	}
-	if !strings.Contains(got, "\x1b[1;15r") {
+	if !strings.Contains(got, "\x1b[1;33r") {
 		t.Errorf("the scroll region was not set:\n%s", got)
 	}
 }
@@ -381,11 +448,77 @@ func TestARedirectedRunWritesWords(t *testing.T) {
 	}
 }
 
+// TestTheBottomBarCarriesIdentityAndApproval covers the field order the reader settled. The
+// bottom bar is the one nearer the bottom of the screen: Provider, Model, Verbosity,
+// Approval, with Approval ahead of Verbosity for the reason it was moved there.
+func TestTheBottomBarCarriesIdentityAndApproval(t *testing.T) {
+	got := RenderBottom("openrouter.ai", "stealth/space-bunny-alpha", "3", "ask")
+
+	for _, want := range []string{
+		"Provider: openrouter.ai",
+		"Model: stealth/space-bunny-alpha",
+		"Verbosity: 3",
+		"Approval: ask",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the bottom bar does not carry %q: %q", want, got)
+		}
+	}
+	if strings.Index(got, "Verbosity") > strings.Index(got, "Approval") {
+		t.Errorf("Verbosity is ahead of Approval: %q", got)
+	}
+}
+
+// TestTheTopBarCarriesTheChangingFields covers the other bar. It is nearer the log and
+// carries what changes second by second, in the order Status, Reasoning, Context, In, Out,
+// Cost, Credits.
+func TestTheTopBarCarriesTheChangingFields(t *testing.T) {
+	got := RenderTop("working", "3", "18,400", "2,104", "916", "$0.0181", "$4.82")
+
+	for _, want := range []string{
+		"Status: working",
+		"Reasoning: 3",
+		"Context: 18,400",
+		"In: 2,104",
+		"Out: 916",
+		"Cost: $0.0181",
+		"Credits: $4.82",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the top bar does not carry %q: %q", want, got)
+		}
+	}
+	if strings.Index(got, "Status") > strings.Index(got, "Reasoning") {
+		t.Errorf("Status is not the first field on the top bar: %q", got)
+	}
+}
+
+// TestTheTopBarKeepsStatusLongest covers the reason the order is what it is. The fields
+// are dropped from the right, so the one field that changes second by second is the last
+// to go on the bar that changes most.
+func TestTheTopBarKeepsStatusLongest(t *testing.T) {
+	got := RenderTop("working", "3", "18,400", "2,104", "916", "$0.0181", "$4.82")
+
+	// A width that fits Status and nothing else.
+	narrow := RenderBar([]Field{
+		{Name: "Status", Value: "working"},
+		{Name: "Reasoning", Value: "3"},
+	}, 20)
+	if !strings.Contains(narrow, "Status") {
+		t.Errorf("a narrow top bar lost Status: %q", narrow)
+	}
+	if strings.Contains(narrow, "Reasoning") {
+		t.Errorf("a narrow top bar kept a field past Status: %q", narrow)
+	}
+	_ = got
+}
+
 // TestAFieldWithNoValueIsADash covers the reporting rule. A bar that shifts shape as values
 // arrive is a bar no reader can scan.
 func TestAFieldWithNoValueIsADash(t *testing.T) {
-	got := RenderProvider("", "", StateIdle, "", "")
-	for _, want := range []string{"Provider: -", "Model: -", "Status: idle", "Approval: -"} {
+	got := RenderBottom("", "", "", "")
+
+	for _, want := range []string{"Provider: -", "Model: -", "Verbosity: -", "Approval: -"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the bar does not carry %q: %q", want, got)
 		}
@@ -395,7 +528,7 @@ func TestAFieldWithNoValueIsADash(t *testing.T) {
 // TestTheStatusCarriesANoteRatherThanAFifthField covers the decision that put paused in
 // Status. A bar that grows a comma is a bar no reader can scan.
 func TestTheStatusCarriesANoteRatherThanAFifthField(t *testing.T) {
-	got := RenderProvider("p", "m", StatePaused, "buffered 12 rows", "ask")
+	got := RenderTop("paused (buffered 12 rows)", "", "", "", "", "", "")
 
 	if !strings.Contains(got, "Status: paused (buffered 12 rows)") {
 		t.Errorf("the note is not beside the state: %q", got)
@@ -451,4 +584,19 @@ func stripSequences(s string) string {
 		b.WriteRune(runes[i])
 	}
 	return b.String()
+}
+
+// stackRowsOnly splits what DrawStack wrote into its rows, with the sequences removed.
+//
+// It is here so an assertion about the layout can name a row by where it sits rather than
+// by searching the whole output for a string that might appear on any of them.
+func stackRowsOnly(s string) []string {
+	stripped := stripSequences(s)
+	parts := strings.Split(stripped, "\r\n")
+
+	// The split leaves a trailing empty element for the final line ending.
+	if len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
 }

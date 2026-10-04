@@ -1,0 +1,66 @@
+Module: 0
+Worker ID: 0
+Merged: started
+Status: escape first, the turn loop arrives with a working interrupt
+
+# Decision: escape interrupts first, [enter][enter] follows
+
+Chosen at the reader's request to take the recommendation, over landing both
+triggers in one unit.
+
+## The choice
+
+The input unit delivers a turn loop with one working interrupt trigger: the lone
+escape byte. The second trigger, `[enter][enter]`, is its own unit, arriving with
+the double-enter window and the drain into the update.
+
+## Why escape first
+
+Neither trigger can do anything visible without a turn loop that owns a running
+turn, since an interrupt that interrupts nothing is a no-op. That is not a
+difference between the two triggers; it is a shared precondition, and it puts
+both of them in the same unit as the loop or neither of them anywhere.
+
+The queue is where the two differ. `[enter][enter]` needs a window in which a
+second enter is a gesture rather than a submission, and draining into the update
+needs `/queue`, which is not built. Escape is one byte the input design already
+names as a key and already names as an interrupt, so it costs the loop nothing
+extra and lands as the first thing a reader can reach.
+
+Landing both at once would never show the reader half the gesture, which is a real
+argument, and it is answered by scope rather than by order: the input unit stops
+at one working trigger and the next unit adds the second, so the interface is
+whole at each step rather than partly built and partly promised.
+
+The queue is the reason, and it is its own unit with its own command in the table
+and its own queued marker printed in the log at queue time. Folding `/queue` into
+an input unit makes the input unit depend on a command that does not exist yet.
+
+## The constraint both triggers share
+
+The model receives the same update shape for either, with nothing in it naming
+which trigger was used. The test for that is cheap and it should be written as it
+is the real assertion: the two paths produce a byte-identical update, rather than
+one that resembles the other.
+
+This is settled now and applies to the second trigger when it arrives, so it is
+written here rather than left to be rediscovered in the unit that adds it.
+
+## What this unit does not settle
+
+`/queue` appends a prompt without sending it and prints a queued marker in the log
+at queue time. The `[enter][enter]` window, the drain into the update, and
+`/redirect` bypassing the queue are all in the unit that follows, not this one.
+
+## Where it goes
+
+`.orcli-design/design-terminal-input.md` already holds that a lone escape is
+still a key and still interrupts. No design file changes. A worker picking up the
+input unit reads that section and this entry.
+
+## Unverified
+
+Nothing here was run against a terminal. Whether an escape read as a key while a
+turn is working reaches the loop and stops it is not settled by a test, and the
+window that would make `[enter][enter]` a gesture rather than two submissions is
+the reason the second trigger is held back.

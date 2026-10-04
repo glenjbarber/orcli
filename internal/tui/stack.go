@@ -1,21 +1,24 @@
 package tui
 
-import (
-	"strings"
-)
+import "strings"
 
-// The footer stack, drawn at the bottom of the screen with the prompt as the last
-// row and the log filling everything above it.
+// The footer stack, drawn at the bottom of the screen in seven fixed rows with the
+// log filling everything above it.
 //
-// The order is the one the design fixed, from the bottom of the screen upward: the
-// prompt, the key hints, the Provider bar, the Credits bar, each separated by a rule.
-// The bars keep the field order DESIGN.md 4.4 gives them, since that order was decided
-// with a reason behind it and moving the bars to the bottom does not move the reasoning
-// with them.
+// The order is the one the reader settled, from the bottom of the screen upward: a
+// blank row, a separator, the bottom bar, the top bar, a separator, the prompt, and
+// the twiddle row. Everything above the twiddle row is the output area.
 //
-// The hint row is drawn empty. Its contents are undecided and the spec says not to invent
-// entries, so the row is present and blank: a stack with a gap in it is honest about the
-// gap, and a stack with invented key names in it is a set of wrong things to press.
+// The two bars are named by where they sit rather than by what they carry. The top
+// bar is nearer the log and holds what changes second by second; the bottom bar is
+// nearer the bottom of the screen and holds what is settled. Both drop whole fields
+// from the right when they will not fit, so the field order is the order of loss: the
+// fields on the top bar that survive longest are the ones a reader watches while a
+// turn runs.
+//
+// There is no hint row. The merged frame carried one, drawn blank with a comment
+// saying its contents were undecided, and this layout has no row for it. A row with a
+// comment about a gap in it is worse than no row.
 
 // rule is the horizontal rule between the stack's rows.
 //
@@ -27,6 +30,10 @@ const rule = "─"
 const Prompt = "root@localhost $ "
 
 // escapeMoveUp moves the cursor up a row.
+//
+// It is a bare move with no erase of the rows it passed over, since the row it lands on
+// is cleared by whatever writes next: the twiddle clears its own, and a paint rewrites
+// the stack whole.
 const escapeMoveUp = "\x1b[1A"
 
 // escapeEraseLine clears the row the cursor is on.
@@ -36,19 +43,35 @@ const escapeMoveUp = "\x1b[1A"
 // a smear rather than a turn.
 const escapeEraseLine = "\x1b[2K"
 
-// stackRows is how many rows the stack occupies, smallest first.
+// stackHeight is how many rows the stack occupies on a terminal tall enough.
 //
-// The smallest is what a short terminal is left with: the prompt and nothing else, since a
-// reader who cannot type cannot use the interface and everything above it is a luxury. The
-// twiddle goes first, then the hint row, then the bars.
+// The seven come from the layout the reader settled, from the bottom of the screen
+// upward: a blank row, a separator, the bottom bar, the top bar, a separator, the
+// prompt, and the twiddle row. Everything above the twiddle row is the log.
+//
+// It is a named constant rather than a figure at each use because the scroll region,
+// the short-terminal behaviour and the painter all have to agree about it, and three
+// places that each count the rows is three places that can disagree.
+const stackHeight = 7
+
+// stackRows is how many rows the stack occupies.
+//
+// It is as many of the seven as the terminal has room for, and not a ladder. A ladder
+// decides which rows are shed in which order, and that order is not settled, so
+// returning one row for a short terminal would be claiming a decision this does not
+// have: a three row terminal would be left with the bottom row, which is the blank one
+// at the bottom of the screen, and a reader who cannot see the prompt cannot type.
+//
+// What is settled is the count at full height and that the prompt survives, and this
+// returns exactly that much. The ladder is the unit that decides the rest.
 func stackRows(height int) int {
 	switch {
-	case height >= 9:
-		return 9
-	case height >= 6:
-		return 6
-	default:
+	case height >= stackHeight:
+		return stackHeight
+	case height < 1:
 		return 1
+	default:
+		return height
 	}
 }
 
@@ -68,13 +91,17 @@ func logRows(height int) int {
 // It is a value rather than something read off the session, so the drawing can be tested
 // with figures a test chose rather than with figures a session happened to have.
 type Bar struct {
-	// Provider is the Provider bar: Provider, Model, Status, Approval, in that order
-	// and with no other field.
-	Provider string
+	// Top is the top bar, nearer the log: Status, Reasoning, Context, In, Out, Cost,
+	// Credits.
+	Top string
 
-	// Credits is the Credits bar: Credits, Cost, Context, In, Out, Host. It is empty
-	// in this unit, since nothing reports those figures yet.
-	Credits string
+	// Bottom is the bottom bar, nearer the bottom of the screen: Provider, Model,
+	// Verbosity, Approval.
+	Bottom string
+
+	// Field is the prompt row's text, drawn behind the editor's own field rather
+	// than beside it, since the editor holds what the reader typed and not the prompt.
+	Field string
 }
 
 // DrawLog writes rows downward into the normal screen buffer.
@@ -162,12 +189,15 @@ func spanBounds(span Span, length int) (int, int) {
 	return span.Start, end
 }
 
-// DrawStack writes the footer stack, from the prompt up.
+// DrawStack writes the footer stack, from the blank row at the bottom upward.
 //
 // The stack is drawn whole every time rather than its parts separately, since it is a
 // fixed number of rows and rewriting all of it is cheaper than tracking which field
 // changed. The log above it is never touched, which is what lets a reader scroll back
 // through it.
+//
+// The prompt row carries the editor's field rather than the bare prompt, so the painter
+// and the editor are not two things writing one row.
 func DrawStack(w *Screen, bar Bar, palette Palette) {
 	height := w.Height()
 	if height < 1 {
@@ -178,7 +208,7 @@ func DrawStack(w *Screen, bar Bar, palette Palette) {
 	lines := stackLines(bar, palette)
 
 	// A terminal too short for the whole stack keeps the bottom of it, since the prompt
-	// is the bottom row and a reader who cannot see it cannot type.
+	// is near the bottom and a reader who cannot see it cannot type.
 	if rows < len(lines) {
 		lines = lines[len(lines)-rows:]
 	}
@@ -194,12 +224,13 @@ func DrawStack(w *Screen, bar Bar, palette Palette) {
 // drawing rather than holding a value that goes stale when a figure changes.
 func stackLines(bar Bar, palette Palette) []string {
 	return []string{
-		chromeLine(palette, bar.Credits),
-		rule,
-		chromeLine(palette, bar.Provider),
-		rule,
 		"",
-		Prompt,
+		rule,
+		chromeLine(palette, bar.Bottom),
+		chromeLine(palette, bar.Top),
+		rule,
+		chromeLine(palette, bar.Field),
+		"",
 	}
 }
 
@@ -215,18 +246,25 @@ func chromeLine(p Palette, line string) string {
 	return p.Sequence(RoleChrome) + line + p.Reset()
 }
 
-// DrawTwiddle writes the twiddle row in place, above the prompt.
+// DrawTwiddle writes the twiddle row in place.
 //
 // It is the only thing in the frame that redraws rather than appends, so it moves the
-// cursor up to its own row and writes there. Every other row is written once and left
+// cursor up one row to the row directly above the prompt, which is where the twiddle
+// row is in this layout, and writes there. Every other row is written once and left
 // alone, which is what makes the reader's own scrollback the transcript.
 //
 // The step rather than the time is the caller's, since the session owns when a frame is
 // due and a function that read the clock itself would be a second thing that has to agree
 // with the repaint rate.
-func DrawTwiddle(w *Screen, palette Palette, step int) {
+//
+// It is not called at all when idle, since the row is blank then and a figure that is
+// not moving is a figure a reader has to learn to ignore.
+func DrawTwiddle(w *Screen, palette Palette, step int, state string) {
+	if state == "" {
+		return
+	}
 	w.Write(escapeMoveUp + escapeEraseLine)
-	w.Write(TwiddleHue(step) + Twiddle(step) + palette.Reset())
+	w.Write(TwiddleHue(step) + Twiddle(step) + "  " + state + palette.Reset())
 }
 
 // Field is one bar field, a name and a figure.
@@ -238,13 +276,10 @@ type Field struct {
 	Value string
 }
 
-// RenderBar renders a bar from its fields, dropping whole fields when it will not fit
-// and cutting the context share rather than dropping it.
+// RenderBar renders a bar from its fields, dropping whole fields when it will not fit.
 //
 // A bar too narrow for its fields drops them from the right, which is the order the
-// fields were given in, and that order is how much a reader loses by losing each. The
-// context share is the exception and is cut, since it is the figure that says a compaction
-// is coming and a reader who cannot see it does not know to expect one.
+// fields were given in, and that order is how much a reader loses by losing each.
 //
 // Width is the terminal's, and a bar with no width given is not cut at all, since a caller
 // that has not asked the terminal yet is a caller that would rather see the whole bar
@@ -272,34 +307,55 @@ func joinWithin(parts []string, sep string, width int) string {
 	return strings.Join(parts, sep)
 }
 
-// RenderProvider renders the Provider bar from the figures a session reports.
+// RenderTop renders the top bar, the one nearer the log.
 //
-// The field order is the one DESIGN.md 4.4 fixes, and Status carries the state rather
-// than having a field of its own, since a fifth field is what put paused in Status in the
-// first place.
-func RenderProvider(provider, model string, state State, detail, approval string) string {
+// The field order is the order of loss, and it is the reverse of what the merged frame
+// did with Status: the fields that change second by second are the ones that survive a
+// narrow bar longest, and Status is last to go for exactly that reason. Context, In,
+// Out, Cost and Credits are carried by nothing yet, so they render as a dash until a
+// caller has a figure for them.
+func RenderTop(status, reasoning, contextUsed, in, out, cost, credits string) string {
+	return RenderBar([]Field{
+		{Name: "Status", Value: status},
+		{Name: "Reasoning", Value: reasoning},
+		{Name: "Context", Value: contextUsed},
+		{Name: "In", Value: in},
+		{Name: "Out", Value: out},
+		{Name: "Cost", Value: cost},
+		{Name: "Credits", Value: credits},
+	}, 0)
+}
+
+// RenderBottom renders the bottom bar, the one nearer the bottom of the screen.
+//
+// The order of loss is Verbosity, Approval, Model, Provider. Approval is ahead of
+// Verbosity for the reason it was moved there: it says whether programs run without
+// asking, and it is not the first thing a narrow bar should lose.
+func RenderBottom(provider, model, verbosity, approval string) string {
 	return RenderBar([]Field{
 		{Name: "Provider", Value: provider},
 		{Name: "Model", Value: model},
-		{Name: "Status", Value: string(state) + detailSuffix(detail)},
+		{Name: "Verbosity", Value: verbosity},
 		{Name: "Approval", Value: approval},
 	}, 0)
 }
 
-// RenderCredits renders the Credits bar from the figures a session reports.
+// RenderProvider renders the bottom bar from the figures a session reports.
 //
-// The context share is the one field that is cut rather than dropped, and RenderBar
-// does not know which field is which, so the caller passes the figures in order and
-// this is where the order is recorded.
-func RenderCredits(credits, cost, contextUsed, in, out, host string) string {
-	return RenderBar([]Field{
-		{Name: "Credits", Value: credits},
-		{Name: "Cost", Value: cost},
-		{Name: "Context", Value: contextUsed},
-		{Name: "In", Value: in},
-		{Name: "Out", Value: out},
-		{Name: "Host", Value: host},
-	}, 0)
+// It is kept as a name a caller already uses, and it renders the bottom bar rather than
+// the bar the merged frame called Provider: the bar nearest the bottom of the screen is
+// the one that names the provider, and the field order on it is the one the reader
+// settled.
+func RenderProvider(provider, model, verbosity, approval string) string {
+	return RenderBottom(provider, model, verbosity, approval)
+}
+
+// RenderStatus renders the top bar from the figures a session reports.
+//
+// The state carries the detail as a note beside it rather than as a fifth field, since
+// a bar that grows a comma is a bar no reader can scan.
+func RenderStatus(status, reasoning, contextUsed, in, out, cost, credits string) string {
+	return RenderTop(status, reasoning, contextUsed, in, out, cost, credits)
 }
 
 // detailSuffix renders the note beside a state.
