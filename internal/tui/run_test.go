@@ -54,8 +54,8 @@ func TestEachRowIsOneLine(t *testing.T) {
 	}
 }
 
-// TestAnEscapeDoesNotReachTheTerminal is the property that keeps a model from steering the
-// terminal through its own reply. The row is filtered before it is written, so what arrives
+// TestAnEscapeDoesNotReachTheTerminal is the property that keeps a model from steering
+// the terminal through its own reply. The row is filtered before it is written, so what arrives
 // is the words and nothing else.
 func TestAnEscapeDoesNotReachTheTerminal(t *testing.T) {
 	screen, out := drawnAt(20, 80)
@@ -71,8 +71,8 @@ func TestAnEscapeDoesNotReachTheTerminal(t *testing.T) {
 }
 
 // TestAClearScreenArrivesAsNothing is the same property with the case that catches a filter
-// dropping only the escape byte. A clear-screen that lost only its ESC arrives at the
-// reader as the letters 2J, which is visible nonsense rather than nothing.
+// dropping only the escape byte. A clear-screen that lost only its ESC arrives at the reader
+// as the letters 2J, which is visible nonsense rather than nothing.
 func TestAClearScreenArrivesAsNothing(t *testing.T) {
 	screen, out := drawnAt(20, 80)
 	DrawLog(screen, []Row{{Text: "\x1b[2J"}}, plainPalette())
@@ -237,6 +237,11 @@ func TestARunRefusesWhatItCannotDraw(t *testing.T) {
 
 // TestARunWritesTheLogAndTheStack covers the ordinary path end to end, since Run is the one
 // call a program makes and nothing else exercises it.
+//
+// The frame is the whole screen now, so the log rides beside the fields and there is no bar
+// carrying the provider as prose: the provider is a field in the first column. What Run has
+// to produce is the log, the state field and the prompt, and the state field is where the
+// reader looks for it.
 func TestARunWritesTheLogAndTheStack(t *testing.T) {
 	screen, out := drawnAt(40, 80)
 	s := New(Options{Model: "stealth/space-bunny-alpha", Provider: "openrouter.ai"})
@@ -245,18 +250,21 @@ func TestARunWritesTheLogAndTheStack(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := out.String()
+	got := stripSequences(out.String())
 	if !strings.Contains(got, "orcli") {
 		t.Errorf("the log was not written:\n%s", got)
 	}
-	if !strings.Contains(got, "openrouter.ai") {
-		t.Errorf("the bottom bar is missing:\n%s", got)
-	}
 	if !strings.Contains(got, string(StateIdle)) {
-		t.Errorf("the Status field is missing the state:\n%s", got)
+		t.Errorf("the state field is missing the state:\n%s", got)
 	}
 	if !strings.Contains(got, Prompt) {
 		t.Errorf("the prompt row is missing:\n%s", got)
+	}
+
+	// Every row is addressed before it is written, so a frame of twenty rows addresses
+	// twenty positions and the last is the prompt.
+	if n := strings.Count(out.String(), escapePosition(StatusFields, 1)); n != 1 {
+		t.Errorf("the prompt row is addressed %d times, want once", n)
 	}
 }
 
@@ -463,7 +471,8 @@ func stripSequences(s string) string {
 	return b.String()
 }
 
-// stackRowsOnly splits what DrawStack wrote into its rows, with the sequences removed.
+// stackRowsOnly splits what a row-at-a-time write produced into its rows, with the sequences
+// removed.
 //
 // It is here so an assertion about the layout can name a row by where it sits rather than by
 // searching the whole output for a string that might appear on any of them.

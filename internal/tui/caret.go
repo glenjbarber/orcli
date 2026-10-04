@@ -5,14 +5,14 @@ import (
 	"strconv"
 )
 
-// The cursor, and the row of the footer that is redrawn where it stands.
+// The cursor, and the row of the frame that is redrawn where it stands.
 //
 // Both live here rather than in stack.go because both are about reaching the prompt row
-// rather than about drawing the footer. The footer is written downward and leaves the
-// cursor below it, so something has to say where the prompt row ended up. It is said by
-// asking stack.go for the row rather than by counting rows back up here: a second figure
-// for the same row is a second thing to be wrong, and the row arithmetic belongs beside the
-// rows it describes.
+// rather than about drawing the frame. The frame is written downward and leaves the cursor
+// below it, so something has to say where the prompt row ended up. It is said by asking
+// stack.go for the row rather than by counting rows back up here: a second figure for the
+// same row is a second thing to be wrong, and the row arithmetic belongs beside the rows
+// it describes.
 //
 // The caret never moves backwards. The prompt row is named and the column is reached by
 // advancing forward from its left edge, so there is no sequence in this file that moves the
@@ -21,9 +21,9 @@ import (
 // escapePosition places the cursor at a row and column, both counted from one.
 //
 // It is used rather than a sequence of relative moves because the prompt row's position
-// depends on the footer's height and the footer may have scrolled, and a relative move from
-// wherever the cursor happens to be is a position that is only right when nothing has moved
-// since the last one.
+// depends on the frame's height and the frame may have been drawn at a different size, and
+// a relative move from wherever the cursor happens to be is a position that is only right
+// when nothing has moved since the last one.
 func escapePosition(row, col int) string {
 	return "\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "H"
 }
@@ -74,8 +74,8 @@ func (l *interfaceLoop) placeCaret() {
 	before := string(runes[:l.editor.Caret()])
 
 	// A caret past the right edge cannot be shown on a row that does not hold it, so it is
-	// placed at the last column rather than past the end of the row, which a terminal
-	// clamps to its own edge and which looks like a caret the reader cannot account for.
+	// placed at the last column rather than past the end of the row, which a terminal clamps
+	// to its own edge and which looks like a caret the reader cannot account for.
 	column := FieldIndent + DisplayWidth(Prompt) + DisplayWidth(before)
 	if column > width-1 {
 		column = width - 1

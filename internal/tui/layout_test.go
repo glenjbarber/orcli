@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,252 +16,159 @@ func hue(h float64) int {
 	return int(r)<<16 | int(g)<<8 | int(b)
 }
 
-// TestTheStackIsSixRows is the layout the reader settled, from the top of the stack downward:
-// two reserved rows, the twiddle row, the bar carrying what changes second by second, the bar
-// carrying the session, and the prompt.
+// TestTheFrameIsTwentyRows is the layout the reader settled: every row of the terminal
+// carries a status field in the first column and a log row beside it.
 //
-// The two leading rows carry placeholder text for now and are drawn so the rows they will
-// occupy are the footer's rather than the log's.
-func TestTheStackIsSixRows(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	DrawStack(screen, Bar{
-		First:   ReservedRowText,
-		Second:  ReservedRowText,
-		Top:     "Status: idle",
-		Bottom:  "Provider: openrouter.ai",
-		Field:   "please read the new preferences in foo.md",
-		Twiddle: "  working",
-	}, plainPalette())
-
-	lines := stackRowsOnly(out.String())
-	if got, want := len(lines), 6; got != want {
-		t.Fatalf("the stack is %d rows, want %d:\n%s", got, want, out.String())
-	}
-
-	for i, want := range []struct {
-		name string
-		has  string
-	}{
-		{name: "statusbar1", has: ReservedRowText},
-		{name: "statusbar2", has: ReservedRowText},
-		{name: "statusbar3", has: "working"},
-		{name: "statusbar4", has: "Status:"},
-		{name: "statusbar5", has: "Provider:"},
-		{name: "the prompt row", has: "root@localhost $ "},
-	} {
-		line := lines[i]
-		if want.has == "" && line != "" {
-			t.Errorf("%s is %q, want it empty", want.name, line)
+// Twenty is the six rows the stack had plus fourteen beside them, and a twenty row terminal
+// is filled on the height. The count is a ceiling rather than a figure, so a terminal taller
+// than twenty draws twenty and the rest of the screen belongs to the terminal.
+func TestTheFrameIsTwentyRows(t *testing.T) {
+	for _, height := range []int{20, 24, 40} {
+		if got, want := screenRows(height), StatusFields; got != want {
+			t.Errorf("on a %d row terminal the frame is %d rows, want %d", height, got, want)
 		}
-		if want.has != "" && !strings.Contains(line, want.has) {
-			t.Errorf("%s does not carry %q: %q", want.name, want.has, line)
-		}
-	}
-
-	if got := lines[5]; !strings.Contains(got, "please read the new preferences") {
-		t.Errorf("the prompt row does not carry what was typed: %q", got)
 	}
 }
 
-// TestTheReservedRowsCarryThePlaceholder covers the two leading rows. They carry a literal
-// rather than nothing, so the rows are the footer's on a reader's screen and not the log's,
-// and the text reads as a placeholder so a reader does not act on it.
-func TestTheReservedRowsCarryThePlaceholder(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{
-		First:  ReservedRowText,
-		Second: ReservedRowText,
-	}, plainPalette())
-
-	lines := stackRowsOnly(out.String())
-	for i, name := range []string{"statusbar1", "statusbar2"} {
-		if got := lines[i]; got != ReservedRowText {
-			t.Errorf("%s is %q, want the placeholder %q", name, got, ReservedRowText)
-		}
+// TestAShortTerminalDrawsWhatItHas covers the floor. A terminal shorter than the field list
+// draws every row it has and takes the fields from the top, so what is shed is the bottom of
+// the list and the prompt row is still there.
+func TestAShortTerminalDrawsWhatItHas(t *testing.T) {
+	if got, want := screenRows(9), 9; got != want {
+		t.Errorf("a nine row terminal draws %d rows, want %d", got, want)
 	}
-	if n := len(lines); n != 6 {
-		t.Errorf("the stack is %d rows, want 6", n)
+	if got, want := screenRows(3), 3; got != want {
+		t.Errorf("a three row terminal draws %d rows, want %d", got, want)
+	}
+	if got := screenRows(0); got != 0 {
+		t.Errorf("a terminal with no rows draws %d", got)
 	}
 }
 
-// TestARowWithNothingInItIsStillDrawn covers the other half. A Bar built by hand for a test
-// leaves the two rows empty, and they are drawn as empty rows rather than omitted, since a
-// row that is the footer's and is drawn as part of the log is a row that scrolls.
-func TestARowWithNothingInItIsStillDrawn(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{}, plainPalette())
-
-	lines := stackRowsOnly(out.String())
-	for i, name := range []string{"statusbar1", "statusbar2"} {
-		if lines[i] != "" {
-			t.Errorf("%s is %q, want it drawn and empty", name, lines[i])
-		}
-	}
-	if n := len(lines); n != 6 {
-		t.Errorf("an empty footer is %d rows, want 6", n)
-	}
-}
-
-// TestThePromptRowIsTheSixthRow covers where the caret is put. The prompt row is the last
-// of the six, and the six are at the top of the screen, so the caret is on row six whatever
-// the terminal's height is.
-//
-// It is a figure that does not depend on the height on purpose. A row named by a height is a
-// row that moves when the height is read a second time, and a row that moves is a row the
-// caret can end up off, which is the failure the absolute position exists to prevent.
-func TestThePromptRowIsTheSixthRow(t *testing.T) {
-	for _, height := range []int{24, 40, 80} {
+// TestThePromptRowIsTheLastRow covers where the caret is put. The prompt row is the last row
+// the frame draws, so on a twenty row terminal it is row twenty and on a short one it is the
+// last row the screen has. Either way it is the last row drawn, which is what puts the caret
+// where a reader expects to find it without being told the frame's height.
+func TestThePromptRowIsTheLastRow(t *testing.T) {
+	for _, height := range []int{20, 24, 40} {
 		screen, _ := drawnAt(height, 80)
-
-		if got := promptScreenRow(screen); got != 6 {
-			t.Errorf("on a %d row terminal the prompt row is %d, want row 6", height, got)
+		if got, want := promptScreenRow(screen), StatusFields; got != want {
+			t.Errorf("on a %d row terminal the prompt row is %d, want %d", height, got, want)
 		}
+	}
+
+	screen, _ := drawnAt(9, 80)
+	if got := promptScreenRow(screen); got != 9 {
+		t.Errorf("on a nine row terminal the prompt row is %d, want the bottom row 9", got)
 	}
 }
 
-// TestEveryFooterRowIsNamedOnce covers the arithmetic every caller shares. The footer's rows
-// are the first rows of the screen in order, so the first is row one and each one follows the
-// one above it.
+// TestEveryFieldIsOneCharacter covers the reader's decision that a field is one column. A
+// field that cannot say what it means in one character says nothing, and every glyph below
+// is a letter a reader can read rather than a figure a reader has to learn.
 //
-// The `+1` is for counting rows from one, and it is the term that is easiest to drop: with it
-// gone, every footer row is one above where it is and the caret sits on the row above the
-// reader's own.
-func TestEveryFooterRowIsNamedOnce(t *testing.T) {
-	screen, _ := drawnAt(24, 80)
-	drawn := len(stackRowsToKeep(24))
+// The state field is the one exception and is named: it is the field a reader watches second
+// by second, and a state spelled `idle` is a state rather than an `i` a reader has to learn.
+func TestEveryFieldIsOneCharacter(t *testing.T) {
+	var s Status
+	s[fieldCwd] = "."
+	s[fieldProvider] = "o"
+	s[fieldModel] = "m"
+	s[fieldKey] = "k"
+	s[fieldFigure] = "w"
+	s[fieldApproval] = "a"
+	s[fieldCognito] = "n"
+	s[fieldColor] = "c"
+	s[fieldMouse] = "-"
+	s[fieldCopy] = "y"
+	s[fieldPane] = "0"
+	s[fieldHeld] = "9"
+	s[fieldFolded] = "0"
 
-	for k := range drawn {
-		got := footerScreenRow(screen, k)
-		want := 1 + k
-		if got != want {
-			t.Errorf("footer row %d is at screen row %d, want %d", k, got, want)
+	for i, got := range s {
+		if i == fieldState {
+			continue
 		}
-		if got < 1 || got > 24 {
-			t.Errorf("footer row %d is at screen row %d, which is off the screen", k, got)
-		}
-	}
-
-	// The rows must be consecutive and increasing, since they are written downward, and the
-	// first must be row one.
-	for k := 1; k < drawn; k++ {
-		if footerScreenRow(screen, k) != footerScreenRow(screen, k-1)+1 {
-			t.Errorf("footer row %d does not follow footer row %d", k, k-1)
-		}
-	}
-	if got := footerScreenRow(screen, 0); got != 1 {
-		t.Errorf("the first footer row is at screen row %d, want row 1", got)
-	}
-}
-
-// TestTheScrollRegionLeavesTheFooterAlone covers what holds the footer in place. A log row
-// long enough to scroll the screen pushes the footer up with everything else, and every
-// figure the drawing code computes about where the footer is then describes a row the reader
-// is no longer looking at.
-func TestTheScrollRegionLeavesTheFooterAlone(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	got := LogRows(24)
-	if got+drawnFooterRows(24) != 24 {
-		t.Errorf("the log has %d rows and the footer %d, which is not the screen's 24",
-			got, drawnFooterRows(24))
-	}
-
-	screen.SetScrollRegion(got)
-	if want := "\x1b[1;" + itoa(got) + "r"; out.String() != want {
-		t.Errorf("the scroll region is %q, want %q", out.String(), want)
-	}
-}
-
-// drawnFooterRows is how many rows the footer draws at this height.
-func drawnFooterRows(height int) int { return len(stackRowsToKeep(height)) }
-
-// TestTheStackIsDrawnAtTheTop covers where the rows are put. The stack is addressed by
-// position before the first line is written, since the cursor at startup is on the shell's
-// last line and a stack drawn from there lands under the reader's own scrollback rather than
-// at row one.
-func TestTheStackIsDrawnAtTheTop(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	DrawStack(screen, Bar{Top: "Status: idle"}, plainPalette())
-
-	if got := out.String(); !strings.HasPrefix(got, escapePosition(1, 1)) {
-		t.Errorf("the stack does not begin at row one: %q", got)
-	}
-}
-
-// TestAShortTerminalKeepsThePrompt covers the floor. A terminal too short for the whole stack
-// keeps the prompt row and the session bar, since a reader who cannot type cannot use the
-// interface.
-//
-// This is a floor rather than a ladder. Which rows are shed on the way down, and in what
-// order, is the reader's decision and is not settled.
-func TestAShortTerminalKeepsThePrompt(t *testing.T) {
-	screen, out := drawnAt(3, 80)
-	DrawStack(screen, Bar{Bottom: "Provider: -", Field: "a question"}, plainPalette())
-
-	got := out.String()
-	if !strings.Contains(got, "a question") {
-		t.Errorf("a three row terminal lost the prompt: %q", got)
-	}
-	if strings.Contains(got, "Status:") {
-		t.Errorf("a three row terminal kept a bar it had no room for: %q", got)
-	}
-}
-
-// TestSameFooterExceptField covers the test that keeps a keystroke from rewriting the footer.
-// The rows above the prompt row have to move when anything in them changes; a change to the
-// field does not, since the field is on the prompt row and that row is rewritten where it
-// stands. The twiddle row's sweep is part of its text, so a turn running and a keystroke
-// arriving together redraw the footer, which is what is wanted.
-func TestSameFooterExceptField(t *testing.T) {
-	base := Bar{Top: "Status: idle", Bottom: "Provider: -", Field: ""}
-
-	typed := base
-	typed.Field = "a question"
-	if !sameFooterExceptField(base, typed) {
-		t.Error("a keystroke was taken as a change to the whole footer")
-	}
-
-	for _, change := range []func(*Bar){
-		func(b *Bar) { b.First = "one" },
-		func(b *Bar) { b.Second = "two" },
-		func(b *Bar) { b.Top = "Status: working" },
-		func(b *Bar) { b.Bottom = "Session 2" },
-		func(b *Bar) { b.Twiddle = "  working" },
-	} {
-		next := base
-		change(&next)
-		if sameFooterExceptField(base, next) {
-			t.Errorf("a change to %q was taken as only the field", next)
+		if DisplayWidth(got) > 1 {
+			t.Errorf("field %d is %q, want one character or less", i, got)
 		}
 	}
 }
 
-// TestDrawFooterRowRewritesOneRow covers the case that stops a keystroke advancing the
-// frame. The whole footer is written as terminal rows, so drawing it again for one character
-// appended the footer's height and pushed the reader's own line down the screen every time
-// they typed.
-func TestDrawFooterRowRewritesOneRow(t *testing.T) {
-	screen, out := drawnAt(24, 80)
+// TestTheFrameCarriesTheLogBesideIt covers the arrangement the reader asked for. Every row
+// carries a field in the first column and a log row beside it, and a row written last appears
+// just above the prompt so everything moves up rather than appearing at the top.
+func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
+	screen, out := drawnAt(20, 80)
 
-	DrawFooterRow(screen, rowPrompt, Bar{Field: "a question"}, plainPalette())
+	var s Status
+	s[fieldCwd] = "."
+	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
 
-	got := out.String()
-	if !strings.HasPrefix(got, escapePosition(promptScreenRow(screen), 1)) {
-		t.Errorf("the prompt row is not reached by position:\n%q", got)
+	DrawStack(screen, stackLines(Bar{Status: s}, rows, 20, plainPalette()), plainPalette())
+
+	got := stripSequences(out.String())
+	if !strings.Contains(got, "the newest row") {
+		t.Errorf("the newest log row is not on the screen:\n%q", got)
 	}
-	if !strings.Contains(got, escapeEraseLine) {
-		t.Errorf("the prompt row did not clear itself first:\n%q", got)
+	if !strings.Contains(got, "orcli, a log and nothing else yet") {
+		t.Errorf("the oldest log row is not on the screen:\n%q", got)
 	}
-	if !strings.Contains(got, Prompt+"a question") {
+}
+
+// TestTheLogIsNewestBesideThePrompt covers the direction of the scroll. A row arriving
+// appears above the prompt and everything above it moves up, which is what the reader asked
+// the log to do, rather than appearing at the top where a reader is not looking.
+func TestTheLogIsNewestBesideThePrompt(t *testing.T) {
+	var s Status
+	rows := []Row{{Text: "first"}, {Text: "second"}, {Text: "third"}}
+
+	frame := stackLines(Bar{Status: s}, rows, 20, plainPalette())
+
+	if got := frame[len(frame)-2].log; got != "third" {
+		t.Errorf("the row above the prompt is %q, want the newest log row %q", got, "third")
+	}
+	if got := frame[len(frame)-3].log; got != "second" {
+		t.Errorf("the row above that is %q, want %q", got, "second")
+	}
+}
+
+// TestTheLogFillsUpward covers the case where the log is longer than the frame. The newest
+// rows fill the rows from the bottom upward and the oldest are off the screen, so a reader
+// scrolling back finds them in the terminal's own scrollback rather than on the screen.
+func TestTheLogFillsUpward(t *testing.T) {
+	var s Status
+	log := make([]Row, 40)
+	for i := range log {
+		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
+	}
+
+	frame := stackLines(Bar{Status: s}, log, 20, plainPalette())
+
+	if got := frame[len(frame)-2].log; got != "row 39" {
+		t.Errorf("the newest row is %q, want row 39", got)
+	}
+	if got := frame[0].log; got != "row 21" {
+		t.Errorf("the topmost row is %q, want row 21 and nineteen above it", got)
+	}
+}
+
+// TestThePromptRowCarriesTheFieldNotALogRow covers the one row that is not a field and a
+// log row. The prompt row carries the reader's own text, and a prompt with a log row behind it
+// is a prompt the reader cannot read.
+func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
+	screen, out := drawnAt(20, 80)
+
+	var s Status
+	s[fieldState] = string(StateIdle)
+	rows := []Row{{Text: "a log row"}}
+
+	DrawStack(screen, stackLines(Bar{Status: s, Field: "a question"}, rows, 20, plainPalette()),
+		plainPalette())
+
+	got := stripSequences(out.String())
+	if !strings.Contains(got, "root@localhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
-	}
-	if strings.Contains(got, "\r\n") {
-		t.Errorf("rewriting one row ended a line:\n%q", got)
-	}
-	if strings.Contains(got, "\x1b[1A") {
-		t.Errorf("the prompt row was reached by moving up:\n%q", got)
 	}
 }
 
@@ -268,7 +176,7 @@ func TestDrawFooterRowRewritesOneRow(t *testing.T) {
 // cursor-position sequence and the column is reached by advancing forward from it, so the
 // caret never travels up through the frame to find the row it belongs to.
 func TestTheCaretIsNotMovedBackwards(t *testing.T) {
-	screen, out := drawnAt(24, 80)
+	screen, out := drawnAt(20, 80)
 
 	l := &interfaceLoop{
 		session: New(Options{Model: "stealth/space-bunny-alpha"}),
@@ -294,7 +202,7 @@ func TestTheCaretIsNotMovedBackwards(t *testing.T) {
 // and after what the reader typed, counted in display columns, so a field holding a wide
 // character does not put the caret inside a glyph.
 func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
-	screen, out := drawnAt(24, 80)
+	screen, out := drawnAt(20, 80)
 
 	l := &interfaceLoop{
 		session: New(Options{Model: "stealth/space-bunny-alpha"}),
@@ -305,16 +213,45 @@ func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
 	l.placeCaret()
 
 	want := escapePosition(promptScreenRow(screen), 1) +
-		"\r\x1b[" + itoa(DisplayWidth(Prompt)+1) + "C"
+		"\r\x1b[" + strconv.Itoa(DisplayWidth(Prompt)+1) + "C"
 	if got := out.String(); got != want {
 		t.Errorf("the caret is not after the prompt and the typed text:\ngot  %q\nwant %q",
 			got, want)
 	}
 }
 
-// TestTheSweepTurnsAlongTheRow covers the colour pattern the reader asked for on the Status
-// value. The hue advances one degree per column along the row and thirty-six per step, so the
-// pattern reads as something travelling rather than as one colour changing.
+// TestSameFooterExceptField covers the test that keeps a keystroke from rewriting the frame.
+// Every field has to move when anything in it changes; a change to the field does not, since
+// the field is on the prompt row and that row is rewritten where it stands. The figure field's
+// sweep is part of its text, so a turn running and a keystroke arriving together redraw the
+// frame, which is what is wanted.
+func TestSameFooterExceptField(t *testing.T) {
+	base := Bar{Status: Status{fieldState: "idle"}, Field: ""}
+
+	typed := base
+	typed.Field = "a question"
+	if !sameFooterExceptField(base, typed) {
+		t.Error("a keystroke was taken as a change to the whole frame")
+	}
+
+	for _, change := range []func(*Bar){
+		func(b *Bar) { b.Status[fieldCwd] = "/" },
+		func(b *Bar) { b.Status[fieldSession] = "2" },
+		func(b *Bar) { b.Status[fieldProvider] = "x" },
+		func(b *Bar) { b.Status[fieldFigure] = "w" },
+		func(b *Bar) { b.Status[fieldHeld] = "9" },
+	} {
+		next := base
+		change(&next)
+		if sameFooterExceptField(base, next) {
+			t.Errorf("a change to %q was taken as only the field", next)
+		}
+	}
+}
+
+// TestTheSweepTurnsAlongTheRow covers the colour pattern on the figure. The hue advances one
+// degree per column along the row and thirty-six per step, so the pattern reads as something
+// travelling rather than as one colour changing.
 func TestTheSweepTurnsAlongTheRow(t *testing.T) {
 	// Two adjacent columns carry adjacent hues, so the pattern is horizontal rather than
 	// one figure in one colour.
@@ -377,6 +314,3 @@ func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
 		t.Errorf("a bar that is not the top bar was swept: %q", got)
 	}
 }
-
-// itoa is here so a test can name a row without importing strconv for one call.
-func itoa(n int) string { return strconv.Itoa(n) }
