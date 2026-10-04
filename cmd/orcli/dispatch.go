@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
@@ -61,6 +63,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.cloudflare(ctx, args)
 		},
+		"test": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.test(args)
+		},
 		"quit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return tui.Result{Quit: true}, nil
 		},
@@ -72,7 +77,7 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 //
 // A command the dispatcher does not have is reported by name, and the two cases are
 // told apart. The table in internal/tui lists thirty names and this build implements
-// two, so a reader who typed /copy is told the name is in the table and this build
+// three, so a reader who typed /copy is told the name is in the table and this build
 // does not run it, rather than being told there is no such command: those are
 // different faults and a reader told the second goes looking for a typo.
 //
@@ -94,6 +99,59 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 	}
 
 	return h(ctx, d, args)
+}
+
+// test is the handler for /test.
+//
+// It lists a directory and hands the listing back as the text, which the loop writes
+// where a reply from the model is written, so the log fills with rows the reader chose
+// and the frame can be watched drawing them. It is a development command: it reaches no
+// network, asks no model, and reads nothing outside the directory it is given.
+//
+// The listing is one result rather than a row per entry. The loop writes a result as a
+// single notice, and a handler that wanted a row per entry would have to reach past the
+// result and into the log, which is the one thing the loop owns. So a listing is one
+// string carrying newlines, and the row it becomes is folded to the width of the
+// terminal. That is worth knowing before the test rather than after it.
+//
+// A directory is written with a trailing slash, since a name cannot say what it is and
+// the listing is read on a terminal rather than parsed.
+func (d *dispatcher) test(args string) (tui.Result, error) {
+	dir := strings.TrimSpace(args)
+	if dir == "" {
+		dir = "."
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return tui.Result{}, fmt.Errorf("/test: %w", err)
+	}
+	if len(entries) == 0 {
+		return tui.Result{Text: fmt.Sprintf("%s is empty", dir)}, nil
+	}
+
+	// The listing is sorted by name rather than left in the order the filesystem hands
+	// the entries over, since a reader comparing two runs of the same command is
+	// comparing what is on disk and an unsorted listing changes with the order the
+	// directory was written in.
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	for i, n := range names {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if entries[i].IsDir() {
+			b.WriteString(n + "/")
+			continue
+		}
+		b.WriteString(n)
+	}
+	return tui.Result{Text: b.String()}, nil
 }
 
 // cloudflareKey returns the credential the Cloudflare commands make calls with.
@@ -133,8 +191,8 @@ func (d *dispatcher) cloudflareClient() (*cloudflare.APIClient, error) {
 // cloudflare is the handler for /cloudflare.
 //
 // Every outcome is a result: an unknown sub-command, a missing flag, and an API refusal
-// are all text the caller shows, which is what AGENTS.md holds: a call always produces a
-// result.
+// are all text the caller shows, which is what AGENTS.md holds: a call always produces
+// a result.
 func (d *dispatcher) cloudflare(ctx context.Context, args string) (tui.Result, error) {
 	// The provider is checked before the sub-command is even read, since a reader who
 	// has not set one up is not helped by being told which of five sub-commands this
@@ -195,8 +253,8 @@ const cloudflareAsk = `The Cloudflare provider is not set up in the configuratio
 // cloudflareAskFallback is what the client says when there is no model to ask.
 //
 // It is deliberately short and it names only what this client is certain of. The
-// example is a placeholder and never a real key: a string in a binary that looks like a
-// credential is a string a reader might paste somewhere, and a placeholder cannot be.
+// example is a placeholder and never a real key: a string in a binary that looks like
+// a credential is a string a reader might paste somewhere, and a placeholder cannot be.
 const cloudflareAskFallback = `The Cloudflare provider is not set up, so /cloudflare cannot run.
 
 Put a cloudflare object in your configuration file alongside "api_key":
