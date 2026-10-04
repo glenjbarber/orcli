@@ -1,0 +1,181 @@
+# Design: /cloudflare in the interface
+
+The design of record is `.orcli-design/design-cloudflare.md` in the main worktree,
+which is ignored and untracked and so cannot be committed from there. This file
+carries the parts of it that bear on the code, and records the decisions this unit
+takes on the questions the design left open.
+
+## What this unit is
+
+A slash command in the interface. `/cloudflare` is a command in `internal/tui`,
+beside `/alias`, `/attribute` and `/connect`, with an entry in the command table
+carrying `Name: "cloudflare"` and an `Args` description for the completer.
+
+It is not a `cmd/orcli` subcommand and it is not a tool the model calls. The client
+performs the API calls itself and the model is not involved. The reader types
+`/cloudflare dns add --name app.example.com --type A --content 203.0.113.42` and
+the client makes the call and reports the result.
+
+## What this unit covers, and what it does not
+
+The design names five sub-commands: `dns`, `zone`, `cache`, `page-rules` and
+`account`. This unit is **`dns` only**, and the command refuses every other
+sub-command by name rather than silently accepting an argument it will not act on.
+
+Five sub-commands is five API surfaces, and building all of them at once is a
+unit whose subject is an API client rather than a command. `dns` is the one the
+reader named first, create a DNS record among them, and it is the one with the
+write confirmation that the design settles, so it carries the whole of that
+decision. The other four follow as their own units against a client that already
+does the credential filter, the result rule and the confirmation hold.
+
+## The credential
+
+The key is read from the configuration file, in a nested provider object rather
+than a flat top-level key, so a further provider can be added under the same block
+without changing the shape of the file:
+
+```json
+{
+  "api_key": "sk-or-v1-...",
+  "cloudflare": {
+    "api_key": "ABC123.XYZ789"
+  }
+}
+```
+
+Three things follow, and all three are rules rather than preferences:
+
+- No environment variable override. `CLOUDFLARE_API_KEY` is never read, on the
+  same terms as the OpenRouter key and for the same reason: a file shadowed by a
+  stale value elsewhere is a failure the reader cannot see.
+- No `--api-key` flag. A credential typed at a prompt is bound for a request, and
+  nothing filters it.
+- The absent Cloudflare key is not fatal. Only the OpenRouter key is an absence
+  that is fatal. A reader who has never used `/cloudflare` has a valid
+  configuration, and a command that refused to start because of it would lock them
+  out of the interface.
+
+The nested block is read as a member this package names, and an unknown or absent
+block is skipped rather than refused, on the same terms as an unknown top-level
+key: a file written by a newer client must still open in an older one.
+
+## The package
+
+`internal/cloudflare`, a leaf beside `internal/openrouter`. It carries the client,
+the credential filter, and the `dns` surface.
+
+It is reached from `internal/tui`, which is a new edge. `AGENTS.md` holds that the
+packages are leaves and import one another in no direction, and that `main` is
+where the direction changes. This edge is deliberate and the reason is recorded
+here: the command is in the interface, so the client is reached from the interface
+and not from `main`. It is the one new edge this unit needs, and `internal/tui`
+must still never reach `internal/tools`.
+
+## The credential filter
+
+Every string bound for a log row or an error string is filtered for the key first.
+Not only the key: the filter takes the credential and reports whether a string
+carries it, so an error from the endpoint that quoted a request back at us is
+filtered the same way a log row is.
+
+The filter runs on the way out, at the boundary where a string becomes something a
+reader sees, rather than at the point the string was built. A filter placed at the
+point of building is one a later call site forgets.
+
+## The result rule
+
+A call always produces a result. An unknown sub-command, a missing `--name`, a
+DNS name that does not parse, a 400 from Cloudflare and a body that failed to
+decode are all results carrying the error. None of them refuses the command, and
+none of them produces nothing.
+
+## Arguments
+
+The design shows flags: `--name`, `--type`, `--content`, `--ttl`, `--record-id`.
+
+`internal/tui` holds no argument grammar today, and `command.go` says so in so
+many words: `Args` is a description rather than a grammar, and there is no
+grammar to build against. This unit parses the argument text where the command
+needs it, in one function in `internal/cloudflare`, and does not build a grammar in
+`internal/tui`.
+
+The reason is that a grammar in `internal/tui` would be a grammar for every
+command, and the only command that needs one is this one. Building the general
+thing first is building the harder half of the problem for a single caller.
+
+An unrecognised flag is a result carrying an error, not a flag ignored. A reader
+who typed `--ttl 300` and got no error would not know the record was created with
+the default.
+
+## Reads and writes
+
+Reads run directly: `dns list` reports the records for a zone and is not
+confirmed.
+
+Writes do not run directly. `dns add`, `dns delete` and `dns edit` fetch the
+current state first, render a unified diff of the actual prior state against the
+proposed state, and hold the change until it is confirmed.
+
+A creation has no prior state and renders as a whole-record addition from nothing.
+A deletion renders as the removal of the record as it stands. An edit renders as
+the two side by side, which is the case the design's example shows.
+
+## Confirmation
+
+`/cloudflare confirm` applies exactly the change that was shown. The proposal is
+held on the session between the two commands rather than rebuilt from arguments
+typed a second time, since a confirmation that rebuilt it could apply something
+other than what the reader was shown.
+
+It is consumed on confirmation and refused on anything else, and it is held for
+one command only: a second `/cloudflare` call before the confirmation replaces it.
+`/cloudflare confirm` with nothing held is a result saying there is nothing to
+confirm, not a silent no-op.
+
+## The diff
+
+`internal/tui/diff.go` exists for a diff block coloured without its text changing,
+and this unit reads it before writing its own. If it renders what the confirmation
+needs, it is used; if not, the confirmation gets its own renderer and the file
+says why.
+
+What the renderer must do:
+
+- show the whole line rather than cutting it, using the column measurement
+  `internal/tui/width.go` already has, since a reader confirming a change needs to
+  see the end of a long value;
+- carry the added and removed lines in a colour that is not the palette's base,
+  and nothing in colour;
+- write plain text for a reader with colour off, which is the same text.
+
+## Syntax highlighting
+
+Plain for the first unit, and this is a decision rather than a deferral. The
+palette is in `internal/tui` and its roles are a theme for the whole frame, and
+the confirmation is the one place in the interface where the reader is deciding
+something and colour would be arguing with them. The unified diff marks its own
+additions and removals with `-` and `+`, which is a mark the reader already reads.
+
+## Where the proposal lives
+
+On the session, beside the log and the state, as a field the command sets and
+`/cloudflare confirm` reads and clears. Not on the `Screen`, since it survives a
+repaint and the screen does not, and not in a package variable, which would be a
+thing two sessions in one process shared.
+
+## What is not in this unit
+
+`zone`, `cache`, `page-rules` and `account`, each its own unit. `/close` and
+`/copy N`, which need the input path that does not exist. The keypress form of
+confirmation, which needs the line editor. A `--json` flag and a `--verbose` flag,
+since neither is in the design's settled part and both would be added with the
+surface that needs them.
+
+## Unverified
+
+Nothing here was run against the Cloudflare API or against a terminal. Whether
+the diff reads correctly at a real width, and whether the confirmation applies what
+was shown, are not settled by a test. The tests cover the argument parsing, the
+credential filter, the render against a fixture body, and the hold-and-confirm
+round trip against a fake transport.
