@@ -4,122 +4,124 @@ import (
 	"strings"
 )
 
-// The footer stack, drawn at the bottom of the screen in nine fixed rows with the
-// log filling everything above it.
+// The footer stack, drawn at the bottom of the screen with the log filling
+// everything above it.
 //
-// The order is the one the reader settled, from the bottom of the screen upward: a
-// blank row, a separator, the bottom bar, the top bar, a separator, the field, the
-// twiddle, the active row, and the task row. Everything above the twiddle row is
-// the output area.
+// The order is the one the reader settled, from the bottom of the screen upward: the
+// two status bars, a blank row, and the prompt row. The prompt row carries either the
+// reader's own line or, while a turn is running, the figure and the state word in place
+// of the `root@localhost $ ` text.
 //
-// The two bars are named by where they sit rather than by what they carry. The top
-// bar is nearer the log and holds what changes second by second; the bottom bar is
-// nearer the bottom of the screen and holds what is settled, along with the session
-// and the two capture modes. Both drop whole entries from the right when they will
-// not fit, so the order they are given in is the order of loss.
+// Everything from the prompt row down is what orcli owns. Above it belongs to the
+// terminal: this package writes rows there and never moves the viewport, so the reader's
+// own scrollback is the transcript and nothing here has to manage it.
 //
-// The prompt is gone. There was a `root@localhost $ ` at the head of the field and it
-// is not in this layout, so the field carries only what has been typed and both it
-// and the twiddle sit at column five. A reader is typing at a known place on the
-// bottom row of the screen and does not need to be told which account they are.
+// The rule spans the full terminal width rather than sitting at column one. A rule at the
+// width of the terminal reads as a divider, and a single figure at column one reads as a
+// left border, and they are two different frames. The cost is that a resize has to
+// redraw it, which is why FillBar asks the caller for the width rather than reading one
+// itself.
 //
-// All nine rows are drawn whether or not anything is running. A footer that grows
-// when a turn starts is a footer that moves the field under the reader's hands, and
-// the one thing this frame is for is that the reader's place in it does not move.
+// There is no rule at the very bottom. A footer that ends in a rule is a closed box, and
+// this one sits against the bottom edge of the terminal where the shell prompt will be
+// when the program exits: a rule there would be the last thing on screen and would read
+// as a border to something that is not bordered.
 
-// rule is the horizontal rule between the stack's rows.
+// rule is the horizontal rule above the prompt row.
 //
 // A box-drawing figure rather than a hyphen, since it is one column rather than one, and
 // a hyphen at the width of a rule leaves a visible notch every other character row.
 const rule = "─"
 
-// Prompt is gone.
+// Prompt is what the reader's line is drawn behind.
 //
-// It is named only so a reader of this file can see that the layout is a change and
-// not an omission, and so nothing else reaches for it.
-const Prompt = ""
+// It is dropped while a turn is running, in place of the figure, so that the row the
+// reader is typing into keeps its position and the figure does not push the field
+// upwards. The row is the same row either way: only the text in front of the reader's
+// own line changes.
+const Prompt = "root@localhost $ "
 
-// FieldIndent is how far in the field and the twiddle sit.
+// FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
-// Five columns, so the figure and the text beside it have the same left edge and a
-// reader's eye does not jump between rows to follow them.
-const FieldIndent = 5
+// Zero, since the prompt is at column one and the caret follows the text the reader has
+// typed rather than the prompt in front of it. It is named rather than deleted because
+// the caret arithmetic in caret.go offsets by it, and a constant of zero there reads as
+// "this was decided" rather than "this was forgotten".
+const FieldIndent = 0
 
-// escapeMoveUp moves the cursor up a row.
-const escapeMoveUp = "\x1b[1A"
-
-// escapeEraseLine clears the row the cursor is on.
+// TwiddleIndent is how far in the figure sits when the prompt row is carrying it.
 //
-// The row is cleared before it is written rather than the figure being overwritten, since
-// two braille cells do not cover a whole row and a figure drawn over the last one leaves
-// a smear rather than a turn.
-const escapeEraseLine = "\x1b[2K"
+// Two columns, so the figure and the word beside it have a left edge of their own and
+// are not read as part of the bottom bar below.
+const TwiddleIndent = 2
 
-// stackRows is how many rows the stack occupies, smallest first.
+// The rows of the stack, as positions in the screen-order slice stackLines returns.
 //
-// The smallest is what a short terminal is left with: the field and nothing else, since a
-// reader who cannot type cannot use the interface and everything above it is a luxury.
-// Which of the nine rows are shed, and in what order, is not settled. What is settled
-// is the count, and this returns it for a terminal tall enough to hold the whole thing.
-func stackRows(height int) int {
-	switch {
-	case height >= 9:
-		return 9
-	default:
-		return 1
+// They are named rather than counted from an end because the prompt row is the bottom
+// row of the stack and every other row is above it, which is the one arrangement where a
+// truncation from the end keeps what the reader is typing into.
+const (
+	rowRule = iota
+	rowPrompt
+	rowBlank
+	rowTopBar
+	rowBottomBar
+
+	// fullStackRows is every row the stack draws. It is named once so the count the
+	// stack renders and the count the tests assert cannot drift apart.
+	fullStackRows
+)
+
+// stackRowsToKeep returns the positions of the rows a terminal of this height draws, in
+// screen order.
+//
+// It is a keep-list rather than a truncation because the rows worth keeping on a short
+// terminal are the prompt row and the blank under it, and the bars are shed first: they
+// report what has already happened while the prompt is what the reader is about to do.
+//
+// On a terminal tall enough it is every row in order. Below that it is the floor. Which
+// rows are shed on the way down, and in what order, is the reader's decision and is not
+// settled; this is a floor rather than a ladder.
+func stackRowsToKeep(height int) []int {
+	if height >= fullStackRows {
+		keep := make([]int, fullStackRows)
+		for i := range keep {
+			keep[i] = i
+		}
+		return keep
 	}
+	return []int{rowPrompt, rowBlank}
 }
 
-// logRows is how many rows are left for the log above a stack.
-//
-// It is never less than one, so the scroll region has something to scroll and a terminal
-// with no room shows a log rather than nothing.
-func logRows(height int) int {
-	if n := height - stackRows(height); n > 1 {
-		return n
-	}
-	return 1
-}
-
-// Bar is what the two status bars carry.
+// Bar is what the footer carries.
 //
 // It is a value rather than something read off the session, so the drawing can be tested
 // with figures a test chose rather than with figures a session happened to have.
 type Bar struct {
-	// Top is the top bar, nearer the log: Status, Reasoning, Context, In, Out, Cost,
-	// Credits.
+	// Top is the bar nearer the log, holding what changes second by second.
 	Top string
 
-	// Bottom is the bottom bar, nearer the bottom of the screen: Session, [Mouse],
-	// [Copy], Provider, Model, Approval, Verbosity.
+	// Bottom is the bar nearer the bottom of the screen, holding what is settled
+	// along with the session and the two capture modes.
 	Bottom string
 
-	// Field is the reader's own line, drawn at column five with no prompt in front of
-	// it.
+	// Field is the reader's own line, drawn after the prompt on the prompt row. It
+	// is empty while a turn is running, since the figure has the row then.
 	Field string
 
-	// Twiddle is the figure and its state word, empty when idle.
+	// Twiddle is the figure and the state word, indented two, and is empty when no
+	// turn is running. When it is set the prompt is not drawn, so the row carries
+	// one or the other and never both.
 	Twiddle string
-
-	// Active is the row reporting what this session is doing, and is drawn whether or
-	// not that is idle.
-	Active string
-
-	// Tasks is the row reporting how many tasks are running and what the newest is
-	// doing.
-	Tasks string
 }
 
-// DrawLog writes rows downward into the normal screen buffer.
+// DrawLog writes rows downward to the terminal, above the footer.
 //
-// It is the only thing that appends to the screen, and it appends: nothing here redraws
-// a row already written. The one exception is the twiddle, drawn by DrawTwiddle on its
-// own row.
-//
-// Rows are cut to the width before they are written, so what reaches the terminal is what
-// a copy of the same row produces. A row allowed to wrap would leave the terminal holding
-// more lines than the log has rows, and the log and the screen would stop agreeing about
-// what was said.
+// It writes downward and never moves the viewport. Nothing here scrolls, clips or
+// positions: the terminal owns the rows above the footer and the reader's own scrollback
+// is the transcript. A row that would be wider than the terminal is cut rather than
+// wrapped, since a wrapped row is two rows and the terminal and the log would then
+// disagree about what was said.
 func DrawLog(w *Screen, rows []Row, palette Palette) {
 	if len(rows) == 0 {
 		return
@@ -195,57 +197,70 @@ func spanBounds(span Span, length int) (int, int) {
 	return span.Start, end
 }
 
-// DrawStack writes the footer stack, from the blank row at the bottom upward.
+// DrawStack writes the footer, from the lower bar up.
 //
-// The stack is drawn whole every time rather than its parts separately, since it is a
-// fixed number of rows and rewriting all of it is cheaper than tracking which field
-// changed. The log above it is never touched, which is what lets a reader scroll back
-// through it.
+// The stack is written as terminal rows rather than into a pinned region, so it is the
+// reader's decision how often it is redrawn: a caller that redraws it on every keystroke
+// will advance the screen by the footer's height each time. Run and Start both redraw it
+// only when one of its rows has changed.
 func DrawStack(w *Screen, bar Bar, palette Palette) {
-	height := w.Height()
-	if height < 1 {
+	if w.Height() < 1 {
 		return
 	}
 
-	rows := stackRows(height)
-	lines := stackLines(bar, palette)
-
-	// A terminal too short for the whole stack keeps the bottom of it, since the field
-	// is near the bottom and a reader who cannot see it cannot type.
-	if rows < len(lines) {
-		lines = lines[:rows]
-	}
-
-	for _, line := range lines {
-		w.Write(line + "\r\n")
+	lines := stackLines(bar, palette, w.Width())
+	for _, at := range stackRowsToKeep(w.Height()) {
+		w.Write(lines[at] + "\r\n")
 	}
 }
 
-// stackLines renders the stack as rows, bottom of the screen last.
-//
-// stackLines renders the stack as rows, in screen order.
+// stackLines renders the stack as rows in screen order.
 //
 // The first row returned is the top of the stack and the last is the bottom of the
 // screen, because DrawStack writes downward and the terminal puts the first line it
-// receives where the cursor is. The blank row is therefore last, since it is the bottom
-// row of the screen.
+// receives where the cursor is. The rule is first and the bottom bar is last.
 //
-// The approved render reads, from the bottom of the screen upward: a blank row, a
-// separator, the bottom bar, the top bar, a separator, the field, the twiddle, the active
-// row, and the task row. Writing that order as written would put the blank row at the top
-// and the task row at the bottom, which is the frame upside down.
-func stackLines(bar Bar, palette Palette) []string {
-	return []string{
-		chromeLine(palette, indent(bar.Tasks)),
-		chromeLine(palette, indent(bar.Active)),
-		chromeLine(palette, indent(bar.Twiddle)),
-		chromeLine(palette, indent(bar.Field)),
-		rule,
-		chromeLine(palette, bar.Top),
-		chromeLine(palette, bar.Bottom),
-		rule,
-		"",
+// The prompt row carries the prompt and the reader's own text when no turn is running,
+// and the figure and the state word when one is. The row is the same row either way: what
+// changes is the text in front of the reader's line, not the row's position, so a reader
+// watching a turn start does not find their field has moved.
+func stackLines(bar Bar, palette Palette, width int) []string {
+	lines := make([]string, fullStackRows)
+	lines[rowRule] = FillBar(rule, width)
+	lines[rowPrompt] = chromeLine(palette, promptRow(bar))
+	lines[rowBlank] = ""
+	lines[rowTopBar] = chromeLine(palette, bar.Top)
+	lines[rowBottomBar] = chromeLine(palette, bar.Bottom)
+	return lines
+}
+
+// promptRow is what the prompt row carries: the figure while a turn runs, and the
+// prompt and the reader's own text otherwise.
+//
+// The two are exclusive rather than both drawn, since a row carrying the figure and the
+// prompt behind it is a row where the reader cannot tell where they are typing to end.
+func promptRow(bar Bar) string {
+	if bar.Twiddle != "" {
+		return bar.Twiddle
 	}
+	return Prompt + bar.Field
+}
+
+// FillBar repeats a figure across the width of the terminal.
+//
+// It counts display columns rather than bytes, since the figure is three bytes to the
+// column and a byte count would produce a rule a third of the width it should be. The
+// remainder is padded with spaces rather than cut, so a rule is never a fraction of a
+// figure long.
+func FillBar(figure string, width int) string {
+	if width < 1 || figure == "" {
+		return ""
+	}
+	one := DisplayWidth(figure)
+	if one < 1 {
+		return ""
+	}
+	return strings.Repeat(figure, width/one) + strings.Repeat(" ", width%one)
 }
 
 // chromeLine wraps a stack row in the chrome role when colour is on.
@@ -258,27 +273,6 @@ func chromeLine(p Palette, line string) string {
 		return line
 	}
 	return p.Sequence(RoleChrome) + line + p.Reset()
-}
-
-// DrawTwiddle writes the twiddle row in place.
-//
-// It is the only thing in the frame that redraws rather than appends, so it moves the
-// cursor up one row to the row directly above the field, which is where the twiddle row
-// is in this layout, and writes there. Every other row is written once and left alone,
-// which is what makes the reader's own scrollback the transcript.
-//
-// The step rather than the time is the caller's, since the session owns when a frame is
-// due and a function that read the clock itself would be a second thing that has to agree
-// with the repaint rate.
-//
-// It is not called at all when idle, since the row is blank then and a figure that is
-// not moving is a figure a reader has to learn to ignore.
-func DrawTwiddle(w *Screen, palette Palette, step int, state string) {
-	if state == "" {
-		return
-	}
-	w.Write(escapeMoveUp + escapeEraseLine)
-	w.Write(indent(TwiddleHue(step)+Twiddle(step)+"  "+state) + palette.Reset())
 }
 
 // Field is one bar field, a name and a figure.

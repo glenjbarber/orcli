@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,18 @@ func drawnAt(rows, cols int) (*Screen, *bytes.Buffer) {
 // plainPalette builds a palette with colour off, which is the default and the case every
 // assertion about text is made against.
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
+
+// itoa is here so a test can name a column without importing strconv for one call.
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// isRuleRow reports whether a drawn row is the footer's rule.
+//
+// A rule is full width since the reader's decision, so it is compared by its figure and
+// its measured width rather than against a single character. A single figure was the old
+// shape and comparing against one would fail on a rule that is drawn correctly.
+func isRuleRow(line string, width int) bool {
+	return line != "" && strings.Trim(line, rule) == "" && DisplayWidth(line) == width
+}
 
 // TestRowsAreWrittenInOrder is the property the log exists for. A reader comparing two
 // tool results is comparing their order, so a draw that reorders them misreports what
@@ -233,211 +246,37 @@ func TestASpanPastTheCutIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheStackIsNineRows is the layout the reader approved, from the bottom of the screen
-// upward: a blank row, a separator, the bottom bar, the top bar, a separator, the field,
-// the twiddle, the active row, and the task row.
-//
-// There is no prompt. The field carries only what has been typed, and it and the twiddle
-// sit at column five.
-func TestTheStackIsNineRows(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-
-	DrawStack(screen, Bar{
-		Top:    "Status: idle",
-		Bottom: "Provider: openrouter.ai",
-		Field:  "please read the new preferences in foo.md",
-	}, plainPalette())
-
-	lines := stackRowsOnly(out.String())
-	if got, want := len(lines), 9; got != want {
-		t.Fatalf("the stack is %d rows, want %d:\n%s", got, want, out.String())
+// TestTheRulesAreColumnsNotBytes covers the rule width at the level of the helper, since a
+// rule three bytes to the column is where a byte count would go wrong.
+func TestTheRulesAreColumnsNotBytes(t *testing.T) {
+	got := FillBar(rule, 10)
+	if want := strings.Repeat(rule, 10); got != want {
+		t.Errorf("FillBar at 10 columns is %q, want %q", got, want)
 	}
-
-	for i, want := range []struct {
-		name   string
-		has    string
-		blank  bool
-		isRule bool
-	}{
-		{name: "the bottom row", blank: true},
-		{name: "the second row from the bottom", isRule: true},
-		{name: "the bottom bar", has: "Provider:"},
-		{name: "the top bar", has: "Status:"},
-		{name: "the fifth row from the bottom", isRule: true},
-		{name: "the field", has: "please read the new preferences"},
-		{name: "the twiddle row", blank: true},
-		{name: "the active row", blank: true},
-		{name: "the task row", blank: true},
-	} {
-		line := lines[i]
-		switch {
-		case want.blank && line != "":
-			t.Errorf("%s is %q, want it blank", want.name, line)
-		case want.isRule && line != rule:
-			t.Errorf("%s is %q, want a separator", want.name, line)
-		case want.has != "" && !strings.Contains(line, want.has):
-			t.Errorf("%s does not carry %q: %q", want.name, want.has, line)
-		}
+	if n := len(got); n != 30 {
+		t.Errorf("the rule is %d bytes, want 30: three bytes to the column", n)
+	}
+	if got := FillBar(rule, 0); got != "" {
+		t.Errorf("FillBar at no width is %q, want it empty", got)
 	}
 }
 
-// TestTheFieldSitsAtColumnFive covers the indentation. A reader's eye follows the field
-// and the figure without jumping between rows, and both have the same left edge for it.
-func TestTheFieldSitsAtColumnFive(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{
-		Field:   "the field",
-		Twiddle: "thinking",
-	}, plainPalette())
-
-	for _, line := range stackRowsOnly(out.String()) {
-		if !strings.Contains(line, "the field") && !strings.Contains(line, "thinking") {
-			continue
-		}
-		if !strings.HasPrefix(line, strings.Repeat(" ", FieldIndent)) {
-			t.Errorf("the row is not indented to column five: %q", line)
-		}
-	}
-}
-
-// TestThePromptIsGone covers the removal. There was a `root@localhost $ ` at the head of
-// the field, and a reader at a known place on the bottom row does not need to be told
-// which account they are.
-func TestThePromptIsGone(t *testing.T) {
-	if Prompt != "" {
-		t.Errorf("Prompt is %q, want it empty", Prompt)
-	}
-
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{Field: "a question"}, plainPalette())
-
-	if got := out.String(); strings.Contains(got, "root@localhost") {
-		t.Errorf("the prompt is still in the frame:\n%s", got)
-	}
-}
-
-// TestTheStackDoesNotChangeHeight covers the reason all nine rows are drawn whether or not
-// anything is running. A footer that grows when a turn starts is a footer that moves the
-// field under the reader's hands.
-func TestTheStackDoesNotChangeHeight(t *testing.T) {
-	quiet, out := drawnAt(24, 80)
-	DrawStack(quiet, Bar{
-		Bottom: "Provider: openrouter.ai",
-		Field:  "a question",
-	}, plainPalette())
-	idle := len(stackRowsOnly(out.String()))
-
-	busy, other := drawnAt(24, 80)
-	DrawStack(busy, Bar{
-		Bottom:  "Provider: openrouter.ai",
-		Field:   "a question",
-		Twiddle: "⠋  thinking",
-		Active:  "active: working",
-		Tasks:   "tasks: 2 running",
-	}, plainPalette())
-	running := len(stackRowsOnly(other.String()))
-
-	if idle != running {
-		t.Errorf("the stack is %d rows when idle and %d while running, want the same",
-			idle, running)
-	}
-}
-
-// TestTheScrollRegionEndsAboveTheStack is the piece with no precedent in the tree. The
-// region has to end where the stack begins, or the first row written scrolls the field
-// off the screen.
-//
-// Forty rows with a nine row stack leaves thirty-one for the log.
-func TestTheScrollRegionEndsAboveTheStack(t *testing.T) {
+// TestNoScrollRegionIsWritten covers the reader's decision that this program manages only
+// the bottom of the terminal. There is no DECSTBM in a draw, since the terminal owns the
+// rows above the footer and the reader's own scrollback is the transcript.
+func TestNoScrollRegionIsWritten(t *testing.T) {
 	screen, out := drawnAt(40, 80)
-	screen.SetScrollRegion(logRows(40))
+	s := New(Options{Model: "stealth/space-bunny-alpha", Provider: "openrouter.ai"})
+	s.Deliver("a reply", 0)
 
-	if got, want := out.String(), "\x1b[1;31r"; got != want {
-		t.Errorf("the scroll region is %q, want %q", got, want)
+	if err := Run(s, screen); err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-}
-
-// TestTheScrollRegionFollowsAResize covers the recomputation. A region left at the old
-// size clips the log to a height the screen no longer has, which is a log that stops
-// growing with no way to see why.
-func TestTheScrollRegionFollowsAResize(t *testing.T) {
-	screen, out := drawnAt(40, 80)
-	screen.SetSize(WindowSize{Rows: 20, Cols: 80})
-
-	if got, want := out.String(), "\x1b[1;11r"; !strings.HasSuffix(got, want) {
-		t.Errorf("after a resize the region is %q, want it to end with %q", got, want)
-	}
-}
-
-// TestAShortTerminalKeepsTheField covers the one thing the ladder has to guarantee. The
-// field is held to the end; everything above it goes first.
-func TestAShortTerminalKeepsTheField(t *testing.T) {
-	screen, out := drawnAt(3, 80)
-	DrawStack(screen, Bar{Bottom: "Provider: -", Field: "a question"}, plainPalette())
 
 	got := out.String()
-	if !strings.Contains(got, "a question") {
-		t.Errorf("a three row terminal lost the field: %q", got)
-	}
-	if strings.Contains(got, "Provider:") {
-		t.Errorf("a three row terminal kept a bar it had no room for: %q", got)
-	}
-}
-
-// TestTheTwiddleMovesInPlace covers the one in-place redraw in the frame. It has to move
-// the cursor up and clear its row, since two braille cells do not cover a row and a figure
-// drawn over the last one leaves a smear rather than a turn.
-func TestTheTwiddleMovesInPlace(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawTwiddle(screen, plainPalette(), 0, "thinking")
-
-	got := out.String()
-	if !strings.Contains(got, escapeMoveUp) {
-		t.Errorf("the twiddle did not move the cursor: %q", got)
-	}
-	if !strings.Contains(got, escapeEraseLine) {
-		t.Errorf("the twiddle did not clear its row: %q", got)
-	}
-	if !strings.Contains(got, Twiddle(0)) {
-		t.Errorf("the figure was not written: %q", got)
-	}
-}
-
-// TestTheTwiddleCarriesTheStateWord covers the second half of the twiddle row. The word is
-// a visual echo of the Status field on the top bar, so a reader watching the figure knows
-// what it is reporting without a second thing to learn.
-func TestTheTwiddleCarriesTheStateWord(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawTwiddle(screen, plainPalette(), 0, "thinking")
-
-	if got := out.String(); !strings.Contains(got, "  thinking") {
-		t.Errorf("the state word is not beside the figure: %q", got)
-	}
-}
-
-// TestTheTwiddleWritesNothingWhenIdle covers the blank row. A figure that is not moving is
-// a figure a reader has to learn to ignore, so nothing is written at all rather than a
-// stopped figure.
-func TestTheTwiddleWritesNothingWhenIdle(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawTwiddle(screen, plainPalette(), 0, "")
-
-	if got := out.String(); got != "" {
-		t.Errorf("an idle twiddle wrote %q, want nothing", got)
-	}
-}
-
-// TestTheTwiddleIsTwoCellsWithOppositeHues covers the decision that makes two cells read as
-// one figure rather than two spinners. The cells are half a period apart and the hue
-// follows the character index, so the two are always opposite hues.
-func TestTheTwiddleIsTwoCellsWithOppositeHues(t *testing.T) {
-	for step := range 10 {
-		figure := Twiddle(step)
-		if got := len([]rune(figure)); got != 2 {
-			t.Errorf("step %d drew %d cells, want 2", step, got)
-		}
-		if TwiddleHue(step) == TwiddleHue(step+5) {
-			t.Errorf("step %d and step %d share a hue, want them opposite", step, step+5)
+	for _, seq := range []string{"\x1b[1;31r", "\x1b[1;33r", "\x1b[1;34r", "\x1b[1;38r"} {
+		if strings.Contains(got, seq) {
+			t.Errorf("a scroll region was written: %q", seq)
 		}
 	}
 }
@@ -473,8 +312,8 @@ func TestARunWritesTheLogAndTheStack(t *testing.T) {
 	if !strings.Contains(got, string(StateIdle)) {
 		t.Errorf("the Status field is missing the state:\n%s", got)
 	}
-	if !strings.Contains(got, "\x1b[1;31r") {
-		t.Errorf("the scroll region was not set:\n%s", got)
+	if !strings.Contains(got, Prompt) {
+		t.Errorf("the prompt row is missing:\n%s", got)
 	}
 }
 
@@ -639,6 +478,21 @@ func TestABarWithNoWidthIsNotCut(t *testing.T) {
 
 	if !strings.Contains(got, "Host") {
 		t.Errorf("a bar with no width lost a field: %q", got)
+	}
+}
+
+// TestTheTwiddleIsTwoCellsWithOppositeHues covers the decision that makes two cells read as
+// one figure rather than two spinners. The cells are half a period apart and the hue
+// follows the character index, so the two are always opposite hues.
+func TestTheTwiddleIsTwoCellsWithOppositeHues(t *testing.T) {
+	for step := range 10 {
+		figure := Twiddle(step)
+		if got := len([]rune(figure)); got != 2 {
+			t.Errorf("step %d drew %d cells, want 2", step, got)
+		}
+		if TwiddleHue(step) == TwiddleHue(step+5) {
+			t.Errorf("step %d and step %d share a hue, want them opposite", step, step+5)
+		}
 	}
 }
 

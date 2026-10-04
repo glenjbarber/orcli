@@ -17,17 +17,18 @@ import (
 // returns strings, and a draw is the only place a string becomes bytes the terminal will
 // act on, so the owner of the bytes is the owner of the terminal.
 //
-// # The scroll region
+// # What this package owns
 //
-// The log and the footer stack share one screen, so the terminal has to be told where the
-// log ends. That is DECSTBM, set on entry and recomputed on every resize, with the log
-// clipped to rows `1..H-stackRows`. Without it the stack would scroll away the first
-// time a row was written, and the reader would lose the field they are typing into.
+// The footer, and nothing above it. There is no scroll region: the terminal owns the rows
+// above the footer, this package writes rows there and never moves the viewport, and the
+// reader's own scrollback is the transcript.
 //
-// This is the one piece of the frame with no precedent in the tree, and the piece most
-// likely to be wrong. It lives here rather than in a screen.go of its own because a
-// scroll region that is set by one function and recomputed by another is two things that
-// have to agree about the same number.
+// The consequence is that the footer is not pinned. A log row long enough to scroll the
+// screen pushes the footer up with everything else, and the next paint writes the footer
+// again at the bottom rather than where it was. That is the reader's decision rather than
+// a fault to repair here, and it is why a keystroke redraws the prompt row alone: the
+// footer is terminal rows, so rewriting all of it on every keystroke advanced the screen
+// by the footer's height each time.
 
 // WindowSize is a terminal's size in rows and columns.
 //
@@ -82,19 +83,23 @@ func (s *Screen) Height() int { return s.Size().Rows }
 // Width returns the number of columns.
 func (s *Screen) Width() int { return s.Size().Cols }
 
-// SetSize adopts a new size and recomputes the scroll region.
+// SetSize adopts a new size.
 //
-// The region is recomputed rather than left, since a terminal resized taller gives the
-// stack rows it did not have and one resized shorter takes them away. A region left at the
-// old size clips the log to a height the screen no longer has, which is a log that stops
-// growing with no way to see why.
+// A paint asks the terminal before it draws, since a rule drawn at the width the terminal
+// had two resizes ago is a rule the wrong length.
 func (s *Screen) SetSize(size WindowSize) {
 	s.mu.Lock()
 	s.rows, s.cols = size.Rows, size.Cols
 	s.mu.Unlock()
-
-	s.SetScrollRegion(logRows(size.Rows))
 }
+
+// Writer returns what this screen writes to, for a caller that has to send a worker's
+// output to the terminal rather than into the log.
+//
+// It is a method rather than the field so a caller holding the Screen cannot reach the
+// writer and write to it behind the lock that serialises draws. Two writers interleaving
+// produce a row with half a sequence in it.
+func (s *Screen) Writer() io.Writer { return s.out }
 
 // Write sends text to the terminal.
 //
@@ -116,27 +121,6 @@ func (s *Screen) Write(text string) {
 		return
 	}
 	io.WriteString(s.out, text)
-}
-
-// SetScrollRegion tells the terminal where the log ends.
-//
-// DECSTBM takes the first and last row of the region, both counted from one. The region
-// ends one row above the stack, so the log cannot scroll the field off the screen. A
-// size too small for a region is left alone rather than set to something that hides the
-// log, since a wrong region is worse than none.
-func (s *Screen) SetScrollRegion(logHeight int) {
-	rows, cols := s.Size().Rows, s.Size().Cols
-	if rows < minSize || cols < minSize {
-		return
-	}
-	if logHeight < 1 {
-		logHeight = 1
-	}
-	if logHeight > rows {
-		logHeight = rows
-	}
-
-	s.Write(fmt.Sprintf("\x1b[%d;%dr", 1, logHeight))
 }
 
 // SizeOf asks the terminal how large it is.
@@ -257,7 +241,7 @@ type interfaceLoop struct {
 	// for.
 	group *group
 
-	// editor is the field on the bottom row.
+	// editor is the field on the prompt row.
 	editor Editor
 
 	// mu guards cancel, which the turn's own goroutine clears while the loop reads
@@ -268,6 +252,16 @@ type interfaceLoop struct {
 	// drawn is how many log rows have been painted, so a paint writes the rows that
 	// arrived since the last one and never the whole log again.
 	drawn int
+
+	// footer is the Bar the last paint drew, and the reason a paint that has nothing
+	// new to say writes nothing. It is compared rather than tracked by version, since
+	// what the reader sees is the text and not a counter.
+	footer Bar
+
+	// footerDrawn reports whether the footer has been painted at all, so the first
+	// paint draws it and a later paint that happens to compute the same Bar still
+	// knows it was drawn.
+	footerDrawn bool
 
 	// step is the twiddle's position, advanced on each paint while a turn runs.
 	step int
@@ -299,39 +293,31 @@ func (l *interfaceLoop) paintAndRead(ctx context.Context) error {
 
 // paint draws what has changed since the last one.
 //
-// The log is append-only and is written forward from what was drawn, never redrawn
-// whole: the frame's one rule is that the reader's own scrollback is the transcript,
-// and a log rewritten under them is a log they cannot scroll back through. The stack
-// is redrawn whole, since it is a fixed number of rows at the bottom.
+// The rows are append-only and are written forward from what was drawn, never redrawn
+// whole: the frame's one rule is that the reader's own scrollback is the transcript, and
+// a log rewritten under them is a log they cannot scroll back through.
 //
-// The size is asked for here rather than only when a resize is signalled, so a
-// terminal that reports its size by some other mechanism is still drawn correctly.
-// The signal only says there is something worth asking about sooner than the next
-// keypress.
+// Three cases, decided by what changed:
+//
+//   - nothing: the footer is left alone and only the caret is placed.
+//   - the prompt row alone: the row is rewritten in place, since that is where the
+//     reader's typing goes and rewriting the whole footer for one character advances the
+//     screen by the footer's height.
+//   - anything else: the whole footer is drawn, since a bar or the figure has moved and
+//     the rows around it have to move with it.
 func (l *interfaceLoop) paint() {
 	screen := l.screen
 
-	// The size is adopted before the region is set, since the region is a function
-	// of the size and setting one with the other a resize away is a region the
-	// frame does not agree with.
+	// The size is adopted before anything is drawn, since a rule drawn at the width the
+	// terminal had two resizes ago is a rule the wrong length.
 	if size := SizeOf(l.keys.fd); size.Rows >= minSize && size.Cols >= minSize {
 		screen.SetSize(size)
-	} else if resized() {
-		// A terminal that answered nothing is left at the size it is rather than
-		// given a zero, since every row cut to no width is a log of empty lines
-		// with no way to tell that from a log with nothing in it.
-		screen.SetScrollRegion(logRows(screen.Height()))
 	}
 	resized()
-
-	screen.SetScrollRegion(logRows(screen.Height()))
 
 	palette := paletteOf(l.session)
 	rows := l.session.Log().Rows()
 
-	// The rows are written with the region in place, so the terminal scrolls the
-	// log rather than the stack. A row reaching the bottom of the region pushes the
-	// others up, which is the whole of what this frame does.
 	if l.drawn < len(rows) {
 		DrawLog(screen, rows[l.drawn:], palette)
 		l.drawn = len(rows)
@@ -340,29 +326,60 @@ func (l *interfaceLoop) paint() {
 	opts := l.session.Options()
 	state, detail := l.session.State()
 
-	DrawStack(screen, Bar{
+	footer := Bar{
 		Top: RenderTop(string(state)+detailSuffix(detail), "", "", "", "", "", ""),
 		Bottom: RenderBottom(l.sessionName(), opts.Mouse, false,
 			opts.Provider, opts.Model, "", string(opts.Approval)),
 		Field: l.fieldRow(),
-	}, palette)
+	}
 
-	// The twiddle is the one in-place redraw, and only while a turn is running: a
-	// figure moving over an idle frame is a figure the reader has to learn to ignore.
-	// It is blank when idle, so nothing is written to the row at all.
+	// The figure takes the prompt row while a turn is running, so a step is a change
+	// to the footer rather than a separate write above it. It is only carried while a
+	// turn is running: a figure over an idle frame is a figure the reader has to learn
+	// to ignore, and the prompt row carries the reader's own line then.
+	running := false
 	switch state {
 	case StateThinking, StateWorking:
 		l.step++
-		DrawTwiddle(screen, palette, l.step, twiddleWord(state))
+		running = true
+		footer.Twiddle = strings.Repeat(" ", TwiddleIndent) +
+			TwiddleHue(l.step) + Twiddle(l.step) + "  " + twiddleWord(state)
 	default:
 		l.step = 0
-		clearTwiddleRow(screen)
 	}
 
-	// The cursor goes back to the field on every paint rather than once at entry.
-	// The twiddle moved it a row up, a resize moved it, and a paint that ended
-	// anywhere else would leave a caret in the middle of the log.
-	l.placeCaret()
+	switch {
+	case !l.footerDrawn:
+		DrawStack(screen, footer, palette)
+		l.footer = footer
+		l.footerDrawn = true
+
+	case sameFooterExceptField(l.footer, footer):
+		// A keystroke, or an edit to the field. Only the prompt row changed, so only
+		// that row is written.
+		l.drawPromptRow(footer, palette)
+		l.footer = footer
+
+	case footer != l.footer:
+		DrawStack(screen, footer, palette)
+		l.footer = footer
+	}
+
+	// The cursor goes back to the prompt row on every paint rather than once at entry,
+	// so a reader typing into a caret they cannot see is never the state they are in.
+	l.placeCaret(running)
+}
+
+// sameFooterExceptField reports whether two footers differ only in the reader's own text.
+//
+// It is the test that keeps a keystroke from rewriting the footer. The bars and the figure
+// are what occupy the rows around the prompt row, and a change to any of them has to move
+// them; a change to the field does not, since the field is on the prompt row and that row
+// is rewritten where it is.
+func sameFooterExceptField(old, next Bar) bool {
+	return old.Top == next.Top &&
+		old.Bottom == next.Bottom &&
+		old.Twiddle == next.Twiddle
 }
 
 // sessionName is what the bottom bar calls the session being typed into.
@@ -372,26 +389,17 @@ func (l *interfaceLoop) paint() {
 // it.
 func (l *interfaceLoop) sessionName() string { return "Session 1" }
 
-// twiddleWord is the word beside the figure on the twiddle row.
+// twiddleWord is the word beside the figure.
 //
 // It is the state itself rather than a second set of words, since a figure beside a
-// word the reader has to learn is two vocabularies where one would do. The twiddle
-// shows which of the two running states this is, which is what a reader watching a
-// pause between the first token and the rest is looking for.
+// word the reader has to learn is two vocabularies where one would do. The figure shows
+// which of the two running states this is, which is what a reader watching a pause
+// between the first token and the rest is looking for.
 func twiddleWord(state State) string {
 	if state == StateThinking {
 		return "thinking"
 	}
 	return "working"
-}
-
-// clearTwiddleRow blanks the row above the field.
-//
-// It moves up and erases rather than writing a space, since the row may hold colour
-// from the figure and a space written plainly over a coloured row leaves the colour
-// showing through.
-func clearTwiddleRow(w *Screen) {
-	w.Write(escapeMoveUp + escapeEraseLine + "\x1b[0m")
 }
 
 // act applies one key and reports whether the loop should leave.
@@ -442,9 +450,9 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 		return true
 
 	case KeyMouse:
-		// A report nothing acts on. Mouse reporting is off, so this arrives only
-		// from a terminal that was asked for it by something else, and consuming it
-		// is what keeps its bytes out of the field.
+		// A report nothing acts on. Mouse reporting is off and /mouse is not wired,
+		// so this arrives only from a terminal that was asked for it by something
+		// else, and consuming it is what keeps its bytes out of the field.
 
 	case KeyUp, KeyDown:
 		// Read so a reader pressing one is not left pressing. This unit has no
@@ -486,7 +494,7 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 //
 // The turn runs on its own goroutine and the loop carries on, which is the whole point
 // of a session that holds its log rather than blocking on a reply. The reader keeps
-// typing, the twiddle moves, and escape reaches the cancel below.
+// typing, the figure moves, and escape reaches the cancel below.
 //
 // The count is raised before the goroutine starts and lowered after its answer has been
 // drawn, so a reader who leaves while a turn is in flight waits for it rather than
@@ -552,8 +560,6 @@ func Run(s *Session, screen *Screen) error {
 	if screen == nil || screen.out == nil {
 		return errors.New("tui: Run was given no terminal to draw on")
 	}
-
-	screen.SetScrollRegion(logRows(screen.Height()))
 
 	palette := paletteOf(s)
 	DrawLog(screen, s.Log().Rows(), palette)

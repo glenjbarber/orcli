@@ -8,15 +8,16 @@ import (
 
 // TestTheStackOrderIsTopToBottom is a diagnostic. It prints what DrawStack writes, in
 // order, so a reader can see which row lands where rather than infer it from the slice.
+//
+// It exists because a footer that is read from the bottom of the screen and written from
+// the top is two directions, and every layout fault this package has had came from
+// confusing them.
 func TestTheStackOrderIsTopToBottom(t *testing.T) {
 	screen, out := drawnAt(24, 80)
 	DrawStack(screen, Bar{
-		Bottom:  "Provider: openrouter.ai",
-		Top:     "Status: working",
-		Field:   "THE FIELD",
-		Twiddle: "THE TWIDDLE",
-		Active:  "THE ACTIVE ROW",
-		Tasks:   "THE TASK ROW",
+		Bottom: "THE BOTTOM BAR",
+		Top:    "THE TOP BAR",
+		Field:  "THE FIELD",
 	}, plainPalette())
 
 	lines := stackRowsOnly(out.String())
