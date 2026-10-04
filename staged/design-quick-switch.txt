@@ -1,0 +1,271 @@
+# Quick switch: where a line goes when it is sent
+
+The user's report. A screen with a main pane carrying the input box and a
+three-window pane for output. `ctrl+j` and `ctrl+;` move between the output
+windows. Sending a message to the second window, the one `/spawn` interacts with,
+means prefixing every command with `/spawn`; the same for `/delegate`. This makes
+a single input window sending to three output windows confusing, and it is why a
+paste cannot be sent to a `/spawn` today: the paste path and the typed path are
+different, and only the typed path reads the `/spawn` prefix.
+
+The request: a quick switch between the interactions, so that
+
+- window 0 sends everything to the session default,
+- window 1 sends everything through `/spawn`'s path,
+- window 2 sends everything through `/delegate`'s path,
+- `/btw` is unaffected and stays with the main session,
+
+and switching with `ctrl+j` and `ctrl+;` sends the reader's line to the right
+window without a prefix, so a paste goes where the window says it goes.
+
+## What is being asked for, stated as one thing
+
+**The window you are looking at is the destination.** Today the window is a
+viewport and the destination is a prefix in the input box. This moves the
+destination into the window and takes the prefix away, which is what makes the
+paste work and what removes the reader having to remember which window they are
+in.
+
+## The name window against the name pane
+
+The report calls them windows. The tree has no windows and its panes are gone.
+`DESIGN-NOTES.md` records that the three-pane set went with `/pane`, `Ctrl-B j`
+and `Ctrl-B ;`, and that every row in the log carries a level instead, since a
+level identifies who is responding and a pane did not.
+
+So the three things the reader switches between are not panes in the frame. They
+are three **destinations**, and the thing that switches is a routing selector
+rather than a viewport. The design below calls it the destination and keeps the
+reader's numbering, 0, 1 and 2.
+
+This matters because the two are different properties and the older frame had them
+fused. A pane is where you look; a destination is where a line goes. Fusing them
+is what made the reader type a prefix at all: the reader was in the `/spawn`
+window, the input box held no `/spawn` in it, and so the reader typed one, in a
+field that was supposed to hold a question.
+
+## The destination
+
+```go
+// Destination is where a line the reader sends goes.
+//
+// It is one value rather than a mode on the session, since the session already
+// has four states and a fifth would be a fifth thing the bar has to explain.
+type Destination int
+
+const (
+    // DestSession is the main conversation, destination 0.
+    DestSession Destination = iota
+    // DestWorker is the worker `/spawn` starts, destination 1.
+    DestWorker
+    // DestDelegate is the delegate `/delegate` asks, destination 2.
+    DestDelegate
+)
+```
+
+Three values and no more. A fourth would be a destination with no path behind
+it, and `/btw` is deliberately not one, since the reader settled that `/btw` stays
+with the main session.
+
+The names are the paths rather than the commands, because the command names are
+`/spawn` and `/delegate` and the destinations are the worker and the delegate
+those commands start. A name that is the command makes a reader wonder whether
+typing `/spawn` in destination 1 starts a second one.
+
+## The rule
+
+**A line sent while the destination is 1 goes through `/spawn`'s path. A line
+sent while it is 2 goes through `/delegate`'s path. A line sent while it is 0 goes
+to the session default, which is the main conversation.**
+
+There is no separate rule for the prefix. The prefix stops being how you choose,
+and it is still how the command is recognised, so a reader who types `/spawn`
+while in destination 0 gets a second worker, which is what they asked for and
+what they would have got before.
+
+`/btw` is unaffected: it is a command like any other and it goes to the session
+whatever the destination is. It is not a destination and this design does not make
+it one.
+
+## The keys
+
+`ctrl+j` and `ctrl+;` move between the three destinations, in the direction the
+reader already has them.
+
+- `ctrl+j` moves to the next destination, wrapping, so 0 to 1 to 2 to 0.
+- `ctrl+;` moves to the previous one, wrapping, so 0 to 2 to 1 to 0.
+
+Two keys rather than one, matching the report. Both wrap rather than stopping at
+the ends, since a reader pressing one of them expects movement and stopping is a
+movement that does not happen. The cost is that a reader who does not know there
+are three cannot tell where the ends are, which the prompt row answers by naming
+the destination.
+
+## What the reader sees
+
+The prompt row carries the destination, beside the prompt and not inside it.
+
+```
+root@localhost $   1 spawn
+```
+
+Three renderings, decided:
+
+- **The number alone**, as `0`, `1`, `2`, matching what the reader is switching
+  between and costing one column.
+- **A name beside the number**, so destination 1 reads `1 spawn`, since a number
+  a reader has to remember is a number the design has not explained.
+- **A name alone**, which is friendlier and hides the numbering the reader already
+  uses.
+
+The second is the lean. The report is in numbers, the numbers cost one column, and
+`1 spawn` names the path a line will take, which is the thing the reader is
+checking before pressing enter.
+
+The name is a **hint, not text**. It is drawn in the dim role, it is not part of
+the composed line, and it is never sent. The alternative is prepopulating the
+input box with the command name, which is what the older design did with worker
+tabs and what the report is complaining about: a field that holds two things, the
+command and the question, is a field whose caret has to be somewhere specific
+before every send.
+
+A field that holds only what the reader typed is the whole of this change. A paste
+lands in a field that holds nothing but the paste.
+
+## Each destination keeps its own composed line
+
+Leaving a destination and coming back does not lose what was being written. Three
+fields, one per destination, so a reader typing a long question for a worker,
+switching to ask the main session something short, and switching back finds the
+long question intact.
+
+A line sent clears the field it was sent from, back to empty, since the answer is
+in the log and the question does not need composing again. This is the rule the
+older design already set for worker tabs and it is right for the same reason.
+
+## The paste
+
+**A paste goes where the destination says, with no prefix and no command.** This is
+the pain point the report names and the reason the destination exists at all: a
+paste and a typed line go down the same path, because the only thing that decided
+the path before was a prefix in the field, and a paste has no prefix to carry.
+
+The three things this depends on, all settled elsewhere and recorded here because
+this unit does not settle them:
+
+- A paste with newlines is **one prompt**, not several submissions.
+- A paste too long for the field is folded, and the text sent is the whole paste
+  unaltered.
+- Bracketed paste is on for the interface lifetime and off at exit.
+
+## Where the destination lives
+
+On the session, beside the log and the state, under the session's own lock. It is
+reader state that outlives a repaint, so it does not belong on the `Screen`, and it
+is read and written by the input goroutine, so it does not need the turn's lock.
+
+Not in a package variable. Two sessions in one process, which a test would have,
+would otherwise share a destination, and a test asserting a switch would pass
+against the wrong session.
+
+## Switching while a turn is working
+
+**Switching is allowed while a turn is working.** A reader who has asked the main
+session something and wants to send a worker a message does not have to wait, and
+the older design refused several commands while working for the same reason
+(`/btw`, `/new`, `/clear` and `/approve` carry `IdleOnly`).
+
+Switching is not one of those commands. It changes no conversation and starts no
+turn, so there is nothing for `IdleOnly` to protect.
+
+What is refused while working is **sending to a destination whose path is busy**,
+and the rule is the queue rather than a refusal: a line sent to a worker while that
+worker is running is queued for that worker, and the reader is told it was queued
+rather than refused. This matches `AGENTS.md`: a call always produces a result, and
+a line sent and dropped is a call that produced nothing.
+
+A line sent to the main conversation while the main turn runs is the existing
+`KindQueued` row, and this changes nothing about it.
+
+## What this does not change
+
+**`/spawn` and `/delegate` still work as commands.** The destination is where a
+line goes, and a reader who types `/spawn some question` in destination 0 is asking
+for a worker and gets one. The destination is not a replacement for the commands,
+it is the removal of the need to type them every time.
+
+**`/btw` is unaffected**, as the report asks.
+
+**`/pane` and the frame are gone and stay gone.** This design does not bring back a
+pane, a viewport, or anything that scrolls separately. The destinations are three
+rows in one log, and the level on each row already says which destination wrote
+it.
+
+**The four session states do not change.** A destination is not a state. The
+Provider bar's Status field continues to carry `idle`, `thinking`, `working` or
+`paused`, and a reader who has switched to a worker while the main turn runs sees
+`working`, which is true of the session and not of the worker, which is what
+`worker.go` already separates `WorkerState` for.
+
+## What this settles, and what it leaves
+
+Settled: the destination is three values; the keys are `ctrl+j` and `ctrl+;` and
+both wrap; the prompt row carries the number and the name as a hint; each
+destination keeps its own field; a paste goes where the destination says; `/btw`
+is unaffected; switching is allowed while working.
+
+**Open, and it is a question for the reader:** what happens to a **worker or a
+delegate that has finished**. Today `/spawn` starts a worker and the reader goes
+back to the main session. With destinations, the reader switches to destination 1
+and sends a line. Is that a second worker, or a follow-up to the first one that
+has finished?
+
+The lean is that the destination names a **path**, not a worker. A line sent to
+destination 1 starts a worker each time, exactly as `/spawn` does today, because a
+destination that remembers one worker is a destination that goes stale when that
+worker is closed and the reader has to find out that their next message went
+nowhere. A destination that is a path has nothing to go stale.
+
+The alternative is that destination 1 holds the most recent worker and a line sent
+there continues it while it is open, which is what a reader might mean by
+"window 1". It is the same ambiguity the level design already answers: a worker is
+retired rather than reused, so continuing a finished one is not something this
+program does.
+
+**Open:** whether the destination is reported in the log when it changes. A row
+naming the switch would be in the transcript and `/copy 0` would copy it, which is
+noise. The prompt row carrying it is the answer this design takes, and a reader
+who wants it in the transcript can ask.
+
+## Alternatives rejected
+
+**Keep the prefix and make the paste carry it.** A paste could be prefixed with
+`/spawn` before it lands in the field. It is rejected because the prefix is the
+thing being removed: it is text in a field that holds a question, it is lost the
+moment the reader edits the first word of the paste, and a reader who pastes into
+destination 1 by accident has to read the start of the paste to find out.
+
+**One destination rather than three.** A single toggle between main and worker
+would answer the paste problem in the common case. It is rejected because the
+report names three windows and the reader is already moving between three, so a
+two-state toggle makes the third window somewhere lines cannot be sent.
+
+**Keep the panes and fix only the routing.** The frame could keep three viewports
+and route lines by which one is in front. It is rejected because the panes are
+gone by a decision the reader made, and a routing fix that requires reinstating
+them is not a fix.
+
+**Make the destination a mode on the session's existing state.** Rejected: the
+state is one of four values the Provider bar shows, and a fifth would be a fifth
+thing to explain in a bar whose field order is already fixed.
+
+## Unverified
+
+Nothing here was run against a terminal or against a live session. Whether
+`ctrl+j` and `ctrl+;` reach the reader as two distinct keys on every terminal this
+builds for, and whether the dim hint reads as a hint rather than as text the
+reader is about to send, are not settled by a test. The tests that would be
+written cover the wrap in both directions, the routing of a line in each of the
+three destinations, a paste going to the destination it was pasted in, `/btw`
+going to the session from any destination, and a line sent to a busy worker being
+queued rather than dropped.
