@@ -1,0 +1,199 @@
+### The status bar as the whole interface
+
+A design record, written at the reader's instruction on
+feature/bottom-console-input. Nothing here is built. This is the shape the
+frame takes if the footer's rows are treated as dynamic status bars rather
+than as six rows the program draws once and then leaves alone, and it is
+written down before any of it is written in code.
+
+The short of it: the six rows become a region the program owns and rewrites
+on every paint, the log gets whatever is left, and the frame stops being a
+sequence of terminal rows written downward. The one question that decides
+the rest is whether the program keeps the primary screen or takes the
+alternate one.
+
+## Where the frame is today, as verified in the code
+
+Six rows, described in stack.go by the constants rowFirst through
+rowPrompt,
+and counted by fullStackRows. Two carry ReservedRowText, one carries the
+twiddle figure, one carries the top bar, one the bottom bar, and the last
+carries the prompt and what the reader has typed.
+
+The rows are placed by footerScreenRow, which returns 1 + k since the stack
+moved to the top of the screen. Before that move it returned
+screen.Height() - drawn + 1 + k, which put the prompt row on the bottom
+row of the terminal and made the caret's row a function of the height.
+
+DrawStack writes the rows downward from wherever the cursor is, addressed
+once to row one before the first line goes out. DrawFooterRow rewrites one
+row in place, addressed by escapePosition and cleared with escapeEraseLine.
+That second path is the one a keystroke takes, and it exists precisely so
+that typing one character does not append the footer's height and a line
+ending and push the reader's own line down the screen. The three cases in
+paint are the whole of it: nothing changed, the prompt row alone changed, or
+something else changed and the footer is drawn whole.
+
+placeCaret writes the row and column as absolute values and then advances
+forward from column one by the prompt's width and what has been typed. It
+never moves the cursor up through the frame, and the comment on the file
+says why: a row named by a figure that a draw left the cursor somewhere is a
+row the caret can end up off.
+
+The log is the rest of the screen. DrawLog writes rows downward and never
+moves the viewport. The scroll region is set on every paint and clips the
+log, and LogRows reports the height less the rows the footer draws.
+
+The frame's one rule is in the header comment of stack.go and it is the
+thing this record is about: the reader's own scrollback is the transcript,
+and a log rewritten under them is a log they cannot scroll back through.
+Every decision in the drawing code follows from it.
+
+## What is wrong with that today, as reported by the reader
+
+Two symptoms, one cause, and the cause is a mis-set region rather than a
+wrong idea.
+
+LogRows(24) reports 18, and SetScrollRegion writes ESC [ 1 ; 18 r, since
+the first row of a region is hardcoded to 1. So rows 1 through 18 are the
+log's scrolling region and rows 19 through 24 are outside it. The footer is
+now on rows 1 through 6, which are inside the region, so a log row long
+enough to scroll goes over the six rows the reader is typing into. And rows
+19 through 24 can never be scrolled into, which is what reads as the output
+being capped to the height of the status bars.
+
+Moving the stack to the top of the screen made both visible. The region was
+always 1;18r and always wrong for a stack that is not at the bottom.
+
+The minimal fix is two signatures: SetScrollRegion takes a first row as well
+as a last, and paint passes the row below the stack, giving 7;24r. That is
+worth doing on its own and is not this document. It fixes a bug. This
+document is about whether the frame should be built a different way.
+
+## What dynamic status bars means here
+
+The distinction is not where the bars are. Both arrangements put six rows
+somewhere. The distinction is who owns the screen.
+
+Today the program owns six terminal rows and borrows the rest. It writes
+the six once, writes one of them again on a keystroke, and lets the terminal
+scroll everything else. The terminal's buffer is the record and the program
+is a guest in it, which is why the region matters and why every write has
+to be placed against a cursor the program does not fully control.
+
+Under the concept the program owns the screen. It holds the log itself, it
+draws the log where the log goes, and it redraws the six bars on every
+paint because every bar is a function of state that moves second by second.
+The bars are then genuinely dynamic: the top bar's Status value and the
+twiddle sweep change every step, and a bar that is redrawn only when the
+reader types is a bar that lags the thing it reports.
+
+Three consequences follow, and they are the design.
+
+The bars stop being rows that scroll. A row the program writes once and
+leaves is a row that ends up somewhere else the moment the log grows. A bar
+the program rewrites by position is a bar that is where the reader expects it
+whenever they look.
+
+The log stops being the terminal's scrollback. It becomes rows the program
+holds, which it can place, cut, and redraw, and which it has to keep itself
+since nothing else is keeping them.
+
+Keystrokes stop being special. Today a keystroke takes the
+DrawFooterRow path because drawing the whole footer on every key would
+advance the screen. Under the concept the whole bar set is redrawn on every
+paint anyway, so there is one path rather than two and the special case
+disappears.
+
+## The question that decides it: the primary screen or the alternate one
+
+A pinned region and a persistent scrollback cannot both be had on the
+primary screen, and the reason is in the terminal rather than in this code.
+
+On the primary screen, every row written scrolls the buffer once the cursor
+is on the last row. A row the program reserves and rewrites still consumes
+buffer entries, so the transcript and the bars contend for the same history.
+A program that pins its bars has to either give up the terminal's record of
+the transcript or accept that its own rows are interleaved with it.
+
+The alternate screen takes the buffer. Nothing written there survives the
+exit, so the transcript has to be written back on the way out, and the
+scrollback a reader had before the program started comes back when it stops.
+
+Three arrangements, and what each costs.
+
+**Primary screen, log in a region, bars at the bottom.** The frame as it
+was before the move. The region is the log's, the bars are the last rows,
+and the reader's scrollback is the transcript. A long log scrolls inside the
+region and the bars stay. The reader cannot have stdout above the bars,
+because the bars are at the bottom and stdout is what was printed before the
+program started.
+
+**Primary screen, bars at the top, log in a region below them.** What the
+tree holds now, with the region fixed. The reader's earlier output stays
+above the bars as scrollback, the log scrolls below them, and the bars are
+drawn downward once. This is the smallest change that gives the reader what
+they asked for, and it keeps the frame's one rule.
+
+**Alternate screen, the program holding the log.** The bars can be redrawn
+on every paint, at the top or the bottom, and the log is rows the program
+places. The transcript is written back to the primary screen on exit. The
+cost is that the transcript is not live scrollback while the program runs,
+and that a reader who scrolls up mid-session scrolls a buffer the program
+has to render, which is a viewport the frame currently does not have at all.
+
+The recommendation is the second, on the grounds that it fixes what is
+broken without spending the frame's one rule. The concept is worth doing
+for its own sake later, and the third arrangement is where it belongs.
+
+## What this settles and what it does not
+
+It settles the diagnosis. The capped output and the overwritten bars are
+one bug in the region bounds, not a symptom that the frame needs to be
+rebuilt, and fixing the two signatures removes both.
+
+It does not settle whether the bars are ever redrawn per paint. Under the
+second arrangement they are drawn once and one row is rewritten on a
+keystroke, which is what the code does now, and the top bar's Status value
+therefore changes only on a repaint for another reason. Whether the bars
+need a per-step repaint while a turn runs is a question about the sweep and
+the step counter, and it is answerable without the alternate screen: paint
+runs on every loop iteration, so a bar that is compared and found equal is
+not written, and a bar whose sweep differs from the last paint's is.
+
+It does not settle the two reserved rows. They carry ReservedRowText,
+which is a placeholder, and a bar that is genuinely dynamic has no reason
+for two of its six rows to be placeholders. Whether the reserved rows are
+dropped, filled, or kept is a separate question and is not answered here.
+
+It does not settle where the bars go in the long run. The reader asked for
+row one to be the first reserved row and stdout above, and the second
+arrangement is that. Whether the bars belong at the top or the bottom is a
+preference and not a derivation, and the design record does not pretend
+otherwise.
+
+## The cost, stated plainly
+
+This is not a small change and it should not be described as one. The
+alternate screen arrangement touches DrawStack, DrawFooterRow, placeCaret,
+the region arithmetic, and the log's own storage, since the log stops being
+terminal scrollback and becomes rows the program keeps. Each of those has a
+test holding a property it would have to keep holding, which is the test
+suite saying what the change costs before the change is made.
+
+The second arrangement is two signatures and one call site. It is what the
+reader should get now.
+
+## Open questions for the reader
+
+- Should the bars be redrawn on every paint, or only when one of them has
+  changed? The code compares the Bar and skips the write when it is equal,
+  so the answer is already effectively the second, and the sweep is the one
+  thing that changes on its own.
+- Should a bar wider than the terminal scroll, wrap, or be cut? barWidth is
+  1 and joinWithin joins the whole list at every width, so a bar is wider
+  than the terminal on most terminals and is clipped by the terminal rather
+  than by the program.
+- Should the log region start at the row below the stack, which is 7;24r,
+  or should the program own the whole height and place the bars over the
+  log? The first is the second arrangement and the second is the concept.
