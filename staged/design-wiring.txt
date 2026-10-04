@@ -1,0 +1,142 @@
+Module: 0
+Worker ID: 6
+Merged: started
+Status: wiring Run into startup on feature/tui-run-call-startup
+
+# Design: call the frame that is already drawn
+
+Branch `feature/tui-run-call-startup`, off `main` at `be27ba7`. The design first,
+then the implementation, the documentation and the tests as three commits after
+it.
+
+## Why this record is not called staged/status.txt
+
+`.orcli.md` names `staged/status.txt` as where a worker keeps its design, and that
+is where mine would go. The file is tracked on `main`, holding the record
+committed at `af24236` for a different unit: the instruction search and the retry
+transport. It belongs to that work and is not mine to replace.
+
+So this record is `staged/design-wiring.txt`, and the file `.orcli.md` names is
+left as it is found. One file per unit under `staged/`, named for the unit, is a
+naming convention rather than a change to the rule, and the alternative is
+overwriting a committed record that exists nowhere else.
+
+## The three pieces, and what each one really is
+
+**The recovered design record.** `staged/design-draw.txt` in this worktree is the
+drawing worker's own record, recovered from the untracked file it left in
+`worktrees/feature/tui-run-draw/staged/status.txt`. It is committed as written,
+unedited, and the differences between it and what merged are recorded here.
+
+Two differences, both confirmed by reading the merged code.
+
+The record says the branch was off `3fb7032`. It was, and that is still true of
+the record. `main` has since taken three commits, including the merge of the
+drawing itself, so a branch made from that instruction today starts somewhere
+else. The record names where the work was written from rather than where the work
+is, which is what a design record is for.
+
+The record says "The hint row is left out." The merged `stack.go` draws one,
+blank: `stackLines` returns `""` between the Provider rule and the prompt. Both
+are the same decision reached twice. The record said not to invent entries, and
+the code holds the row and leaves it empty rather than not holding it. The
+comment above `stackLines` says why, and that comment is the more useful of the
+two records, since a reader looking at the code sees the reason rather than the
+summary.
+
+So the record goes in as written. Where it and the code disagree, both are
+committed and this section says which is which. A record edited to match the
+result is a record of the result.
+
+## What `Run` is, read from the code rather than from the record
+
+```
+func Run(s *Session, screen *Screen) error
+```
+
+Three things about it decide this unit.
+
+It takes a `*Screen`, and a `Screen` is built by `NewScreen(out io.Writer, size
+WindowSize)`. The caller owns the writer and the size, so this unit supplies
+both.
+
+It draws once and returns: it sets the scroll region, calls `DrawLog` over
+`s.Log().Rows()`, reads `s.State()`, calls `DrawStack`, returns nil. There is no
+loop, no key read and no resize watch. `DrawTwiddle` exists and `Run` never calls
+it, since the frame it draws has no step to draw at.
+
+It takes a `*Session`, and a session is built by `tui.New(Options)`. `Options`
+carries the credential, the model, the provider, the approval, the working
+directory, colour, bell, mouse and cognito. `tui.New` appends one banner row, so
+a session handed to `Run` already has something to draw.
+
+## The call, and the shape of it
+
+`Run` draws and returns. Calling it from startup and then returning opens the
+frame, writes it, and closes it inside the same instant, so the reader sees the
+log scroll past and the stack gone before they can read it. That is not the
+interface, and it is also not something this unit can fix: a frame that stays open
+needs a loop, a loop needs keys, and keys are a line editor, which the task rules
+out.
+
+So the wiring is honest about what it is. Startup builds the session and the
+screen, calls `Run`, and the frame is written. The reader is told, in one line on
+stderr, that nothing reads keys yet. That is a fact about the build rather than a
+failure, and it beats silence: a reader who ran the program and saw a frame appear
+and vanish has no other way to know whether it broke.
+
+## What was rejected, and why
+
+**A loop in `main` that redraws on a timer.** Rejected. It would look like an
+interface and be one: no keys, no turns, a twiddle spinning over a log that never
+grows. `DrawTwiddle` is the only in-place redraw and the frame design makes it
+the only one, so a loop calling it adds behaviour the frame was designed not to
+have, and adds it here rather than in the unit that owns keys.
+
+**A line editor, or a minimal one.** Rejected, and it is the task's own rule. A
+line editor is a real unit with a real design: the folding, the paste handling,
+the level columns, the `/queue` semantics. A hundred lines of it inside a wiring
+commit puts it in the wrong file and the wrong place in the history, and the
+reader who has to unpick it later pays for the shortcut.
+
+**Leaving `Run` uncalled and reporting the tree as it stands.** Rejected, since it
+is the state this unit exists to leave. The frame is drawn and reachable, and what
+is missing is named rather than hidden.
+
+**A screen with no writer.** Rejected as a way to keep the call total. `Run` already
+refuses a screen with a nil writer, and startup never builds one.
+
+## A terminal that reports no size
+
+`SizeOf` returns a zero size for a terminal it cannot ask, and `Run` refuses a
+screen with no writer but not a zero-sized one. A zero-sized screen cuts every row
+to no width, which is a log of empty lines and a stack of nothing. So the caller
+checks the size and reports it, rather than drawing into a terminal that reported
+nothing. That is the case a reader reaches on a pipe, which `run` already names,
+and it is worth naming twice rather than drawing nothing.
+
+## The redirect, and why it is not a special case
+
+`run` already reports a redirected run on stderr with `tui.ErrNoTerminal`. That
+check stays where it is. The interface cannot draw into a pipe, and a caller that
+tried would write escape sequences into whatever is reading.
+
+The frame is drawn only when both streams are terminals. A redirected run prints
+the session report and says why there is no frame. This is not a new branch so
+much as the existing one given something to do besides a message. The tests in
+`main_test.go` pass buffers, so they take the redirect path, which is why the
+existing suite keeps passing without a terminal being stood in for.
+
+## The gate
+
+`bmake check` and `bmake lint`, run in this worktree, reported as this worker's
+own. The previous worker claimed the gates and produced no report, so the claim
+could not be checked from outside. This one is written down.
+
+## Unverified
+
+Two things, neither settled by a test and neither claimed.
+
+How the stack looks. Whether the two-cell twiddle reads as one figure. Both need
+a real terminal, and a test that writes bytes into a buffer cannot say whether
+those bytes are the right shape on a screen.
