@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -153,9 +152,9 @@ func SizeOf(fd uintptr) WindowSize {
 // Result is what running a line produced.
 //
 // It is a small type rather than a string and an error because a line can end up meaning two
-// different things, and a caller that has to guess which is being told something rather than
-// being answered. The Cloudflare guidance is a question the reader did not type, and a loop
-// that inferred it from the text would send a reply it happened to look like.
+// different things, and a caller that has to guess which is being told something rather
+// than being answered. The Cloudflare guidance is a question the reader did not type, and a
+// loop that inferred it from the text would send a reply it happened to look like.
 type Result struct {
 	// Text is what the reader is shown, and is usually the whole of it.
 	//
@@ -246,8 +245,8 @@ func Start(ctx context.Context, s *Session, screen *Screen, run LineRunner, ask 
 //
 // It is a value rather than a set of parameters threaded through paint, because the painter,
 // the key handler and the turn all need the same things and a function carrying them all is
-// a function whose signature nobody can read. It is not named Loop because that reads as an
-// exported thing this package offers, and it is not.
+// a function whose signature nobody can read. It is not named Loop because that reads as
+// an exported thing this package offers, and it is not.
 type interfaceLoop struct {
 	session *Session
 	screen  *Screen
@@ -344,10 +343,10 @@ func (l *interfaceLoop) paint() {
 	// rather than a field the session has to keep up to date.
 	running := state == StateThinking || state == StateWorking
 
-	figure := " "
+	figure := "idle"
 	if running {
 		l.step++
-		figure = SweepText(twiddleGlyph(state), l.step)
+		figure = SweepText(twiddleWord(state), l.step)
 	} else {
 		l.step = 0
 	}
@@ -380,83 +379,92 @@ func (l *interfaceLoop) paint() {
 	l.placeCaret()
 }
 
-// status builds the single column, field by field.
+// status builds the value of each field, field by field.
 //
-// A field is one character, so a field that cannot say what it means in one character says
-// nothing, and every entry here is spelled out: the glyph chosen is the readable one rather
-// than a decorative figure a reader has to learn. The field names are the specification of
-// what each glyph means, and they are the constants in stack.go.
+// A value is whatever the field has to say, so a provider is its whole name and a count is
+// its whole figure. The one character rule is gone, since a field that could not say what it
+// meant in one character said nothing, and a reader looking at `model s` has to read the
+// design record to learn what it means.
 //
-// The state is the one field carried as a word rather than a glyph, since it is the field a
-// reader watches second by second and a state spelled `idle` is a state rather than an `i` a
-// reader has to learn.
+// The figure is the state word rather than its first character, so the sweep has the whole
+// word to turn along rather than a single glyph, which is what the sweep was drawn for: a
+// pattern turning across a row. It is the state field beside it that carries the plain word,
+// so the two say the same thing twice and the sweep is the copy a reader watches move.
 func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	opts := l.session.Options()
 	log := l.session.Log()
 	s := Status{}
 
-	s[fieldCwd] = "."
-	s[fieldSession] = "1"
-	s[fieldProvider] = glyphOr(opts.Provider, "-")
-	s[fieldModel] = glyphOr(opts.Model, "-")
-	s[fieldKey] = onOff(opts.APIKey != "", "k")
+	s[fieldCwd] = l.workingDir()
+	s[fieldSession] = "Session 1"
+	s[fieldProvider] = orNone(opts.Provider)
+	s[fieldModel] = orNone(opts.Model)
+	s[fieldKey] = present(opts.APIKey != "")
 	s[fieldState] = string(state) + detailSuffix(detail)
 	s[fieldFigure] = figure
-	s[fieldApproval] = glyphOr(string(opts.Approval), "-")
-	s[fieldVerbosity] = "v"
-	s[fieldCognito] = onOff(opts.Cognito, "n")
-	s[fieldColor] = onOff(opts.Color, "c")
-	s[fieldMouse] = onOff(opts.Mouse, "m")
-	s[fieldCopy] = onOff(false, "y")
-	s[fieldBell] = onOff(opts.Bell, "b")
-	s[fieldPane] = "0"
-	s[fieldWorkers] = count(len(l.session.Workers()))
-	s[fieldQueue] = "0"
-	s[fieldHeld] = count(log.Len())
-	s[fieldFolded] = count(log.Folded())
-	s[fieldLevels] = count(len(l.session.Levels()))
+	s[fieldApproval] = orNone(string(opts.Approval))
+	s[fieldVerbosity] = "0"
+	s[fieldCognito] = onOff(opts.Cognito, "on", "off")
+	s[fieldColor] = onOff(opts.Color, "on", "off")
+	s[fieldMouse] = onOff(opts.Mouse, "on", "off")
+	s[fieldCopy] = onOff(false, "available", "none")
+	s[fieldBell] = onOff(opts.Bell, "on", "off")
+	s[fieldPane] = "main"
+	s[fieldWorkers] = plural(len(l.session.Workers()), "worker", "workers")
+	s[fieldQueue] = plural(0, "prompt", "prompts")
+	s[fieldHeld] = plural(log.Len(), "row", "rows")
+	s[fieldFolded] = plural(log.Folded(), "row", "rows")
+	s[fieldLevels] = plural(len(l.session.Levels()), "level", "levels")
 
 	return s
 }
 
-// onOff is a letter when the thing it names is on, and a dash when it is off.
+// workingDir is the directory the session is typed into, as the reader would name it.
 //
-// The pair is one character each so a field is one column wide, and the two are different
-// characters rather than one and a space, since a space is indistinguishable from a field
-// nobody filled.
-func onOff(on bool, letter string) string {
+// The whole path rather than the last component, since a reader who ran this from a
+// worktree and cannot see which one is the reason to look at the field at all. A path too
+// long for the terminal is cut by the row it is on rather than here, since the cut is the
+// same cut either way and doing it once is one fewer place to be wrong.
+func (l *interfaceLoop) workingDir() string {
+	if dir := l.session.Options().WorkingDir; dir != "" {
+		return dir
+	}
+	return "."
+}
+
+// present reports whether a credential is set up, and never what it is.
+//
+// The figure itself is never written to a diagnostic in this program, and a frame row is a
+// diagnostic: every line of it ends up in terminal scrollback and a reader selecting the row
+// gets the whole of it.
+func present(there bool) string {
+	if there {
+		return "present"
+	}
+	return "absent"
+}
+
+// onOff is a word rather than a glyph, so a field says what it means.
+//
+// It was a letter and a dash when a field was one character wide, and the letter was the
+// figure the field carried rather than its name, so `c` meant colour and `m` meant mouse and
+// nothing said which. A word costs columns and saves the reader the design record.
+func onOff(on bool, yes, no string) string {
 	if on {
-		return letter
+		return yes
 	}
-	return "-"
+	return no
 }
 
-// glyphOr is the first character of a value, or a dash where there is none.
+// plural is a count with the noun it counts, so a field reads as English.
 //
-// The first character rather than the whole value, since a field is one column. It is the
-// first because a provider and a model are both named by what they start with, and a reader
-// looking down the column is comparing first characters rather than reading words.
-func glyphOr(value, none string) string {
-	if value == "" {
-		return none
+// A count with no noun is a figure a reader has to interpret, and a figure beside a name is
+// the thing the frame stopped carrying when it stopped being one character wide.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
 	}
-	for _, r := range value {
-		return string(r)
-	}
-	return none
-}
-
-// count is a figure for a field one column wide.
-//
-// A field is one character, so a count past nine is its first digit rather than a figure laid
-// out. That is a lie for a session holding ten thousand rows, and it is a lie the field names
-// make up for: the count is one digit and the log carries the whole number in the transcript
-// where a reader who needs it can read it.
-func count(n int) string {
-	if n < 0 {
-		return "-"
-	}
-	return strconv.Itoa(n)[:1]
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // sameFooterExceptField reports whether two frames differ only in the reader's own text.
@@ -472,16 +480,16 @@ func sameFooterExceptField(old, next Bar) bool {
 	return old.Status == next.Status
 }
 
-// twiddleGlyph is the figure beside the log while a turn runs.
+// twiddleWord is the figure beside the state while a turn runs.
 //
-// It is one character rather than the word, since a field is one column wide. The word is the
-// state field beside it, which is carried whole, so nothing is lost by the figure being one
-// character.
-func twiddleGlyph(state State) string {
+// It is the word rather than its first character, so the hue sweep turns across the whole
+// word. A sweep on one glyph is a glyph changing colour rather than a pattern travelling,
+// and the pattern is what the sweep was drawn to be.
+func twiddleWord(state State) string {
 	if state == StateThinking {
-		return "t"
+		return "thinking"
 	}
-	return "w"
+	return "working"
 }
 
 // act applies one key and reports whether the loop should leave.

@@ -9,9 +9,20 @@ import (
 // The frame, as it is now: the program owns the screen.
 //
 // There is one region, and it is the whole terminal. Every row is a status field in the
-// first column and a log row beside it, and the log scrolls upward through those rows as it
-// is written. The prompt is the last row, with its own field behind the prompt text rather
-// than beside it.
+// first columns and a log row beside it, and the log scrolls upward through those rows as
+// it is written. The prompt is the last row, with the reader's own line rather than a log
+// row beside it.
+//
+// # The field column
+//
+// A row is a name, a value, and the log. The name is what the reader reads and the value
+// is what it says, and they are beside each other rather than on two rows, since a reader
+// looking for the model is looking for one row and not for a label and a figure.
+//
+// The column is padded to the widest name in the field list rather than to a figure, so a
+// field is at the same column on every row and a reader following one down the screen is
+// following one left edge. That is the whole of the alignment: the log starts at the same
+// column on every row, and the padding is what puts it there.
 //
 // # Why the log is not below the stack any more
 //
@@ -47,10 +58,10 @@ const Prompt = "root@localhost $ "
 // the count the tests assert, and the count the layout reads cannot drift apart.
 const StatusFields = 20
 
-// statusGap is what sits between a status field and the log beside it.
+// statusGap is what sits between the fields and the log beside them.
 //
-// One space. The field is a single character and the log beside it is prose, and prose
-// starting in the column straight after the field is a row with no left edge at all.
+// One space, and one space only. A wider gap is a column the log has not got on a narrow
+// terminal, and the log is what the reader came back for.
 const statusGap = " "
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
@@ -74,6 +85,9 @@ const statusPrefix = "Status: "
 // is doing, what the reader may act on, and what the session is holding. Each is a named
 // constant rather than an index, since a field is a thing the reader looks for down a column
 // and an index is a thing the code counts with.
+//
+// The name beside each is what the row reads, and the two cannot drift apart because the name
+// is written here once and the value is written at the place that fills it.
 const (
 	// fieldCwd is the directory the session is typed into.
 	fieldCwd = iota
@@ -90,10 +104,11 @@ const (
 	// fieldKey reports whether a credential is set up.
 	fieldKey
 
-	// fieldState is the state the client is in, carried as a word.
+	// fieldState is the state the client is in, and is the one field that changes second by
+	// second without the reader asking.
 	fieldState
 
-	// fieldFigure is the twiddle figure, and is the field that sweeps.
+	// fieldFigure is the figure beside the state, and is the field that sweeps.
 	fieldFigure
 
 	// fieldApproval reports whether programs run without asking.
@@ -142,44 +157,110 @@ const (
 // statusCount is how many fields exist, named so a loop and an array agree.
 //
 // It is one more than fieldPrompt, since the prompt row is a field like the rest and is the
-// last of them, and it is what makes the count twenty rather than nineteen. Writing it as the
-// index of the prompt plus one is the term that is easiest to drop, and with it gone the last
-// field has no row and the frame is one row short of the height it promises.
+// last of them, and it is what makes the count twenty rather than nineteen.
 //
 // It is written as StatusFields rather than as the field index, and the two agreeing is the
 // check: a field added above the prompt without the count moving is a frame one row taller
 // than the height the reader asked for.
 const statusCount = StatusFields
 
-// promptField is the field the prompt row carries.
+// The name each field reads as, in the same order as the fields above.
 //
-// It is longer than one character, and it is the one field that is, since a row cannot be one
-// glyph and a prompt at the same time and the prompt is the row a reader is typing on. Every
-// other field is one character; this one names itself.
-const promptField = ">"
+// It is a function rather than an array so the name sits beside the constant it belongs to,
+// which is the only way the two cannot drift apart. A reader seeing a field on the screen and
+// a name in the source is looking at the same thing written down twice, and the second
+// writing is the one that can go stale.
+func fieldName(k int) string {
+	switch k {
+	case fieldCwd:
+		return "cwd"
+	case fieldSession:
+		return "session"
+	case fieldProvider:
+		return "provider"
+	case fieldModel:
+		return "model"
+	case fieldKey:
+		return "key"
+	case fieldState:
+		return "state"
+	case fieldFigure:
+		return "figure"
+	case fieldApproval:
+		return "approval"
+	case fieldVerbosity:
+		return "verbosity"
+	case fieldCognito:
+		return "cognito"
+	case fieldColor:
+		return "color"
+	case fieldMouse:
+		return "mouse"
+	case fieldCopy:
+		return "copy"
+	case fieldBell:
+		return "bell"
+	case fieldPane:
+		return "pane"
+	case fieldWorkers:
+		return "workers"
+	case fieldQueue:
+		return "queue"
+	case fieldHeld:
+		return "held"
+	case fieldFolded:
+		return "folded"
+	case fieldLevels:
+		return "levels"
+	case fieldPrompt:
+		return ""
+	default:
+		return ""
+	}
+}
 
-// Status is the single column the frame draws, field by field.
+// nameWidth is how wide the name column is, so the log starts at one column on every row.
+//
+// It is the widest name in the field list plus a space, computed from the names rather than
+// carried as a figure. A figure here would be one more thing to go stale when a field is
+// renamed, and a name column a character narrow puts the log one column left on some rows
+// and not on others, which is a log with no left edge.
+//
+// It is the width of the names and not the width of the names and their values, since a
+// value is prose of any length and padding to it would leave the log off the right edge of a
+// narrow terminal for the sake of a field that is four characters wide.
+func nameWidth() int {
+	widest := 0
+	for k := range statusCount {
+		if w := DisplayWidth(fieldName(k)); w > widest {
+			widest = w
+		}
+	}
+	return widest
+}
+
+// Status is what each field says, field by field.
 //
 // It is a fixed-size array rather than a slice because the count is fixed, and a caller
 // setting one field and leaving the rest blank would be a caller that forgot a field. The
 // zero value is a valid status with every field blank, which is what a frame drawn before the
 // session has read anything looks like.
 //
-// A field is one character, so a field is a glyph rather than a word. That is the reader's
-// decision and it has a consequence worth naming: a field that cannot say what it means in
-// one character says nothing, so every glyph below is a letter a reader can read rather than a
-// figure a reader has to learn.
+// A value is whatever the field has to say, so a provider is its whole name and a count is
+// its whole figure. The one character rule is gone: a field that could not say what it meant
+// in one character said nothing, and every field here has something to say.
 type Status [statusCount]string
 
-// barRow is one row of the frame: a field in the first column and the log beside it.
+// barRow is one row of the frame: the fields in the leading columns and the log beside them.
 //
-// The log is empty on the prompt row, since that row carries the reader's own text rather than
+// The log is empty on the prompt row, since that row carries the reader's own line rather than
 // a log row, and a prompt with a log row behind it is a prompt the reader cannot read.
 type barRow struct {
-	// field is the status field, one character, in the first column.
-	field string
+	// fields is the name and the value, padded to the name column.
+	fields string
 
-	// log is the log row shown beside it, which is the reader's own line on the prompt row.
+	// log is the log row shown beside the fields, which is the reader's own line on the
+	// prompt row.
 	log string
 }
 
@@ -224,16 +305,16 @@ func promptScreenRow(screen *Screen) int {
 	return 1
 }
 
-// Bar is what the frame carries that is not a single character.
+// Bar is what the frame carries that is not a field value.
 //
-// A row is a field and a log row, and the field is one character, so almost nothing is left to
-// carry here. What is left is the text of the prompt row, which is the reader's own line,
-// since a row cannot be one character and a prompt at once.
+// A row is a set of field values and a log row, and the only thing neither of those carries
+// is the reader's own line, since a field is a value about the session and the field the
+// reader is typing is not that.
 type Bar struct {
-	// Status is the single column, field by field.
+	// Status is the value of each field, field by field.
 	Status Status
 
-	// Field is the reader's own line, drawn after the prompt on the prompt row.
+	// Field is the reader's own line, drawn on the prompt row.
 	Field string
 }
 
@@ -255,8 +336,8 @@ func DrawLog(w *Screen, rows []Row, palette Palette) {
 
 // foldRow renders one row, cut to the width.
 //
-// The palette is asked for a role per span rather than per row, since a row may carry several: a
-// tool line is a tool colour over its own words. A row with no spans is written plainly, which
+// The palette is asked for a role per span rather than per row, since a row may carry several:
+// a tool line is a tool colour over its own words. A row with no spans is written plainly, which
 // is the common case and the one that must cost the least.
 //
 // The walk is in one piece: every byte of the row is written exactly once, either inside a
@@ -352,27 +433,27 @@ func DrawFooterRow(w *Screen, at int, rows []barRow, palette Palette) {
 	w.Write(frameLine(rows[at], w.Width(), palette))
 }
 
-// frameLine renders one row of the frame: the field, then the log beside it.
+// frameLine renders one row of the frame: the fields, then the log beside them.
 //
 // The prompt row is the one row that does not take this shape, since it carries the prompt and
-// the reader's own line rather than a field and a log row. It is recognised by its field
-// rather than by its row number, so a frame that shed rows from the bottom still draws its
-// prompt row as a prompt row.
+// the reader's own line rather than a set of fields and a log row. It is recognised by having
+// no fields rather than by its row number, so a frame that shed rows from the bottom still
+// draws its prompt row as a prompt row.
 func frameLine(row barRow, width int, palette Palette) string {
-	if row.field == promptField {
+	if row.fields == "" {
 		return chromeLine(palette, Prompt+row.log)
 	}
 
-	line := row.field + statusGap + row.log
+	line := row.fields + statusGap + row.log
 	if width > 0 {
-		// The log beside a field is cut from the tail, since the field is the thing a reader is
-		// looking down the column for and cutting it would move every log row one column left.
-		// The field is one character and is never the thing cut.
-		keep := width - DisplayWidth(row.field) - DisplayWidth(statusGap)
+		// The log beside the fields is cut from the tail, since the fields are the thing a
+		// reader is looking down the left of and cutting them would move every log row one
+		// column left. The fields are the widest thing on the row and are never the thing cut.
+		keep := width - DisplayWidth(row.fields) - DisplayWidth(statusGap)
 		if keep < 0 {
 			keep = 0
 		}
-		line = row.field + statusGap + CutColumnFromEnd(row.log, keep)
+		line = row.fields + statusGap + CutColumnFromEnd(row.log, keep)
 	}
 	return chromeLine(palette, line)
 }
@@ -405,7 +486,7 @@ func stackLines(bar Bar, log []Row, height int, palette Palette) []barRow {
 
 	out := make([]barRow, drawn)
 	for i := range out {
-		out[i] = barRow{field: fieldAt(bar, i)}
+		out[i] = barRow{fields: fieldsLine(bar, i)}
 	}
 	// The log rows were gathered newest first, so they fill upward from the prompt.
 	for i, row := range shown {
@@ -416,29 +497,30 @@ func stackLines(bar Bar, log []Row, height int, palette Palette) []barRow {
 		out[at].log = row.Text
 	}
 
-	// The prompt row carries the reader's own line in place of a log row.
+	// The prompt row carries the reader's own line in place of a log row, and carries no
+	// fields, since the prompt is where the reader types rather than something they read.
 	if prompt := drawn - 1; prompt >= 0 {
-		out[prompt].field = promptField
+		out[prompt].fields = ""
 		out[prompt].log = bar.Field
 	}
 
 	return out
 }
 
-// fieldAt returns the field for row k, and the prompt field for the last field row.
+// fieldsLine renders the name and the value of the field at k, padded to the name column.
 //
-// The prompt row is named by its field rather than by an index, since a frame that shed a row
-// sheds from the bottom and the prompt row moves with whatever the last row is. A reader on a
-// short terminal therefore gets the prompt on the last row of a screen rather than off the
-// bottom of a taller one.
-func fieldAt(bar Bar, k int) string {
-	if k < 0 || k >= statusCount {
+// The padding is what puts the log at one column on every row. A row whose name is shorter
+// than the column gets spaces after it and a row whose name is the width of the column gets
+// none, and the log starts in the same place either way, which is the whole of what a reader
+// following one column down the screen is asking for.
+func fieldsLine(bar Bar, k int) string {
+	name := fieldName(k)
+	if k < 0 || k >= statusCount || name == "" {
 		return ""
 	}
-	if k == fieldPrompt {
-		return promptField
-	}
-	return bar.Status[k]
+
+	pad := nameWidth() - DisplayWidth(name) + 1
+	return name + strings.Repeat(" ", pad) + bar.Status[k]
 }
 
 // chromeLine wraps a frame row in the chrome role when colour is on.
