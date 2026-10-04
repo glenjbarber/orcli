@@ -1,0 +1,76 @@
+### The doc directory, and what supersedes it
+
+The reader added `doc/` to the main worktree on 2025-10-05, holding five reference
+files written from the source of a build this branch is not: `README.md`,
+`interface-connect.md`, `interface-bell.md`, `interface-verbosity.md`,
+`interface-permission.md`, and `interface-commands.md`.
+
+This branch supersedes them. The instruction was given plainly, twice, and it is
+recorded here rather than acted on, since the instruction was to ignore the
+directory and record the suppression rather than to reconcile anything.
+
+## What the directory says
+
+Five files on the control interface, cross-referenced against `AGENTS.md`, with
+a table naming the design file for each topic it deliberately does not duplicate.
+The command table in `interface-commands.md` has thirty-two rows and
+thirty-three names, one of them hidden.
+
+## What this branch holds instead
+
+None of the files `doc/` names exists in this tree. There is no
+`internal/tui/render.go`, `screen.go`, `hintrow.go`, `complete.go`,
+`conversation.go`, `verbosity.go`, `cognito.go`, `btw.go`, or `compact.go`, and
+no `internal/complete/`. The command table here has forty entries, carries
+`/test` which `doc/` does not, and lacks `/theme` and `/paste` which `doc/` does.
+
+Two shapes of interface are described, and this branch is the third.
+
+| | `doc/` describes | this branch |
+| --- | --- | --- |
+| frame | twenty rows: nine-row header, pane, seven-row division, prompt, two-row foot | twenty rows of status fields, the log in the second column |
+| bars | two bars, fields dropped whole when narrow | twenty one-character fields, none dropped |
+| input | `LineEditor`, panes, a hint row | `Editor`, no panes, no hint row |
+| verbosity | seven levels, clamped, read by name | six levels, refused out of range, read as a number |
+
+## The verbosity disagreement, which is the substantive one
+
+`internal/verbosity` has six levels and `Levels` as the bound. `doc/` describes
+seven, and its own summary of invariants names seven.
+
+| | this branch | `doc/` |
+| --- | --- | --- |
+| levels | 0 to 5, `Levels` is the bound | 0 to 6 |
+| 5 | `audit`, an exhaustive audit | cited, and what was not checked |
+| 6 | none | `exhaustive audit` |
+| out of range | refused by name, listing the levels | brought to the nearest end |
+| read as | a number, with a leading zero refused | number, whole name, or unambiguous leading word |
+| configuration | reads none | `OPENROUTER_VERBOSITY`, held as a pointer so zero is a preference |
+
+Three of those are decisions rather than counts, and the code gives a reason for
+each. A clamp gives the reader something they did not ask for and they would not
+discover it until the next reply arrived. A number alone is what the field the
+level occupies can hold. Nothing is read from the configuration, since the level
+is a session preference carried in a request rather than a setting this package
+owns.
+
+Where the document and the code disagree, the code is the answer on this branch
+and the disagreement is a difference between two builds rather than a question
+to settle. The document is not wrong about the build it describes.
+
+## What is deliberately not done
+
+`doc/` is not edited. A note saying the branch supersedes it would put this
+branch's business into a directory the reader added as reference material, and
+the reader asked for the suppression to be recorded rather than the reference to
+be amended.
+
+Nothing in the code was changed to match `doc/`, and nothing in `doc/` was
+changed to match the code. The direction was one way.
+
+## Where the frame is recorded
+
+The frame this branch draws is in `staged/design-status-bar-ui.txt`, which sets
+out the arrangement, the three that were considered, and what each costs. That
+file describes this tree and this branch; `doc/interface-commands.md` describes
+the header-and-pane frame and is superseded.
