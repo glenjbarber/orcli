@@ -7,6 +7,10 @@ terminal and sets no scroll region.
 Code: `internal/tui/stack.go` in full, `internal/tui/caret.go`, and the painter in
 `internal/tui/run.go`.
 
+This file describes `main` as of `f24e0b7`. The decision that replaced the
+previous frame is ADR 001 in `staged/adr-superseded-events.txt`, and what it cost
+is at the end of this file.
+
 ## The shape
 
 ```text
@@ -71,20 +75,25 @@ reader may act on, and what the session is holding.
 | 18 | `fieldFolded` | rows the log dropped | a count |
 | 19 | `fieldPrompt` | the reader's own line | `>` and the prompt |
 
-**A field is one character.** That is the reader's decision and it has a
-consequence worth stating: a field that cannot say what it means in one character
-says nothing. Every glyph is a letter a reader can read rather than a figure a
-reader has to learn, and `TestEveryFieldIsOneCharacter` holds every field to one
-character except the two named below.
+**A field is one character.** That is the reader's decision and it is ADR 002. A
+field that cannot say what it means in one character says nothing, so every glyph
+is a letter a reader can read rather than a figure a reader has to learn, and
+`TestEveryFieldIsOneCharacter` holds every field to one character except the two
+named below.
 
 **Two fields are not one character.** `fieldState` is carried as the whole word,
-since it is the field a reader watches second by second and a state spelled
-`idle` is a state rather than an `i` a reader has to learn. The prompt row is
-`>` followed by the prompt and whatever the reader typed, since a row cannot be a
-glyph and a prompt at once.
+since it is the field a reader watches second by second and a state spelled `idle`
+is a state rather than an `i` a reader has to learn. The prompt row is `>` followed
+by the prompt and whatever the reader typed, since a row cannot be a glyph and a
+prompt at once.
 
 **A count is one digit.** `count` in `run.go` truncates. A log holding nineteen
 thousand rows reports `1`, and the field names say which count it is.
+
+**`fieldModel` moves with `/model`.** Since `b1950ab` a choice calls
+`Session.SetModel` as well as writing the file, so the glyph beside the prompt is
+the model the next turn is sent with rather than the one the file held when the
+frame was drawn. See ADR 004.
 
 ## The log rides beside the fields
 
@@ -191,8 +200,8 @@ and what a caller outside the module reaches for.
 
 `barWidth` is 1, which is a floor and not a cap. `joinWithin` joins the whole
 list at every width and never drops a field, so a bar carries everything it has
-and overflows its row rather than losing the end of itself. `TestABarKeepsEveryFieldAtEveryWidth`
-holds it at widths 1 through 200.
+and overflows its row rather than losing the end of itself.
+`TestABarKeepsEveryFieldAtEveryWidth` holds it at widths 1 through 200.
 
 ## What this costs, recorded
 
@@ -200,8 +209,9 @@ The reader's own scrollback is not the transcript. It is whatever the terminal k
 from before the program started. The transcript is drawn from rows the program
 holds, in the second column.
 
-That is the trade the design record weighs, and `staged/design-status-bar-ui.txt`
-sets out the three arrangements considered and why this one was chosen.
+That is the trade ADR 001 weighs, and `staged/design-status-bar-ui.txt` sets out
+the three arrangements considered and why this one was chosen. The alternate
+screen is where the bars could be redrawn per paint, and it was not taken.
 
 ## Known gaps
 
@@ -214,4 +224,10 @@ sets out the three arrangements considered and why this one was chosen.
    fills it because a path is wider than one character and the field is not.
 
 3. **`fieldPane` is a constant.** It reads `0` and never changes, since the pane
-   set described in `SPAWN-API.md` is not built in this branch.
+   set described in `SPAWN-API.md` is not built.
+
+4. **`fieldVerbosity` is a letter.** It reads `v` and nothing reaches the wire,
+   since `internal/verbosity` is not imported.
+
+5. **The frame is unverified on a real terminal.** Every test draws to a buffer,
+   and whether twenty rows and a caret on row twenty look right needs a screen.

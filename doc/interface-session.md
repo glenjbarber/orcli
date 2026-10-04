@@ -5,6 +5,9 @@ What a command manipulates and what `/copy N` reaches.
 Code: `internal/tui/session.go`, `internal/tui/log.go`, `internal/tui/levels.go`,
 `internal/tui/worker.go`.
 
+This file describes `main` as of `f24e0b7`. The one addition since the session was
+written is `SetModel`, and it is below.
+
 ## The session is small on purpose
 
 ```go
@@ -26,6 +29,30 @@ that grew all of them would be the one file that decides everything.
 
 `New` appends one row, the banner, so a session opening onto an empty screen gives
 a reader something to tell it started.
+
+**`Options()` returns a copy rather than the field**, so a caller cannot reach into
+the session's own options and change what a turn is sent as.
+
+## The model moves with the file
+
+```go
+func (s *Session) SetModel(model string) error
+```
+
+New as of `b1950ab`, and it exists because of ADR 004. A `/model` choice writes
+`model` and `last_model` to the configuration file, and without this the frame
+would draw one model while the reader was answered by another until the next turn.
+
+**It takes the session lock** for the reason the state does: a command runs on the
+input goroutine and `ask` reads the model on the request goroutine, and the two
+would otherwise reach for the same field without a lock between them.
+
+**It refuses an empty model** rather than storing one, since an empty model is a
+session that cannot ask anything and a caller storing one has a bug in it rather
+than a reader who asked for it.
+
+`Ready` reads the model under the same lock, so the two agree about what the
+session is in a position to ask.
 
 ## The four states
 
@@ -113,10 +140,16 @@ which is visible nonsense rather than nothing at all.
 
 `escapeLength` reports how many runes past an escape belong to its sequence, and
 covers three shapes: CSI running to a final byte in 0x40 to 0x7e, string sequences
-running to BEL or ST, and everything else as two bytes or the escape alone.
+running to BEL or ST, and everything else as two byte or the escape alone.
 
 A sequence with no terminator takes the rest of the row rather than the whole log,
 since one row the endpoint wrote badly should cost the reader that row.
+
+**A newline is a row break rather than a thing a row carries.** `plainRow` strips
+it, so a multi-line result would run together if it were written as one row. The
+loop splits a result on newlines before writing, and a carriage return beside a
+newline is one break rather than two. That split is in `submit` rather than in each
+handler, because the loop owns the log.
 
 ## The levels
 
@@ -233,9 +266,9 @@ one that is only plain while nothing interesting has happened.
 
 ## Known gaps
 
-1. **A worker has no tool loop in this branch.** `Spawn` allocates the level and
-   writes the question row, and `Finish` retires it. Nothing runs the turn. The
-   loop described in `SPAWN-API.md` is not built here.
+1. **A worker has no tool loop.** `Spawn` allocates the level and writes the
+   question row, and `Finish` retires it. Nothing runs the turn. The loop described
+   in `SPAWN-API.md` is not built.
 
 2. **No conversation is held.** `Session` has no field for messages, and
    `Begin` returns the context without recording a turn. What a turn carries is
@@ -244,3 +277,7 @@ one that is only plain while nothing interesting has happened.
 3. **`RowsAt` copies every row it finds.** A level with many rows builds a slice of
    all of them, and `CopyText` builds the whole string. Neither is bounded by
    `LogBound` beyond what the log already trimmed.
+
+4. **`fieldVerbosity` draws a letter and nothing sets it.** `Options` has no
+   verbosity field and `internal/verbosity` is not imported, so the six level
+   ladder is unreachable from a session.

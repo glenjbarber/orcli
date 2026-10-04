@@ -5,6 +5,10 @@ whole of it is testable without a terminal.
 
 Code: `cmd/orcli/main.go` in full.
 
+This file describes `main` as of `f24e0b7`. The decision that removed `/connect`
+is ADR 003 in `staged/adr-superseded-events.txt`, and the section on the
+confirmation below is new as of `140ff39`.
+
 ## The order
 
 ```go
@@ -157,10 +161,44 @@ mode arrives as off rather than as a decision the reader did not make.
 second provider credential does not sit in the interface for the length of a
 session doing nothing with it.
 
+## The connection, which is the reader's first question
+
+There is no `/connect`. The wiring in `openInterface` is where the probe lives:
+
+```go
+return tui.Start(ctx, s, tui.NewScreen(out, size),
+    d.Run,
+    ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
+)
+```
+
+A reader's own first question is the probe. A turn that came back with text has
+proved the credential and the model together, and `confirmModel` is what writes
+the model to the file on that evidence.
+
+**A turn that delivered nothing confirms nothing**, even when the endpoint called
+it finished, since a cut stream has proved nothing and a model written on that
+evidence is one nobody has reached the endpoint with.
+
+**It writes once per session**, since the reader's first question is the probe and
+every turn after that writing the same model again is a write nobody asked for.
+
+**A failed write is a row in the log rather than a refusal.** The turn was answered
+and the answer is the thing the reader asked for, so a model that could not be
+written is a nuisance rather than a lost reply.
+
+**A confirmation does not record the model it replaced.** See ADR 004: a reader's
+first question is a probe rather than a move.
+
+Three seams carry the write, all in `cmd/orcli/confirm.go` and all substituted by
+every test: `configPath`, `writeModel` and `writeModelSwap`. Without them a test
+proving a model was written would read the reader's own configuration file.
+
 ## The dispatcher
 
 ```go
 func newDispatcherFor(cfg config.Config) *dispatcher
+d.withSession(s)
 ```
 
 Built here rather than held on the session, since a command needs the
@@ -168,6 +206,10 @@ configuration and the held proposal and the interface needs neither. The transpo
 is built on the same seam, so a reader with no credential gets an interface that
 opens and tells them so when they type a question, rather than one that refused to
 start.
+
+`withSession` is what lets `/model` change the model the next turn is sent with,
+not only the one written to the file. A dispatcher with no session can still run
+the commands that do not touch one, which is what a test over `/cloudflare` does.
 
 ## The report
 
@@ -192,11 +234,16 @@ present is the only thing it has any business carrying.
 
 1. **`--bootstrap` is validated and not used.** `readable` opens the file and
    refuses a directory, and the path is handed to `session.Bootstrap` for the
-   report, but nothing reads the document's contents in this branch.
+   report, but nothing reads the document's contents.
 
 2. **`cognito` never arrives true.** `Options.Cognito` exists and `Spawn` refuses
    under it, but startup has no path that sets it.
 
 3. **`hasTools` is not carried into the interface either.** `session.HasTools` is
    reported and gates nothing: `tui.Options` has no field for it, and no tool is
-   offered in this branch.
+   offered.
+
+4. **The model is not chosen from a catalogue.** `ModelIsOffered` is exported and
+   has no caller, since the transport has no models endpoint, so a reader naming a
+   model the endpoint does not offer finds out from a refusal rather than before
+   the request.

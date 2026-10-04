@@ -1,12 +1,14 @@
 # Interface documentation
 
-Reference documentation for `orcli`, written from the source of this branch rather
-than from a README. Every claim about behaviour names the function that carries it,
-and every claim about intent is taken from the comment on that function.
+Reference documentation for `orcli`, written from the source of this tree rather
+than from a README. Every claim about behaviour names the function that carries
+it, and every claim about intent is taken from the comment on that function.
 
-These files describe the build on `feature/bottom-console-input`. Where an earlier
-build's documentation exists and disagrees, this branch supersedes it; see
-`staged/design-doc-superseded.txt` for the differences and the reasoning.
+These files describe `main` as of `f24e0b7`. Where an earlier build's
+documentation exists and disagrees, this tree supersedes it: the record is in
+`staged/adr-superseded-events.txt` for the four decisions and in
+`staged/design-doc-superseded.txt` for the documentation that was replaced, with
+the two overwritten files kept in `doc-backup/`.
 
 ## The files
 
@@ -33,10 +35,32 @@ command manipulates and what `/copy N` reaches.
 `interface-commands.md` last, since it is the table and the exported surface, and
 it assumes the other three.
 
+## What changed in the merge that brought this tree up to date
+
+Four decisions, all recorded in full in `staged/adr-superseded-events.txt`. The
+short of them, so a reader who knew the tree before does not have to find it.
+
+**There is no `/connect`.** A reader's own first question is the probe. A turn
+that came back with text has proved the credential and the model together, and
+that is what writes `model` to the configuration file. A turn that delivered
+nothing confirms nothing.
+
+**`/model NAME` records the model it replaced** under `last_model`, and
+`/model last` swaps the pair. Two of them put the members back where they were.
+A choice moves the session as well as the file, so the frame does not draw one
+model while the reader is answered by another.
+
+**The frame owns every row** and there is no scroll region, so the log rides
+beside twenty one-character status fields rather than occupying a region above
+six footer rows.
+
+**A bar never drops a field**, so the bar renderers join the whole list at every
+width and a bar carries everything it has.
+
 ## What a worker needs to know before changing anything here
 
-Four rules hold across the tree and a change that breaks one is a bug rather than a
-style question.
+Four rules hold across the tree and a change that breaks one is a bug rather than
+a style question.
 
 **A row leaves as plain text.** `plainRow` in `internal/tui/log.go` strips the
 C0 and C1 controls and the delete character, keeping only the tab. A model can
@@ -72,17 +96,22 @@ changing the test and saying why.
 | a multi-line result becomes one row per line | `TestSplitRowsMakesOneRowPerLine` |
 | a row carries no escape | `TestAnEscapeDoesNotReachTheTerminal` |
 | the log never grows past `LogBound` and says how many it dropped | `Log.Folded` |
-| a retired level keeps what it was | `TestTheCaretIsNotMovedBackwards` and `levels.go` |
+| a retired level keeps what it was | `levels.go`, `CopyText` |
 | a worker is refused under cognito | `ErrCognito`, `worker.go` |
+| a confirmed turn writes the model, and only once | `TestAConfirmedModelIsWritten`, `TestTheModelIsWrittenOnce` |
+| nothing is written before a turn is answered | `TestNothingIsWrittenWithoutAConfirmedTurn` |
+| two `/model last` leave the file as it was | `TestLastTwiceIsANoOp` |
+| a choice keeps the credential, the key order, and a single-line file | `TestTheWriteKeepsTheCredentialAndTheKeyOrder`, `TestTheWriteKeepsASingleLineFileOnOneLine` |
 
 ## The known gaps, so absence reads as a gap
 
-Three things a reader looking for them will not find here.
+Six things a reader looking for them will not find here.
 
 1. **No scroll region exists.** The program owns every row, so there is nothing
    for a region to hold in place. The bug that region caused is recorded in
-   `staged/design-status-bar-ui.txt`: it took a row count and wrote its first row
-   as one, which put the rows the reader was typing inside it.
+   `staged/design-status-bar-ui.txt` and in ADR 001: it took a row count and
+   wrote its first row as one, which put the rows the reader was typing inside
+   it.
 
 2. **The reader's own scrollback is not the transcript.** The transcript is drawn
    from rows the program holds, in the second column beside the status fields.
@@ -94,3 +123,30 @@ Three things a reader looking for them will not find here.
    `internal/tui/run.go` truncates a count to its first digit. A log holding
    nineteen thousand rows reports `1`. The full number is in the transcript, and
    the field names say which they are.
+
+4. **A turn carries no history.** `ask` sends one user message and no
+   conversation, so a follow-up question is blind to what came before it.
+
+5. **`internal/verbosity` is untracked and unimported.** The six-level ladder is
+   the specification, and nothing reaches the wire. The frame carries a letter `v`
+   and no level is asked for.
+
+6. **`DrawStack` and `DrawFooterRow` are exported over an unexported type.** A
+   caller outside the module can call them and cannot construct the argument.
+
+## The reference documentation this tree supersedes
+
+Four of the six files the reader added under `doc/` are still there, untracked,
+and describe a build this tree is not:
+
+```text
+interface-bell.md          the bell and the preference behind it
+interface-connect.md       /connect, which this tree does not have
+interface-permission.md   the approval rules
+interface-verbosity.md     seven levels, where this tree has six
+```
+
+The two that could not both exist at the same path were overwritten by the
+merge and are kept in `doc-backup/`. None of them is reconciled, since this tree
+supersedes what they describe and a reader wanting the older build's account has
+them.

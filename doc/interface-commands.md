@@ -5,7 +5,11 @@ The table, the dispatcher, completion, the line editor, and what a caller outsid
 
 Code: `internal/tui/command.go`, `internal/tui/command_line.go`,
 `internal/tui/line.go`, `internal/tui/alias.go`, `internal/tui/diff.go`,
-`internal/tui/width.go`, `cmd/orcli/dispatch.go`.
+`internal/tui/width.go`, `cmd/orcli/dispatch.go`, `cmd/orcli/confirm.go`.
+
+This file describes `main` as of `f24e0b7`. What that merge changed is recorded
+in ADR 003 and ADR 004 of `staged/adr-superseded-events.txt`, and the short of it
+is here rather than left to a reader who has to go looking.
 
 ## The table is the one place names are written
 
@@ -37,7 +41,6 @@ worth writing down.
 | --- | --- | --- | --- |
 | `help` | | | list this table |
 | `version` | | | print the version |
-| `connect` | | | test the connection and report the key |
 | `key` | | | report the usage against the key |
 | `search` | TEXT | | search the log, filtered as it is typed |
 | `models` | TEXT | | list the models, filtered as it is typed |
@@ -48,7 +51,7 @@ worth writing down.
 | `bell` | | | ring the terminal bell on reply, on or off |
 | `color` | | | turn color on or off, and save the choice |
 | `cognito` | | | record nothing, on or off |
-| `verbosity` | 0-6 | | how much the model is asked to answer with |
+| `verbosity` | 0-5 | | how much the model is asked to answer with |
 | `verbose` | | | report the shape of each streamed turn, on or off |
 | `delegate` | QUESTION | | ask a question alongside, without recording it |
 | `pane` | main\|delegate\|spawn | | show the conversation, the delegate output or the spawn output |
@@ -75,6 +78,10 @@ worth writing down.
 | `exit` | | | leave the interface |
 | `cloudflare` | | | the Cloudflare commands |
 
+**There is no `connect`.** It was in the table with no handler, and ADR 003 removed
+it: a reader's own first question is the probe, and a turn that came back with
+text is what proves the credential and the model together.
+
 Two entries carry a hidden name or an alias, and the reasons are in the source.
 
 `color` has `Hidden: []string{"colour"}`. It resolves through `Lookup`, and is
@@ -87,8 +94,8 @@ spelling nobody asked for.
 says the value has to be one the endpoint offers. Merging them would take that
 decision from the reader.
 
-**The table lists forty entries and this build runs three.** The dispatcher in
-`cmd/orcli` implements `cloudflare`, `test` and `quit`. Everything else is
+**The table lists thirty-nine entries and this build runs four.** The dispatcher in
+`cmd/orcli` implements `cloudflare`, `model`, `test` and `quit`. Everything else is
 reported as listed-but-not-run, which is a different message from unknown, since a
 reader told there is no such command goes looking for a typo they do not have.
 
@@ -143,6 +150,44 @@ with the lines run together. The split is in `submit` rather than in each handle
 because the loop owns the log. A carriage return beside a newline is one end and
 not two, which is how a program writing to a terminal ends a line.
 
+## `/model`, and the connection it replaced
+
+```go
+func modelHandler(s *tui.Session, args string) (tui.Result, error)
+```
+
+Four cases, and they are told apart before anything is written:
+
+| Argument | What it does |
+| --- | --- |
+| none | reports the model in force and the one `/model last` would reach |
+| `last` | swaps the two members, so the reader lands where they started |
+| a name | records the model in force under `last_model` and writes the new one |
+| a name, with nothing in force | writes it and leaves `last_model` alone |
+
+**Two `last` commands are a no-op.** The swap is its own inverse, so pressing it
+twice puts both members back. `TestLastTwiceIsANoOp` holds it by comparing the
+file byte for byte.
+
+**A `last` with nothing to go back to is refused by name.** An empty model is a
+session that cannot ask anything, and one the reader did not choose.
+
+**A choice moves the session as well as the file**, through `Session.SetModel`, so
+the frame does not draw one model while the reader is answered by another. The
+setter takes the lock the state already takes, since `ask` reads the model on the
+request goroutine.
+
+**A turn that came back with text is the confirmation, and a confirmation does not
+record the model it replaced.** A reader's first question is a probe rather than a
+move, and treating it as one would send `/model last` to a model they never chose.
+The confirmation writes once per session and a failed write is a row in the log
+rather than a refusal, since the turn was answered and the answer is the thing the
+reader asked for.
+
+Three seams carry it, all in `cmd/orcli`, and all three are substituted by every
+test: `configPath`, `writeModel` and `writeModelSwap`. Without them a test proving
+a model was written would read the reader's own configuration file.
+
 ## The input loop
 
 ```go
@@ -183,8 +228,8 @@ its bytes out of the field.
 **The turn count is raised before the goroutine and lowered after the answer has
 been drawn,** so a reader who leaves while a turn is in flight waits for it rather
 than handing the terminal back with a request still writing to it. A count raised
-after leaving began waiting is a count nobody waits for, so the group refuses one
-rather than accepting it silently.
+after leaving began waiting is a count nobody is waiting for, so the group refuses
+one rather than accepting it silently.
 
 ## Completion
 
@@ -294,7 +339,7 @@ fence that marks a diff from one that does not, since a model writes both.
 
 ## The exported surface
 
-Verified against `go doc` on this branch rather than written from memory.
+Verified against `go doc` on this tree rather than written from memory.
 
 **Construction and lifecycle**
 
@@ -308,7 +353,6 @@ func StdoutIsATerminal() bool
 func StreamsAreTerminal(in io.Reader, out io.Writer) bool
 func IsTerminal(fd uintptr) bool
 func ReaderFor(in io.Reader) *bufio.Reader
-func EnterRawMode(fd uintptr) (func(), error)   // as RestoreRawMode below
 ```
 
 `Run` draws once with no input, and is kept because the drawing is worth having on
@@ -337,6 +381,7 @@ writer writes nothing rather than panicking.
 ```go
 func (s *Session) Log() *Log
 func (s *Session) Options() Options
+func (s *Session) SetModel(model string) error
 func (s *Session) State() (State, string)
 func (s *Session) SetState(state State, detail string)
 func (s *Session) Ready() error
@@ -345,6 +390,10 @@ func (s *Session) Deliver(text string, level int)
 func (s *Session) Notice(text string, level int, role Role)
 func (s *Session) Finished(reason string)
 ```
+
+`SetModel` is new as of `b1950ab` and is what a `/model` choice calls, so the file
+and the session cannot disagree about which model is in force. It refuses an empty
+model rather than storing one.
 
 **The log**
 
@@ -394,6 +443,21 @@ func CloudflareCommand() Command
 func TestCommand() Command
 ```
 
+**The configuration writers**, which are how a preference reaches the file.
+
+```go
+func WriteModel(path, model string) error
+func WriteModelSwap(path, model string) error
+func ReadModelPair(path string) (model, last string, err error)
+func ModelIsOffered(catalogue []string, model string) error
+```
+
+`WriteModelSwap` is new as of `b1950ab` and sets `model` while recording the one
+being replaced under `last_model`. The pair is one read and one write, so a reader
+whose terminal died between two writes is not left with a file that disagrees with
+itself. `ReadModelPair` is exported for the same reason a writer is: a caller
+swapping the pair needs to know what it is swapping from and to.
+
 **Colour**
 
 ```go
@@ -428,7 +492,7 @@ func SweepText(text string, step int) string
 `Field`. A bar is never cut and never drops a field; `barWidth` is 1 and
 `joinWithin` joins the whole list at every width.
 
-**The errors, all eleven**
+**The errors**
 
 ```go
 ErrNoSize        the terminal reported no size
@@ -465,15 +529,18 @@ and is what a caller checks before trusting `IsTerminal`.
    caller outside the module can call the function and cannot construct its
    argument. This is a defect rather than a decision.
 
-2. **Thirty-seven of forty commands have no body.** The table lists them, the
+2. **Thirty-five of thirty-nine commands have no body.** The table lists them, the
    dispatcher reports them as listed-but-not-run, and no handler exists.
 
 3. **No command renders help.** The table carries summaries and nothing reads them.
 
 4. **`Options.Verbosity` does not exist.** The frame carries a letter `v` in
    `fieldVerbosity` and nothing reaches the wire, so `/verbosity` has no body and
-   `internal/verbosity` is not imported by this branch.
+   `internal/verbosity` is not imported.
 
-5. **`EnterRawMode` is not exported by that name.** The raw-mode entry points are
-   unexported in `rawmode.go` and reached through `Start`, so the signature above
-   is illustrative rather than the real one.
+5. **A turn carries no history.** `ask` sends one user message and no
+   conversation, so a follow-up question is blind to what came before it.
+
+6. **`ModelIsOffered` has no caller.** It is the check a reader naming a model the
+   endpoint does not offer would want, and it needs a catalogue that nothing
+   fetches, since the transport has no models endpoint.
