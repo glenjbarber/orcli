@@ -6,6 +6,22 @@ type Request struct {
 	Messages []Message `json:"messages"`
 	Stream   bool      `json:"stream"`
 	Tools    []Tool    `json:"tools,omitempty"`
+
+	// AttributionID names who asked, for the provider's own record of the request
+	// and for anything the reply is attributed to.
+	//
+	// The endpoint calls this an HTTP-Referer value, and this client calls it an
+	// attribution, because the reader is the one who sets it: it is typed at
+	// `/attribute` and held in the configuration rather than arrived in a header
+	// the transport owns. The name here and the command are the same word on
+	// purpose, so a reader reading the request and a reader reading the help are
+	// looking at the same thing.
+	//
+	// It is omitted when empty rather than sent as an empty string. An absent
+	// attribution and one that is the empty string are different to the provider,
+	// and a client that sent the second whenever the reader had not answered the
+	// first would be recording a byline of "" rather than of nobody.
+	AttributionID string `json:"attribution_id,omitempty"`
 }
 
 // EventKind labels an event.
