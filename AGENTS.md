@@ -5,9 +5,9 @@ any person; the file is written to be published with the source.
 
 ## Before anything else
 
-Read `.OPENROUTER.md` before making any change. It holds the operating rules for
+Read `.orcli.md` before making any change. It holds the operating rules for
 this tree and they are not restated here, deliberately: a second copy is a copy
-that drifts. Where this file and `.OPENROUTER.md` appear to disagree, `.OPENROUTER.md`
+that drifts. Where this file and `.orcli.md` appear to disagree, `.orcli.md`
 decides, and the disagreement is a bug in one of the two.
 
 ## Where things live
