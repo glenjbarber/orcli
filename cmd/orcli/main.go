@@ -1,13 +1,3 @@
-// Package main is the orcli entry point.
-//
-// The order of run is the startup contract, and it is the order DESIGN.md sets
-// out: parse the flags, read the bootstrap document if one was named, install the
-// default configuration, load it, settle the approval mode, resolve the working
-// directory, ask about that directory, open the interface, and report.
-//
-// stdin, stdout and stderr are parameters rather than the process streams, so the
-// whole of startup is testable without a terminal. A test that needs a terminal to
-// check a flag message is a test that does not get written.
 package main
 
 import (
@@ -51,10 +41,10 @@ var draw = openInterface
 
 // tuiStreamsAreTerminal is the terminal check, as a variable rather than a call.
 //
-// It is a seam for the same reason draw is one, and it is a second seam rather than
-// a folding of the first because the two answer different questions: this one asks
-// whether the streams are terminals at all, and openInterface asks whether there is
-// a descriptor and a size to draw on. A test that stood in for both would not be
+// It is a seam for the same reason draw is one, and it is a second seam rather than a
+// folding of the first because the two answer different questions: this one asks
+// whether the streams are terminals at all, and openInterface asks whether there is a
+// descriptor and a size to draw on. A test that stood in for both would not be
 // testing that the interface opens when the reader is at a terminal, since the whole
 // condition would be the stand-in.
 //
@@ -302,9 +292,12 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	d := newDispatcherFor(cfg)
 	d.canAsk = func() bool { return canAsk(s) }
 
+	// The confirmation is wired here rather than in ask, since the writer belongs to
+	// main and the interface holds no configuration. A turn that came back with text
+	// is what writes the model, and that is the connection there is no command for.
 	return tui.Start(ctx, s, tui.NewScreen(out, size),
 		d.Run,
-		ask(s, newTransport(cfg.APIKey), cfg.AttributionID),
+		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
 	)
 }
 
@@ -442,8 +435,11 @@ configuration:
   It must be mode 0600.
 
 in the interface:
-  Type a question and press enter. Type /cloudflare to manage DNS records, and
-  /cloudflare confirm to apply a change it showed you. /quit leaves.
+  Type a question and press enter. There is no /connect: your first question is
+  what proves the connection, and the model you are answered by is written to the
+  configuration file only once the endpoint has answered. Type /cloudflare to
+  manage DNS records, and /cloudflare confirm to apply a change it showed you.
+  /quit leaves.
 
 tools:
   A directory is asked about once and the answer is recorded. A reader who
