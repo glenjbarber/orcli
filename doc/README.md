@@ -4,11 +4,12 @@ Reference documentation for `orcli`, written from the source of this tree rather
 than from a README. Every claim about behaviour names the function that carries
 it, and every claim about intent is taken from the comment on that function.
 
-These files describe `main` as of `f24e0b7`. Where an earlier build's
-documentation exists and disagrees, this tree supersedes it: the record is in
-`staged/adr-superseded-events.txt` for the four decisions and in
-`staged/design-doc-superseded.txt` for the documentation that was replaced, with
-the two overwritten files kept in `doc-backup/`.
+These files describe `main`. Where an earlier build's documentation exists and
+disagrees, this tree supersedes it. The decisions behind the current shape are
+recorded one file each in `staged/`, listed in `staged/adr-index.txt`, and the
+documentation this tree replaced is accounted for in
+`staged/design-doc-superseded.txt` with the two overwritten files kept in
+`doc-backup/`.
 
 ## The files
 
@@ -37,25 +38,25 @@ it assumes the other three.
 
 ## What changed in the merge that brought this tree up to date
 
-Four decisions, all recorded in full in `staged/adr-superseded-events.txt`. The
-short of them, so a reader who knew the tree before does not have to find it.
+Four decisions, each recorded in full as a file in `staged/`. The short of them,
+so a reader who knew the tree before does not have to find it.
 
 **There is no `/connect`.** A reader's own first question is the probe. A turn
 that came back with text has proved the credential and the model together, and
 that is what writes `model` to the configuration file. A turn that delivered
-nothing confirms nothing.
+nothing confirms nothing. See 0003.
 
 **`/model NAME` records the model it replaced** under `last_model`, and
 `/model last` swaps the pair. Two of them put the members back where they were.
 A choice moves the session as well as the file, so the frame does not draw one
-model while the reader is answered by another.
+model while the reader is answered by another. See 0004.
 
 **The frame owns every row** and there is no scroll region, so the log rides
 beside twenty one-character status fields rather than occupying a region above
-six footer rows.
+six footer rows. See 0001.
 
 **A bar never drops a field**, so the bar renderers join the whole list at every
-width and a bar carries everything it has.
+width and a bar carries everything it has. See 0002.
 
 ## What a worker needs to know before changing anything here
 
@@ -108,10 +109,7 @@ changing the test and saying why.
 Six things a reader looking for them will not find here.
 
 1. **No scroll region exists.** The program owns every row, so there is nothing
-   for a region to hold in place. The bug that region caused is recorded in
-   `staged/design-status-bar-ui.txt` and in ADR 001: it took a row count and
-   wrote its first row as one, which put the rows the reader was typing inside
-   it.
+   for a region to hold in place. What it cost is recorded in 0001.
 
 2. **The reader's own scrollback is not the transcript.** The transcript is drawn
    from rows the program holds, in the second column beside the status fields.
@@ -141,12 +139,12 @@ and describe a build this tree is not:
 
 ```text
 interface-bell.md          the bell and the preference behind it
-interface-connect.md       /connect, which this tree does not have
+interface-connect.md       a connection command, which this tree does not have
 interface-permission.md   the approval rules
 interface-verbosity.md     seven levels, where this tree has six
 ```
 
-The two that could not both exist at the same path were overwritten by the
-merge and are kept in `doc-backup/`. None of them is reconciled, since this tree
+The two that could not both exist at the same path were overwritten by the merge
+and are kept in `doc-backup/`. None of them is reconciled, since this tree
 supersedes what they describe and a reader wanting the older build's account has
 them.

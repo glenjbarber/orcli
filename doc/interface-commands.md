@@ -7,9 +7,10 @@ Code: `internal/tui/command.go`, `internal/tui/command_line.go`,
 `internal/tui/line.go`, `internal/tui/alias.go`, `internal/tui/diff.go`,
 `internal/tui/width.go`, `cmd/orcli/dispatch.go`, `cmd/orcli/confirm.go`.
 
-This file describes `main` as of `f24e0b7`. What that merge changed is recorded
-in ADR 003 and ADR 004 of `staged/adr-superseded-events.txt`, and the short of it
-is here rather than left to a reader who has to go looking.
+What the merge that brought this tree up to date changed is recorded in
+`staged/adr-0003-first-request-is-the-probe.txt` and
+`staged/adr-0004-model-choice-records-replaced.txt`, and the short of it is here
+rather than left to a reader who has to go looking.
 
 ## The table is the one place names are written
 
@@ -78,7 +79,7 @@ worth writing down.
 | `exit` | | | leave the interface |
 | `cloudflare` | | | the Cloudflare commands |
 
-**There is no `connect`.** It was in the table with no handler, and ADR 003 removed
+**There is no `connect`.** It was in the table with no handler, and 0003 removed
 it: a reader's own first question is the probe, and a turn that came back with
 text is what proves the credential and the model together.
 
@@ -391,9 +392,9 @@ func (s *Session) Notice(text string, level int, role Role)
 func (s *Session) Finished(reason string)
 ```
 
-`SetModel` is new as of `b1950ab` and is what a `/model` choice calls, so the file
-and the session cannot disagree about which model is in force. It refuses an empty
-model rather than storing one.
+`SetModel` is what a `/model` choice calls, so the file and the session cannot
+disagree about which model is in force. It refuses an empty model rather than
+storing one.
 
 **The log**
 
@@ -452,11 +453,11 @@ func ReadModelPair(path string) (model, last string, err error)
 func ModelIsOffered(catalogue []string, model string) error
 ```
 
-`WriteModelSwap` is new as of `b1950ab` and sets `model` while recording the one
-being replaced under `last_model`. The pair is one read and one write, so a reader
-whose terminal died between two writes is not left with a file that disagrees with
-itself. `ReadModelPair` is exported for the same reason a writer is: a caller
-swapping the pair needs to know what it is swapping from and to.
+`WriteModelSwap` sets `model` while recording the one being replaced under
+`last_model`. The pair is one read and one write, so a reader whose terminal died
+between two writes is not left with a file that disagrees with itself.
+`ReadModelPair` is exported for the same reason a writer is: a caller swapping the
+pair needs to know what it is swapping from and to.
 
 **Colour**
 

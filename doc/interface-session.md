@@ -5,8 +5,8 @@ What a command manipulates and what `/copy N` reaches.
 Code: `internal/tui/session.go`, `internal/tui/log.go`, `internal/tui/levels.go`,
 `internal/tui/worker.go`.
 
-This file describes `main` as of `f24e0b7`. The one addition since the session was
-written is `SetModel`, and it is below.
+The one addition since the session was written is `SetModel`, and it exists
+because of 0004 in `staged/adr-0004-model-choice-records-replaced.txt`.
 
 ## The session is small on purpose
 
@@ -30,7 +30,7 @@ that grew all of them would be the one file that decides everything.
 `New` appends one row, the banner, so a session opening onto an empty screen gives
 a reader something to tell it started.
 
-**`Options()` returns a copy rather than the field**, so a caller cannot reach into
+**`Options()` returns a copy rather than the field,** so a caller cannot reach into
 the session's own options and change what a turn is sent as.
 
 ## The model moves with the file
@@ -39,9 +39,9 @@ the session's own options and change what a turn is sent as.
 func (s *Session) SetModel(model string) error
 ```
 
-New as of `b1950ab`, and it exists because of ADR 004. A `/model` choice writes
-`model` and `last_model` to the configuration file, and without this the frame
-would draw one model while the reader was answered by another until the next turn.
+It exists because of 0004. A `/model` choice writes `model` and `last_model` to the
+configuration file, and without this the frame would draw one model while the
+reader was answered by another until the next turn.
 
 **It takes the session lock** for the reason the state does: a command runs on the
 input goroutine and `ask` reads the model on the request goroutine, and the two
