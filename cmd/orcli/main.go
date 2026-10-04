@@ -292,6 +292,10 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	d := newDispatcherFor(cfg)
 	d.canAsk = func() bool { return canAsk(s) }
 
+	// The dispatcher needs the session so `/model` can change the model the next turn
+	// is sent with, not only the one written to the file.
+	d.withSession(s)
+
 	// The confirmation is wired here rather than in ask, since the writer belongs to
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
@@ -437,8 +441,9 @@ configuration:
 in the interface:
   Type a question and press enter. There is no /connect: your first question is
   what proves the connection, and the model you are answered by is written to the
-  configuration file only once the endpoint has answered. Type /cloudflare to
-  manage DNS records, and /cloudflare confirm to apply a change it showed you.
+  configuration file only once the endpoint has answered. Type /model NAME to
+  choose one and /model last to go back to the one before it. Type /cloudflare
+  to manage DNS records, and /cloudflare confirm to apply a change it showed you.
   /quit leaves.
 
 tools:

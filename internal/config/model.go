@@ -19,23 +19,179 @@ import (
 // a value that reaches a commit trailer is either a name the endpoint uses or
 // something a reader invented, and the invented one is wrong in six months.
 //
-// What this does not do is check the value against the endpoint's catalogue. There
-// is no catalogue in the client: internal/openrouter carries the wire types and the
+// # What it does to last_model
+//
+// Choosing a model records the one it replaced under `last_model`, so `/model last`
+// can go back to it. The recording is a part of choosing rather than a separate
+// step, since a reader who typed a model and then typed `/model last` is asking to
+// come back to where they were, and that only works if the model they left is the
+// one that was written down when they left it.
+//
+// A model chosen with `last` recorded is the previous model on the way back, not
+// the one it was swapped with, so two `last` commands in a row put the reader where
+// they started. That is the swap property and it is what makes the command safe to
+// press twice.
+//
+// # What this does not do
+//
+// It does not check the value against the endpoint's catalogue. There is no
+// catalogue in the client: internal/openrouter carries the wire types and the
 // request path, and no model list. A reader who names a model the endpoint does not
 // offer finds out when a request is refused, which is a worse place to find out than
-// here. The check belongs to whoever fetches the catalogue, and ModelIsOffered is
-// the shape of it, so a caller is handed a check rather than being told one was
-// done.
+// here. The check belongs to whoever fetches the catalogue, and ModelIsOffered is the
+// shape of it, so a caller is handed a check rather than being told one was done.
 //
 // The edit copies the file as bytes rather than re-encoding it, for the reason
 // WriteColor gives, and it refuses a file at any other mode, as every writer here
 // does.
 func WriteModel(path, model string) error {
+	return writeModelPair(path, model, "")
+}
+
+// WriteModelSwap sets the model and records the one it replaces.
+//
+// It is a separate writer rather than a flag on WriteModel, since the two are not
+// the same operation. WriteModel is what the confirmation does: a turn proved the
+// model works and the file should say so, and the model it replaced was one the
+// reader chose by hand and has not moved away from. A swap is what `/model last`
+// does, and it moves both members at once, so a writer that did only one of them
+// would leave a file whose two members disagree about which is current.
+func WriteModelSwap(path, model string) error {
+	if strings.TrimSpace(model) == "" {
+		return fmt.Errorf("config: no model was given")
+	}
+
+	current, err := readModelMember(path)
+	if err != nil {
+		return err
+	}
+
+	return writeModelPair(path, model, current)
+}
+
+// writeModelPair sets the model and the one it replaced, in one pass.
+//
+// Two setMember calls would be two reads of the file and two writes, and a reader
+// whose terminal died between them would be left with a model and no last_model or a
+// last_model and no model. One read and one write is the shape of the thing: the two
+// members are one decision.
+func writeModelPair(path, model, last string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return fmt.Errorf("config: no model was given")
 	}
-	return setTopLevel(path, modelKey, quoteJSONString(model))
+
+	data, err := readForEdit(path)
+	if err != nil {
+		return err
+	}
+
+	rendered := quoteJSONString(model)
+	edited, err := setMember(data, modelKey, rendered)
+	if err != nil {
+		return err
+	}
+	if err := checkMember(edited, modelKey, rendered); err != nil {
+		return fmt.Errorf("config: the edit did not verify: %w", err)
+	}
+
+	// A swap records the model being left, and a plain write records nothing. An
+	// empty last_model is written as an empty string rather than skipped, since a
+	// file carrying a last_model the reader cannot read back is worse than one
+	// carrying none, and a swap always has a model to record.
+	prev := quoteJSONString(strings.TrimSpace(last))
+	if last != "" {
+		edited, err = setMember(edited, lastModelKey, prev)
+		if err != nil {
+			return err
+		}
+		if err := checkMember(edited, lastModelKey, prev); err != nil {
+			return fmt.Errorf("config: the edit did not verify: %w", err)
+		}
+	}
+
+	return osWriteFile(path, edited)
+}
+
+// lastModelKey is the member the model a reader left lives under.
+//
+// It is named once so a writer and a reader cannot disagree about the spelling, the
+// reason modelKey is named. The spelling carries no version prefix, since a reader
+// editing their own configuration should not have to know which build wrote a member
+// to leave it alone.
+const lastModelKey = "last_model"
+
+// readModelMember reads the model currently in the file.
+//
+// It is a read rather than a field on Config, since the writer is handed a path and
+// not a configuration, and a writer that took a Config would be a caller holding two
+// things that can disagree about which model is current.
+func readModelMember(path string) (string, error) {
+	data, err := readForEdit(path)
+	if err != nil {
+		return "", err
+	}
+
+	span, found := findMember(data, modelKey)
+	if !found {
+		return "", nil
+	}
+
+	var model string
+	if err := json.Unmarshal(data[span.start:span.end], &model); err != nil {
+		return "", fmt.Errorf("config: the %s member is not a string: %w", modelKey, err)
+	}
+	return model, nil
+}
+
+// ReadModelPair returns the model and the one a reader left, as the file has them.
+//
+// It is exported because a caller swapping the pair needs to know what it is
+// swapping from and to, and a caller that re-read the file through Load would be
+// doing the read twice with a different set of members in between.
+func ReadModelPair(path string) (model, last string, err error) {
+	data, err := readForEdit(path)
+	if err != nil {
+		return "", "", err
+	}
+
+	for _, key := range []string{modelKey, lastModelKey} {
+		span, found := findMember(data, key)
+		if !found {
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(data[span.start:span.end], &value); err != nil {
+			return "", "", fmt.Errorf("config: the %s member is not a string: %w", key, err)
+		}
+		switch key {
+		case modelKey:
+			model = value
+		case lastModelKey:
+			last = value
+		}
+	}
+	return model, last, nil
+}
+
+// readForEdit reads the bytes a writer is about to edit.
+//
+// The mode and the object checks are here rather than in each writer, since every
+// writer has the same three steps before it touches a byte and a writer that
+// skipped one would write into a file another account can read.
+func readForEdit(path string) ([]byte, error) {
+	if err := checkMode(path); err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	if !isObject(data) {
+		return nil, fmt.Errorf("config: %s: %w", path, ErrNotAnObject)
+	}
+	return data, nil
 }
 
 // modelKey is the member the model identifier lives under.
@@ -57,16 +213,9 @@ const modelKey = "model"
 // keeps the quoting in one place per value type instead of spreading it through
 // every writer that happens to write a string.
 func setTopLevel(path, key, value string) error {
-	if err := checkMode(path); err != nil {
-		return err
-	}
-
-	data, err := os.ReadFile(path)
+	data, err := readForEdit(path)
 	if err != nil {
-		return fmt.Errorf("config: read %s: %w", path, err)
-	}
-	if !isObject(data) {
-		return fmt.Errorf("config: %s: %w", path, ErrNotAnObject)
+		return err
 	}
 
 	edited, err := setMember(data, key, value)

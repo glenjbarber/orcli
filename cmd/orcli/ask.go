@@ -42,6 +42,10 @@ func ask(s *tui.Session, c *openrouter.Client, attribution string, confirmed fun
 			return err
 		}
 
+		// The model is read through the session rather than off the options value,
+		// since `/model` can change it while a turn is in flight and the turn has to
+		// be sent with the model in force when it was asked rather than the one the
+		// file happened to hold when the request was built.
 		model := s.Options().Model
 
 		var reply strings.Builder
