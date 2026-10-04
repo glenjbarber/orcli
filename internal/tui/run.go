@@ -12,28 +12,27 @@ import (
 
 // Screen owns the terminal the interface draws on.
 //
-// It is the one thing in this package that writes to a file descriptor. Everything
-// else returns strings, and a draw is the only place a string becomes bytes the
-// terminal will act on, so the owner of the bytes is the owner of the terminal.
+// It is the one thing in this package that writes to a file descriptor. Everything else
+// returns strings, and a draw is the only place a string becomes bytes the terminal will
+// act on, so the owner of the bytes is the owner of the terminal.
 //
 // # The scroll region
 //
-// The log and the footer stack share one screen, so the terminal has to be told
-// where the log ends. That is DECSTBM, set on entry and recomputed on every resize,
-// with the log clipped to rows `1..H-stackRows`. Without it the stack would scroll
-// away the first time a row was written, and the reader would lose the prompt they
-// are typing into.
+// The log and the footer stack share one screen, so the terminal has to be told where the
+// log ends. That is DECSTBM, set on entry and recomputed on every resize, with the log
+// clipped to rows `1..H-stackRows`. Without it the stack would scroll away the first
+// time a row was written, and the reader would lose the prompt they are typing into.
 //
-// This is the one piece of the frame with no precedent in the tree, and the piece
-// most likely to be wrong. It lives here rather than in a `screen.go` of its own
-// because a scroll region that is set by one function and recomputed by another is two
-// things that have to agree about the same number.
+// This is the one piece of the frame with no precedent in the tree, and the piece most
+// likely to be wrong. It lives here rather than in a screen.go of its own because a
+// scroll region that is set by one function and recomputed by another is two things that
+// have to agree about the same number.
 
 // WindowSize is a terminal's size in rows and columns.
 //
 // It is a value rather than a pair of returns because every caller here needs both
-// halves and a caller that had to remember which order they came in would get it
-// wrong once.
+// halves, and a caller that had to remember which order they came in would get it wrong
+// once.
 type WindowSize struct {
 	Rows int
 	Cols int
@@ -41,16 +40,16 @@ type WindowSize struct {
 
 // minSize is the smallest window this package will draw into.
 //
-// A terminal reporting nothing is one that cannot be read, and drawing a frame into
-// it produces rows nobody sees. A terminal reporting one row is one that can hold the
+// A terminal reporting nothing is one that cannot be read, and drawing a frame into it
+// produces rows nobody sees. A terminal reporting one row is one that can hold the
 // prompt and nothing else.
 const minSize = 1
 
 // Screen writes to a terminal and knows how large it is.
 //
-// The zero value is not usable. A Screen is built by NewScreen, which needs a writer
-// and a size, and a Screen built by hand has a writer of nil and writes nothing
-// while reporting that it did.
+// The zero value is not usable. A Screen is built by NewScreen, which needs a writer and
+// a size, and a Screen built by hand has a writer of nil and writes nothing while
+// reporting that it did.
 type Screen struct {
 	mu sync.Mutex
 
@@ -62,9 +61,9 @@ type Screen struct {
 
 // NewScreen returns a Screen writing to out at the given size.
 //
-// The size is a parameter rather than a query, so a draw can be tested against
-// figures a test chose rather than against whatever the machine's terminal happens
-// to be. SizeOf asks the terminal for the real one.
+// The size is a parameter rather than a query, so a draw can be tested against figures a
+// test chose rather than against whatever the machine's terminal happens to be. SizeOf
+// asks the terminal for the real one.
 func NewScreen(out io.Writer, size WindowSize) *Screen {
 	return &Screen{out: out, rows: size.Rows, cols: size.Cols}
 }
@@ -85,9 +84,9 @@ func (s *Screen) Width() int { return s.Size().Cols }
 // SetSize adopts a new size and recomputes the scroll region.
 //
 // The region is recomputed rather than left, since a terminal resized taller gives the
-// stack rows it did not have and one resized shorter takes them away. A region left at
-// the old size clips the log to a height the screen no longer has, which is a log that
-// stops growing with no way to see why.
+// stack rows it did not have and one resized shorter takes them away. A region left at the
+// old size clips the log to a height the screen no longer has, which is a log that stops
+// growing with no way to see why.
 func (s *Screen) SetSize(size WindowSize) {
 	s.mu.Lock()
 	s.rows, s.cols = size.Rows, size.Cols
@@ -98,12 +97,12 @@ func (s *Screen) SetSize(size WindowSize) {
 
 // Write sends text to the terminal.
 //
-// It is the only method that writes, so the lock that serialises draws lives here
-// rather than in each caller. Two writers interleaving produce a row with half a
-// sequence in it, which is a colour that bleeds into the next row.
+// It is the only method that writes, so the lock that serialises draws lives here rather
+// than in each caller. Two writers interleaving produce a row with half a sequence in it,
+// which is a colour that bleeds into the next row.
 //
 // A screen with no writer writes nothing rather than panicking, since a Screen built by
-// hand has one and a draw that crashed would take the session with it.
+// hand has one, and a draw that crashed would take the session with it.
 func (s *Screen) Write(text string) {
 	if text == "" || s == nil {
 		return
@@ -155,15 +154,14 @@ func SizeOf(fd uintptr) WindowSize {
 // Run draws the session until it ends.
 //
 // This is the first thing in the package that paints, and the shape of it is decided
-// rather than open: the log grows downward, the stack is held at the bottom, and
-// nothing is redrawn except the twiddle. A frame that redrew itself whole would be the
-// model this package was rebuilt to leave behind, since a reader who has scrolled back
-// to compare two tool results is reading history rather than a viewport.
+// rather than open: the log grows downward, the stack is held at the bottom, and nothing
+// is redrawn except the twiddle. A frame that redrew itself whole would be the model
+// this package was rebuilt to leave behind.
 //
 // The session is read, not driven. Nothing here reads keys and nothing here sends a
 // request, because a line editor and a turn loop are separate units with their own
-// decisions. What this owns is the terminal: the scroll region, the rows, and the
-// width every row is cut to.
+// decisions. What this owns is the terminal: the scroll region, the rows, and the width
+// every row is cut to.
 //
 // A nil session or a screen with no writer is reported rather than drawn into, since a
 // silent draw writes nothing and a reader concludes the program is idle.

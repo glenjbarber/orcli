@@ -49,10 +49,10 @@ type attributes struct {
 // kernel fills four bytes of, and the columns come back as zero, which looks like
 // a terminal that cannot be asked rather than one asked wrongly.
 type windowSizeRaw struct {
-	Rows    uint16
-	Cols    uint16
-	Xpixel  uint16
-	Ypixel  uint16
+	Rows   uint16
+	Cols   uint16
+	Xpixel uint16
+	Ypixel uint16
 }
 
 // isTerminal reports whether the descriptor is a terminal.
