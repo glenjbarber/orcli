@@ -1,0 +1,254 @@
+# Design: the interface reads keys, and a turn answers
+
+Branch `feature/tui-input-loop`, off main. This is one unit because the pieces
+are useless apart: a loop with no turn accepts a question and never answers it,
+and the guidance below needs a turn to be asked through.
+
+## What exists and what is missing
+
+The frame is built and on main. `internal/tui/run.go` holds `Screen`, the scroll
+region and `Run`; `internal/tui/stack.go` holds `DrawLog`, `DrawStack`,
+`DrawTwiddle` and the two bar renderers. `session.go` holds the log, the levels,
+the workers and the four states, with `Begin`, `Deliver`, `Finished` and
+`Notice` ready to be called. `command.go` holds the table and a completer whose
+`Completion` already returns text and a caret position. `worker.go` holds the
+background turn machinery.
+
+The transport is built and on main. `internal/openrouter` streams a reply, holds
+a retry, filters the credential from every diagnostic, and delivers events to a
+callback. It has never been connected to a session.
+
+Nothing reads keys. `Run` sets the scroll region, draws the log, draws the stack
+and returns. `cmd/orcli` calls it once during startup and says on stderr that
+nothing reads keys yet. No file draws a line editor, and no file puts the
+terminal into raw mode.
+
+The dispatcher is built and on main. `cmd/orcli/dispatch.go` resolves a typed
+line through `tui.IsCommand` and runs `/cloudflare`. Nothing calls it, so no
+command is reachable by a reader.
+
+## The frame, and what it means for input
+
+Rows go downward into the normal screen buffer in the order they happened, and
+the reader's own scrollback is the transcript. The alternate screen is given up,
+which is forced by the scroll rather than chosen.
+
+`DECSTBM` is set on entry and recomputed on every resize, with the log clipped to
+the rows above the footer stack. The stack is pinned at the bottom: the prompt is
+the last row, above the hint row, above the Provider bar, above the Credits bar,
+with a rule between each.
+
+Three consequences settle most of the input decisions by themselves.
+
+**The editor owns one row.** The prompt is the last row of the screen and never
+moves, so the caret is always on the last row and never in the middle of the
+log. The editor edits the stack and nothing else. It never scrolls, never
+repositions within the log, and never redraws a row above itself.
+
+**The cursor is placed on every paint, not once at entry.** This is already
+recorded in `.orcli-design/design-terminal-input.md` under raw mode, and the
+reason is in the code: `DrawTwiddle` moves the cursor up one row, erases it and
+writes the figure, so a twiddle step leaves the caret a row above the prompt.
+Placing it at the end of every paint holds by construction, and the frame already
+redraws the whole stack each time, so one more sequence on a paint that rewrites
+nine rows is not the thing that costs.
+
+**The painter owns the bottom rows and nothing else.** A paint redraws the stack.
+The log is append-only and is never touched by a repaint, and the twiddle is the
+one in-place redraw, sitting directly above the prompt and below the scroll
+region so it neither scrolls nor disturbs the log.
+
+Mouse reporting stays off. Capturing the mouse intercepts the wheel, and the
+wheel is how a reader scrolls back through their own transcript in this frame.
+
+## Raw mode
+
+The interface reads keys itself, so the line discipline cannot assemble a line.
+
+`TCGETA` reads the prior state and `TCSETA` writes it back. `ISIG`, `ECHO`,
+`ICANON`, `IEXTEN` and `OPOST` are cleared on entry, and the prior state is
+restored on exit. The BSD and System V spellings differ only in the trailing A,
+so `termios_bsd.go` and `termios_linux.go` are where `rawMode` and
+`restoreTermios` live, beside the names they use and nowhere else.
+
+A signal handler restores the prior state before the process leaves. A crash
+that left the terminal with no echo and no line discipline is a terminal the
+reader has to fix by hand, and the handler is what stops that.
+
+## Reading keys
+
+Input is read in blocks, not a byte at a time.
+
+A terminal writes a whole mouse report in one piece, so a block read returns it
+complete and it is recognised before any of its bytes are read as keys. Reading a
+byte at a time would see the opening escape alone, and a lone escape interrupts,
+so every mouse press would stop a turn.
+
+A prefix that is too short to recognise is held rather than treated as keys. A
+prefix that begins like a mouse report is held until it is whole, bounded by the
+read rather than by a deadline on the file, so a report split across two blocks is
+not lost and a prefix at the end of a stream does not wait for ever. Beyond the
+bracket the form decides: an arrow is not held, since the up arrow is the
+shortest sequence that begins like a mouse report and is not one.
+
+`readWithin` in `readable.go` is the one way to read with a bound. Two
+approaches were rejected and the reasons are in the design record:
+`SetReadDeadline` fails with `ErrNoDeadline` on a standard stream, because Go
+hands those to a program through `os.NewFile`, which leaves the descriptor
+outside the runtime poller; and `select(2)` needs a different spelling on every
+BSD while `poll(2)` on Darwin ignores its timeout. What is left is a read that
+cannot block, plus a short sleep between attempts, at a 2ms step. The descriptor
+is put back the way it was found, since the mode of a descriptor is not the
+client's to keep.
+
+A lone escape is still a key and still interrupts. It is the one byte at the
+front of a buffer that could be a report, and holding it would swallow the
+interrupt it stands for.
+
+## The line editor
+
+Text on the prompt row, and nothing more.
+
+Insertion, backspace, left and right, home and end. There is no history in this
+unit: a history needs the conversation, and the conversation is not settled.
+
+Completion calls `Completion(prefix)`, which is already on main and already
+returns the text and a caret. The trailing space it puts after a whole name is
+what lets a reader type `/color ` and then an argument rather than pressing tab
+before every word, and it must survive into the field rather than being stripped.
+
+The editor is a value over the field, not a thing that writes to the terminal.
+`Run` asks it what the prompt row should say, and the painter draws it. An
+editor that wrote into the screen behind the painter would be two things writing
+to one place.
+
+## What a line does
+
+A line beginning with a slash goes to the dispatcher. `Run` is given a
+`func(context.Context, string) (string, error)`, which is `dispatcher.Run`, and
+`Run` no longer returns after one paint. This is the whole of what makes
+`/cloudflare` work, and no further work in the dispatcher is needed.
+
+A line that is not a slash is a question.
+
+`Session.Begin` appends the question, sets `StateThinking`, and returns the
+context. `openrouter.Client.Chat` streams the reply into a buffer on its own
+goroutine. `Deliver` is called once, with the whole reply, on the first text, and
+the first delivery moves the session from thinking to working. `Finished` is
+called at `EventFinish`, whichever way the turn ended. Model text is held for the
+turn and written whole, since a log that grows a row per token is a log that
+scrolls past what the reader was reading.
+
+Escape closes the turn's cancel context. It is the one interrupt trigger in this
+unit: `[enter][enter]`, `/queue` and `/redirect` are separate, and the reason
+they are is recorded at `staged/status-interrupt.txt`.
+
+## The result a command produces
+
+Running a line produces one of three things, and a caller has to be able to tell
+them apart:
+
+- text for the reader, which is what most commands produce;
+- a question for the model, which is what the Cloudflare guidance below produces;
+- a failure.
+
+The current signature returns a string and an error, and the guidance is neither
+of those. It is not a failure, because it is the ordinary first-run path and a
+status bar showing an error for a reader who typed a command that is not set up
+yet would be reporting a fault that does not exist. So the dispatcher returns a
+small result carrying `Text`, `Ask` and `Err`, and the loop sends `Ask` as a turn
+when it is set. A change of signature is fine here: the dispatcher is on main,
+its tests are in the same unit, and nothing outside the dispatcher calls it.
+
+## A Cloudflare provider that is not set up
+
+If `Config.CloudflareAPIKey` is empty, `/cloudflare` makes no API call at all.
+Not a call that fails, not a call that sends an empty credential: no call.
+
+The client then asks the model to tell the reader how to set one up, and the
+model's answer arrives in the log as an ordinary reply. The question the client
+sends is worded so its echo, which `Begin` writes as a row, is useful to read:
+
+```
+The Cloudflare provider is not set up in the configuration file, so
+/cloudflare cannot run. Tell me how to add one: the exact JSON shape of the
+cloudflare block, where the file is found and what mode it must carry, and an
+example with a sample API key.
+```
+
+The reason the guidance goes to the model rather than being a string in the
+binary is that the configuration syntax can change and the binary does not. A
+client that carries its own instructions describes the file as this build
+understands it, and a reader with a newer server than this build was written
+against is then told the wrong thing by something that looks authoritative. A
+model asked the question at the time can answer it from what it knows now. The
+client keeps the one fact it is certain of, which is that the provider is not
+set up, and asks for the rest.
+
+The sample key in that answer is a placeholder, written by the model, and never
+the reader's own key. Nothing in this unit writes a credential anywhere.
+
+**The fallback, and why it exists.** A reader with no OpenRouter credential and
+no model chosen cannot be answered by a model, and `/cloudflare` must still
+produce a result rather than nothing. In that case the client falls back to its
+own short text: the file is `~/.orcli.json` or `~/.config/orcli/orcli.json`, it
+must be mode 0600, and the member is a `cloudflare` object carrying `api_key`.
+That text is the thing that drifts, which is exactly why it is the fallback and
+not the default.
+
+**The name stays in the table.** `/cloudflare` is listed in completion whether or
+not a provider is set up, since a reader who wants Cloudflare support and has not
+configured it is exactly the reader who needs to be told how. Removing the name
+from the table would make the feature invisible to the person who needs it.
+
+## The credential check that is missing today
+
+`dispatcher.cloudflareClient` builds a client from whatever key the block holds
+and makes the call. There is no check for an empty key, and
+`internal/cloudflare.APIClient` has `ErrNoCredential` defined but never returns
+it. `internal/openrouter.Client.Chat` does check, and that is the asymmetry.
+
+The test named `TestNoCredentialIsNamedRatherThanSilent` passes for the wrong
+reason and should be fixed rather than trusted. Its fixture server returns an
+empty body with a 200, so the call is made, the body fails to decode, and the
+error it asserts on is the decode failure, which happens to contain the word
+"cloudflare". Give that fixture a well-formed body and the test still passes
+with the call going out and no credential on it. The new test asserts the refusal
+directly: with no block in the file, no request reaches the server.
+
+## The turn carries no conversation
+
+A turn sends the question and nothing else. There is no history in the request,
+no level is attributed to the reply beyond the one the session was given, and no
+tools are offered.
+
+This is the one place where the interface is not yet a chat client rather than a
+question sender, and it is left unfinished rather than guessed at. What a turn
+carries, and from which level, is a decision the reader has not made. It is
+recorded here so the next reader knows it was left open on purpose and not
+overlooked.
+
+## What this unit does not do
+
+`/spawn`, `/delegate`, `/btw`, `/queue`, `/redirect`, `[enter][enter]`, mouse
+reporting, tools, the conversation, the transcript being sent, `/copy` and
+`/close` being wired to a keystroke, and the paste handling. The decision about
+`/spawn` and `/delegate` is deliberately not taken here.
+
+A long paste is folded for display and the remainder is expanded by a command,
+and a line longer than the terminal is folded at a column rather than cut, since
+`width.go` already measures display columns. Both are recorded at
+`staged/status-paste.txt` and neither is in this unit.
+
+## Unverified
+
+Three things a test cannot settle and this unit does not claim.
+
+How the stack looks on a real screen. Whether the two-cell twiddle reads as one
+figure. Whether an escape read as a key while a turn is running reaches the loop
+and stops it. The last one is a real risk rather than a nicety, since a report
+that arrives one byte at a time would present its opening escape as an interrupt,
+and it needs a terminal to rule out.
+
+The gates are `bmake check` and `bmake lint`, both run in the worktree and
+reported as the worker's own.
