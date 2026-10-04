@@ -34,3 +34,12 @@ var ErrBadMode = errors.New("config: the configuration file must be mode 0600")
 // An array or a bare value at the top level parses, which is the trap here: a
 // reader would be told the file is valid while nothing in it could be read.
 var ErrNotAnObject = errors.New("config: the configuration file is not a JSON object")
+
+// ErrNoModelList is returned when a model cannot be checked because the
+// endpoint's catalogue has not been fetched.
+//
+// It is a named error rather than a bare refusal so a caller can tell "this
+// model does not exist" from "we never asked". The two need different
+// remedies: one is a reader who typed it wrong, and the other is a fetch that
+// failed.
+var ErrNoModelList = errors.New("config: the model catalogue has not been fetched")

@@ -108,6 +108,7 @@ func init() {
 			Args:    "NAME",
 			Summary: "show or choose the model, without an argument to list",
 		},
+		attributeCommand,
 		{
 			Name:     "new",
 			Summary:  "clear the conversation",
