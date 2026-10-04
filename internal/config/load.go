@@ -46,6 +46,21 @@ type Config struct {
 	// Provider is the endpoint host, defaulting to the OpenRouter one.
 	Provider string `json:"provider,omitempty"`
 
+	// AttributionID names who asked, and is sent with every request so the
+	// provider can record a byline and a reply can be attributed to whoever is
+	// holding this session.
+	//
+	// It is empty until the reader answers for it, and that is the ordinary
+	// first-run state rather than a fault. A reader who has not said who they
+	// are has not said anything false, and a client that supplied a byline on
+	// their behalf would be putting words in their mouth for a third party.
+	// /attribute asks the question and WriteAttribution records the answer.
+	//
+	// The endpoint calls this an HTTP-Referer value. It is spelled here the way
+	// the command is, since the reader is the one who sets it and the command
+	// and the field should be the same word.
+	AttributionID string `json:"attribution_id,omitempty"`
+
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool `json:"mouse,omitempty"`
 
@@ -90,13 +105,14 @@ type Config struct {
 // design names as the default.
 func Default() Config {
 	return Config{
-		Model:     "",
-		Provider:  "openrouter.ai",
-		Mouse:     false,
-		Bell:      false,
-		Color:     false,
-		Verbosity: 0,
-		Approval:  string(ApprovalAsk),
+		Model:         "",
+		Provider:      "openrouter.ai",
+		AttributionID: "",
+		Mouse:         false,
+		Bell:          false,
+		Color:         false,
+		Verbosity:     0,
+		Approval:      string(ApprovalAsk),
 	}
 }
 
@@ -203,6 +219,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readString(value, &c.Model)
 		case "provider":
 			err = readString(value, &c.Provider)
+		case "attribution_id":
+			err = readString(value, &c.AttributionID)
 		case "mouse":
 			err = readBool(value, &c.Mouse)
 		case "bell":
