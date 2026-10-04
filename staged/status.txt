@@ -1,0 +1,146 @@
+### The instruction search list, extended and given precedence
+
+The user extended the list named at DESIGN.md line 845. The search covers
+`AGENTS.md`, `ORCLI.md`, `RULES.md`, `SHARED.md`, `preferences.md`,
+`OPENROUTER.md` as AGENTS.md spells it, and `.OPENROUTER.md`, which is what
+staged/design-api-transport.md reads at startup. One list rather than two, which
+answers the collision this session raised: the search list and the always-read
+house rules are the same mechanism, so `.OPENROUTER.md` is reached by being named
+rather than by a second path.
+
+One spelling question is settled by the list being one: `.OPENROUTER.md` is the
+real file, since it is what this tree holds and what the transport document
+already reads. `OPENROUTER.md` without the dot is the spelling in DESIGN.md line
+845, and it is a name that does not exist here. Whether the search also matches
+the undotted spelling is not decided; a search that matched two names for one file
+would install the same rules twice.
+
+Precedence is the user's, in three rules and in this order:
+
+1. Read in order of precedence. The first file carrying a rule wins.
+2. Most restrictive rule wins a conflict between files.
+3. A circular conflict states the paradox and prompts the reader to resolve it.
+
+The order the names are read in is not specified by the user, and it is load
+bearing, since rule 1 makes the list an ordered thing. Two candidates, and the
+choice between them is a judgment rather than a derivation: the list as the user
+enumerated it, with AGENTS.md first since it is what the repository already
+carries, or most-specific-first, with preferences.md ahead of AGENTS.md since a
+reader's own standing preferences are a stronger claim on their session than a
+file a repository ships.
+
+What rule 3 needs and does not yet have. A paradox is reported by asking, and
+this is a turn that runs before a reader is present, so a prompt during a
+request is a question sent to a model rather than to the reader. Three shapes:
+
+- The conflict is detected before the request is sent, the reader is asked at the
+  keyboard, and the request waits. A reader who is not there waits for ever, and
+  the design already holds that a question nobody answers is a refusal rather
+  than a wait.
+- The conflict is detected before the request, the request is abandoned, and the
+  reader is asked. A turn producing nothing is a turn that stalls, which
+  AGENTS.md holds against.
+- The request is sent with one file's rules and the paradox is reported beside
+  the answer. The turn completes and the reader is told afterwards that two files
+  disagreed and which one was used. Nothing stalls and nothing is silent, and the
+  reader can correct it by editing a file and asking again.
+
+The third is the lean. It is the only one of the three that is consistent with the
+two rules the tree already holds about questions and about empty turns, and it
+keeps the paradox visible without making the reader's presence a precondition for
+the model answering.
+
+Most restrictive, read against the rules this tree already has: a refusal wins over
+a permission, `cognito` wins over recording, `0600` wins over readability, and a
+tool refusal wins over an approval. The rule is doing the same work here as the
+nearest-rule-wins rule in internal/config/approval.go: a rule beneath another
+rule can narrow what the other allows and cannot widen it.
+
+What this settles about the search being specified but not built. Nothing is built
+yet, so this is still specification. internal/bootstrap/resolve.go implements
+the cross-device symlink rule the search is supposed to use and nothing calls it,
+and that seam is where the list, the precedence and the paradox report would be
+written.
+
+## Retry on an upstream idle timeout
+
+Written this pass, in the tree and uncommitted, at the user's instruction to write
+it as-is.
+
+### The cause, verified in the code
+
+The error the reader saw was
+`(error) the stream reported an error: Upstream idle timeout exceeded`, with the
+real cause stripped. internal/openrouter/stream.go decoded only Choices and Usage
+from a chunk, and an SSE payload of the form {"error":{"message":"..."}} carries
+neither, so the parser reported nothing for it and the loop went on to the end of
+the stream. The reader was then told the stream ended without its terminating
+marker, which is a symptom and not the cause. The endpoint names the fault; this
+client was discarding the name and reporting a consequence.
+
+### What was written
+
+Three files. internal/openrouter/stream.go gains an Error field on chunk and a
+reportedError carrying only the message, since nothing here depends on the code
+beside it and the code is quoted as a number by some failures and as a string by
+others. The parser state moves from three locals into a progress value, which
+exists so the retry rule is decided in one place rather than in a reader loop.
+
+internal/openrouter/client.go gains the retry. internal/openrouter/retry_test.go
+is new and carries nine tests.
+
+Three decisions, each named in a comment rather than left implicit:
+
+- Retry only when nothing was delivered. A request that delivered text or a
+  completed tool call is a reply that was paid for, and a second attempt would
+  either duplicate the text or throw it away. The text before a cut is kept
+  rather than taken back, which is what the package already did.
+- HTTP status failures are not retried. A status is the endpoint refusing the
+  request rather than an upstream stalling behind it, and a second request cannot
+  satisfy a rejected credential or a malformed request. A rate limit is the case
+  where the reader could retry by waiting, and this bounds the wait at three
+  attempts rather than letting a turn sit for as long as the limit names.
+- Exactly one EventFinish per call. The parser stays silent about a failure it is
+  going to be retried over, which means an attempt that is retried reports nothing
+  at all, and Chat reports the cause and the unfinished turn once the attempts are
+  exhausted. Without this the reader would be told about a failure and then handed
+  a reply with no explanation for the silence.
+
+The bound is three attempts at 250ms and then 500ms, as constants in the
+transport rather than a configuration key. The reason is recorded in the comment:
+internal/config has named writers and holds the credential, so a key is a third
+writer, and AGENTS.md records that the packages import one another in no
+direction, which a bound read from the configuration would be the first edge
+across. The user was asked for three numbers and did not answer them, so the
+numbers are named in the comment as things to revisit rather than presented as
+derived.
+
+### Verification
+
+go build ./..., go vet ./..., go test -race ./... and gofmt -l internal/ were all
+run and all pass. No source file outside internal/openrouter was touched.
+
+### Two mistakes this pass, recorded because the ledger is supposed to be trustworthy
+
+internal/openrouter/chat_test.go was overwritten with a broken draft, losing 607
+lines of committed tests, and restored with git checkout --. Nothing was lost and
+git status confirms the file is back to its committed state, but the overwrite was
+a write to a file whose contents had not been read. The draft was also invalid Go,
+and the new file was truncated mid-test on a second pass. Both errors were
+compiling failures rather than silent ones, which is the only reason they cost time
+rather than correctness.
+
+The lesson is the one the earlier process notes in this file already record, from
+the other direction: a whole-file rewrite of a ledger propagates an error into the
+permanent record, and the same is true of a whole-file rewrite of a source file.
+This pass wrote new code into an existing file three times before it built, and
+the first two attempts were wrong.
+
+### What is open about the retry
+
+Whether the bound and the wait are right is a question for the user and was
+unanswered. Whether a retried request should be visible as a milestone in the log
+is answered by the frame design rather than here: the reader is told nothing until
+the attempts are exhausted, so a retry is silent and a failure is one line. Whether
+the provider's own wording should be shown verbatim or paraphrased into this
+client's voice is not decided, and verbatim is what it does now.
