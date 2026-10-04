@@ -1,0 +1,30 @@
+Module: 0
+Worker ID: 6
+Merged: started
+Status: wiring Run into startup on feature/tui-run-call-startup
+
+Design records for the unit that calls tui.Run from startup. The abridged view
+of a worker sits at the root of that worker's own worktree, so this is it under
+staged/ with the two records it points at, since a file at the root of the main
+worktree reads as a repository document rather than as one worker's note.
+
+staged/design-draw.txt is the drawing worker's own record, recovered from the
+untracked file it left in worktrees/feature/tui-run-draw/staged/status.txt and
+committed as written. It says its branch was off 3fb7032, which is where the
+drawing was written from, and it says the hint row was left out where the merged
+stack.go draws one blank. Both are noted rather than edited.
+
+staged/design-wiring.txt is that worker's own record. staged/status.txt was not
+used for either, since it is tracked on main and holds another unit's committed
+record from af24236, so it was left as it was found.
+
+The wiring is merged as e885ef5. It is three commits on
+feature/tui-run-call-startup: 3628ae2 the two records, 7eb2b8a the call and the
+session translation, 3ce2f90 the tests. Both gates pass in the main worktree
+after the merge.
+
+One record was duplicated in the merge and one copy is now redundant:
+staged/status-draw.txt and staged/design-draw.txt are byte identical, and
+staged/status-draw.txt was committed here at 30ef990 while the other came in on
+the branch. Deleting the one at staged/status-draw.txt, since the worker's own
+file is the one a reader arriving at this unit would look for.
