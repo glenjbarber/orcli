@@ -227,6 +227,11 @@ type session struct {
 // rather than a member of it, and there is no field on Config to copy from. Nothing
 // reads the marker yet, so the mode arrives as off rather than as a decision the
 // reader did not make.
+//
+// The Cloudflare key is not carried across either, and that is the rule this
+// dispatcher exists to keep. A command in main reads the block itself, so a second
+// provider credential does not sit in the interface for the length of a session doing
+// nothing with it.
 func (s session) tuiSession() *tui.Session {
 	opts := tui.Options{
 		APIKey:     s.Config.APIKey,

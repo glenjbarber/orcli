@@ -1,0 +1,152 @@
+# Design: a command dispatcher, and the /cloudflare command on it
+
+Branch `feature/cloudflare-command-dispatch`, off `main` at `11809cf`. The design
+first, then the implementation, the documentation and the tests as three commits
+after it.
+
+## What this unit is
+
+The dispatcher that lets `internal/tui` run a command at all, and `/cloudflare`
+as the first command on it.
+
+`internal/tui` has a command table with `Lookup`, `Names`, `Complete` and
+`Completion`, and thirty-odd names in it, and nothing that runs one. `Run` draws
+the log and the stack once and returns. The frame exists, the names exist, and
+the line a reader types does nothing.
+
+So this unit is two things: the seam every command needs, and one command on it.
+
+## The seam is in main, not in tui
+
+`cmd/orcli` owns the dispatcher. A command handler is
+
+```go
+func(ctx context.Context, s *tui.Session, args string) (string, error)
+```
+
+in `cmd/orcli`, and `internal/tui` gains only what a handler needs from it: a way
+to say that a line beginning with a slash is a command rather than a prompt, and
+the completer it already has.
+
+The reason is the credential, and it is the whole reason. `/cloudflare` needs a
+Cloudflare API key, which lives in the configuration file, and the session already
+holds the OpenRouter key in `tui.Options.APIKey`. Adding a second provider key to
+`Options` would put a credential in the interface that the interface never uses,
+held for the lifetime of the session, for the convenience of a handler that runs
+in `main` and can read the file itself.
+
+So the dispatcher builds the Cloudflare client per call, from the configuration
+`main` already loaded, and hands it to the handler. Nothing credential-shaped
+crosses into `internal/tui` except the session's own.
+
+`AGENTS.md` holds that `main` is where the direction changes, and this is that:
+`main` may reach `config`, `openrouter`, `cloudflare` and `tui`, and it is the only
+place that does.
+
+## What internal/tui gains
+
+Three things, each small and each useless on its own:
+
+- `IsCommand(line string) (name, args string, ok bool)`, which strips the slash and
+  splits at the first space. It is in `internal/tui` beside `Lookup` since it is the
+  same question the table answers, and it refuses a line that is only a slash.
+- `CloudflareKey(cfg config.Config) string` is **not** here. It is in `main`, beside
+  the translation from `config.Config` to `tui.Options`, and this is the decision
+  that keeps it there.
+- Nothing on the `Session`. The proposal `/cloudflare` holds between two commands is
+  in `main`, in the dispatcher, and not on the session, because a session holding a
+  proposed DNS change is an interface holding a state the interface never reads.
+
+## The proposal lives in the dispatcher
+
+`/cloudflare dns add` fetches, renders a diff, and holds the change. `/cloudflare
+confirm` applies it. Both are commands, so both are handlers, and the thing they
+share is a field on the dispatcher:
+
+```go
+type dispatcher struct {
+    session *tui.Session
+    cloudflareKey string
+    pending *cloudflare.Proposal
+    before cloudflare.Record
+    existed bool
+}
+```
+
+It is a value in `main` rather than a field on the session for the reason above.
+A session is the log, the levels, the workers and the four states; a proposed DNS
+record is none of those, and putting it there would be the interface growing a
+concept it has no use for.
+
+The rules the design settles, and this unit implements:
+
+- A second `/cloudflare` call before the confirmation replaces the held proposal.
+- `/cloudflare confirm` with nothing held is a result saying so, not a silent no-op.
+- The confirmation applies exactly what was shown. The proposal carries the record,
+  not the arguments, so nothing is rebuilt from what was typed the second time.
+
+## What the handler does
+
+For a read, `dns list`:
+
+1. Build a client from the key. An empty key is `cloudflare.ErrNoCredential`, which
+   names where to put one.
+2. Parse the arguments in `internal/cloudflare`, where the parser already is.
+3. Call the API.
+4. Return the result as text, which the dispatcher puts in the log.
+
+For a write, `dns add`, `dns delete` or `dns edit`:
+
+1. Fetch the current state, which is what the diff is made against.
+2. Build the proposal and ask it whether it changes anything. A proposal that does
+   not is reported rather than shown as a diff of a record against itself.
+3. Render the diff, return it, and hold the proposal.
+4. Tell the reader the confirmation is `/cloudflare confirm`, since a diff with no
+   instruction is a diff nobody acts on.
+
+Every one of those returns an error as a result. An unknown sub-command, a missing
+`--name`, a 400 from Cloudflare and a body that did not decode are all text in the
+log, which is what `AGENTS.md` holds: a call always produces a result.
+
+## What lands in the log
+
+Three kinds of row, and the choice is worth stating:
+
+- A read's result is one row. The API's JSON, one line per record, since a row per
+  field is a log nobody scans.
+- A diff is several rows, one per line of the diff, each carrying the diff's own
+  `-` and `+`. The confirmation is the one place a reader is deciding something, and
+  colour there would be arguing with them; the marks are what a reader already reads.
+- An error is one row in `RoleFailure`.
+
+The log is cut to the terminal width on the way out, which is what `CutColumnFromEnd`
+does for every row. A long DNS value is cut rather than folded, and that is the
+frame's rule rather than this command's: a fold is the paste decision and it is not
+built.
+
+## The configuration block
+
+The key is read from a nested object, `cloudflare.api_key`, and this unit adds the
+read to `internal/config`:
+
+- `Config.Cloudflare` is a small struct with `APIKey string`.
+- The member is absent on every reader who does not use it, and its absence is not
+  an error, on the same terms as an unknown top-level key.
+- No writer. `/cloudflare` sets nothing; the reader edits the file by hand. A writer
+  is added with a command that sets it, and `AGENTS.md` holds that every writer is
+  named in `internal/config`.
+
+## What this unit does not do
+
+- The line editor and the input loop. `Run` returns; nothing calls the dispatcher
+  yet. That is the next unit and it is the one that makes any of this reachable.
+- `/zone`, `/cache`, `/page-rules` and `/account`. The handler refuses them by name.
+- The keypress form of confirmation.
+- A `--json` flag.
+
+## Unverified
+
+Nothing here was run against the Cloudflare API or against a terminal. Whether a
+diff reads correctly at a real width, and whether the command is reachable at all,
+are not settled by a test. The tests cover the parsing, the command boundary, the
+hold-and-confirm round trip against a fake transport, and the configuration read.
