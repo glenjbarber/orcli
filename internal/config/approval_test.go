@@ -106,7 +106,7 @@ func TestReadableIsReadFromTheFile(t *testing.T) {
 	h := home(t)
 	path := filepath.Join(h, ".orcli.json")
 	writeConfig(t, path,
-		`{"api_key":"sk-or-v1-abc","OPENROUTER_READABLE":["/usr/share/doc"]}`, 0o600)
+		`{"api_key":"sk-or-v1-abc","ORCLI_READABLE":["/usr/share/doc"]}`, 0o600)
 
 	cfg, err := Load()
 	if err != nil {

@@ -4,89 +4,124 @@ import (
 	"strings"
 )
 
-// The footer stack, drawn at the bottom of the screen with the prompt as the last
-// row and the log filling everything above it.
+// The footer stack, drawn at the bottom of the screen with the log filling
+// everything above it.
 //
-// The order is the one the design fixed, from the bottom of the screen upward: the
-// prompt, the key hints, the Provider bar, the Credits bar, each separated by a rule.
-// The bars keep the field order DESIGN.md 4.4 gives them, since that order was decided
-// with a reason behind it and moving the bars to the bottom does not move the reasoning
-// with them.
+// The order is the one the reader settled, from the bottom of the screen upward: the
+// two status bars, a blank row, and the prompt row. The prompt row carries either the
+// reader's own line or, while a turn is running, the figure and the state word in place
+// of the `root@localhost $ ` text.
 //
-// The hint row is drawn empty. Its contents are undecided and the spec says not to invent
-// entries, so the row is present and blank: a stack with a gap in it is honest about the
-// gap, and a stack with invented key names in it is a set of wrong things to press.
+// Everything from the prompt row down is what orcli owns. Above it belongs to the
+// terminal: this package writes rows there and never moves the viewport, so the reader's
+// own scrollback is the transcript and nothing here has to manage it.
+//
+// The rule spans the full terminal width rather than sitting at column one. A rule at the
+// width of the terminal reads as a divider, and a single figure at column one reads as a
+// left border, and they are two different frames. The cost is that a resize has to
+// redraw it, which is why FillBar asks the caller for the width rather than reading one
+// itself.
+//
+// There is no rule at the very bottom. A footer that ends in a rule is a closed box, and
+// this one sits against the bottom edge of the terminal where the shell prompt will be
+// when the program exits: a rule there would be the last thing on screen and would read
+// as a border to something that is not bordered.
 
-// rule is the horizontal rule between the stack's rows.
+// rule is the horizontal rule above the prompt row.
 //
 // A box-drawing figure rather than a hyphen, since it is one column rather than one, and
 // a hyphen at the width of a rule leaves a visible notch every other character row.
 const rule = "─"
 
 // Prompt is what the reader's line is drawn behind.
+//
+// It is dropped while a turn is running, in place of the figure, so that the row the
+// reader is typing into keeps its position and the figure does not push the field
+// upwards. The row is the same row either way: only the text in front of the reader's
+// own line changes.
 const Prompt = "root@localhost $ "
 
-// escapeMoveUp moves the cursor up a row.
-const escapeMoveUp = "\x1b[1A"
-
-// escapeEraseLine clears the row the cursor is on.
+// FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
-// The row is cleared before it is written rather than the figure being overwritten, since
-// two braille cells do not cover a whole row and a figure drawn over the last one leaves
-// a smear rather than a turn.
-const escapeEraseLine = "\x1b[2K"
+// Zero, since the prompt is at column one and the caret follows the text the reader has
+// typed rather than the prompt in front of it. It is named rather than deleted because
+// the caret arithmetic in caret.go offsets by it, and a constant of zero there reads as
+// "this was decided" rather than "this was forgotten".
+const FieldIndent = 0
 
-// stackRows is how many rows the stack occupies, smallest first.
+// TwiddleIndent is how far in the figure sits when the prompt row is carrying it.
 //
-// The smallest is what a short terminal is left with: the prompt and nothing else, since a
-// reader who cannot type cannot use the interface and everything above it is a luxury. The
-// twiddle goes first, then the hint row, then the bars.
-func stackRows(height int) int {
-	switch {
-	case height >= 9:
-		return 9
-	case height >= 6:
-		return 6
-	default:
-		return 1
+// Two columns, so the figure and the word beside it have a left edge of their own and
+// are not read as part of the bottom bar below.
+const TwiddleIndent = 2
+
+// The rows of the stack, as positions in the screen-order slice stackLines returns.
+//
+// They are named rather than counted from an end because the prompt row is the bottom
+// row of the stack and every other row is above it, which is the one arrangement where a
+// truncation from the end keeps what the reader is typing into.
+const (
+	rowRule = iota
+	rowPrompt
+	rowBlank
+	rowTopBar
+	rowBottomBar
+
+	// fullStackRows is every row the stack draws. It is named once so the count the
+	// stack renders and the count the tests assert cannot drift apart.
+	fullStackRows
+)
+
+// stackRowsToKeep returns the positions of the rows a terminal of this height draws, in
+// screen order.
+//
+// It is a keep-list rather than a truncation because the rows worth keeping on a short
+// terminal are the prompt row and the blank under it, and the bars are shed first: they
+// report what has already happened while the prompt is what the reader is about to do.
+//
+// On a terminal tall enough it is every row in order. Below that it is the floor. Which
+// rows are shed on the way down, and in what order, is the reader's decision and is not
+// settled; this is a floor rather than a ladder.
+func stackRowsToKeep(height int) []int {
+	if height >= fullStackRows {
+		keep := make([]int, fullStackRows)
+		for i := range keep {
+			keep[i] = i
+		}
+		return keep
 	}
+	return []int{rowPrompt, rowBlank}
 }
 
-// logRows is how many rows are left for the log above a stack.
-//
-// It is never less than one, so the scroll region has something to scroll and a terminal
-// with no room shows a log rather than nothing.
-func logRows(height int) int {
-	if n := height - stackRows(height); n > 1 {
-		return n
-	}
-	return 1
-}
-
-// Bar is what the two status bars carry.
+// Bar is what the footer carries.
 //
 // It is a value rather than something read off the session, so the drawing can be tested
 // with figures a test chose rather than with figures a session happened to have.
 type Bar struct {
-	// Provider is the Provider bar: Provider, Model, Status, Approval, in that order
-	// and with no other field.
-	Provider string
+	// Top is the bar nearer the log, holding what changes second by second.
+	Top string
 
-	// Credits is the Credits bar: Credits, Cost, Context, In, Out, Host. It is empty
-	// in this unit, since nothing reports those figures yet.
-	Credits string
+	// Bottom is the bar nearer the bottom of the screen, holding what is settled
+	// along with the session and the two capture modes.
+	Bottom string
+
+	// Field is the reader's own line, drawn after the prompt on the prompt row. It
+	// is empty while a turn is running, since the figure has the row then.
+	Field string
+
+	// Twiddle is the figure and the state word, indented two, and is empty when no
+	// turn is running. When it is set the prompt is not drawn, so the row carries
+	// one or the other and never both.
+	Twiddle string
 }
 
-// DrawLog writes rows downward into the normal screen buffer.
+// DrawLog writes rows downward to the terminal, above the footer.
 //
-// It is the only thing that appends to the screen, and it appends: nothing here redraws
-// a row already written. The one exception is the twiddle, drawn by DrawTwiddle on its
-// own row.
-//
-// Rows are cut to the width before they are written, so what reaches the terminal is what
-// a copy of the same row produces. A row allowed to wrap would leave the terminal holding
-// more lines than the log has rows, and the log and the screen would stop agreeing about
-// what was said.
+// It writes downward and never moves the viewport. Nothing here scrolls, clips or
+// positions: the terminal owns the rows above the footer and the reader's own scrollback
+// is the transcript. A row that would be wider than the terminal is cut rather than
+// wrapped, since a wrapped row is two rows and the terminal and the log would then
+// disagree about what was said.
 func DrawLog(w *Screen, rows []Row, palette Palette) {
 	if len(rows) == 0 {
 		return
@@ -162,45 +197,70 @@ func spanBounds(span Span, length int) (int, int) {
 	return span.Start, end
 }
 
-// DrawStack writes the footer stack, from the prompt up.
+// DrawStack writes the footer, from the lower bar up.
 //
-// The stack is drawn whole every time rather than its parts separately, since it is a
-// fixed number of rows and rewriting all of it is cheaper than tracking which field
-// changed. The log above it is never touched, which is what lets a reader scroll back
-// through it.
+// The stack is written as terminal rows rather than into a pinned region, so it is the
+// reader's decision how often it is redrawn: a caller that redraws it on every keystroke
+// will advance the screen by the footer's height each time. Run and Start both redraw it
+// only when one of its rows has changed.
 func DrawStack(w *Screen, bar Bar, palette Palette) {
-	height := w.Height()
-	if height < 1 {
+	if w.Height() < 1 {
 		return
 	}
 
-	rows := stackRows(height)
-	lines := stackLines(bar, palette)
-
-	// A terminal too short for the whole stack keeps the bottom of it, since the prompt
-	// is the bottom row and a reader who cannot see it cannot type.
-	if rows < len(lines) {
-		lines = lines[len(lines)-rows:]
-	}
-
-	for _, line := range lines {
-		w.Write(line + "\r\n")
+	lines := stackLines(bar, palette, w.Width())
+	for _, at := range stackRowsToKeep(w.Height()) {
+		w.Write(lines[at] + "\r\n")
 	}
 }
 
-// stackLines renders the stack as rows, bottom of the screen last.
+// stackLines renders the stack as rows in screen order.
 //
-// It is a function rather than a value so the caller asks for the stack when it is
-// drawing rather than holding a value that goes stale when a figure changes.
-func stackLines(bar Bar, palette Palette) []string {
-	return []string{
-		chromeLine(palette, bar.Credits),
-		rule,
-		chromeLine(palette, bar.Provider),
-		rule,
-		"",
-		Prompt,
+// The first row returned is the top of the stack and the last is the bottom of the
+// screen, because DrawStack writes downward and the terminal puts the first line it
+// receives where the cursor is. The rule is first and the bottom bar is last.
+//
+// The prompt row carries the prompt and the reader's own text when no turn is running,
+// and the figure and the state word when one is. The row is the same row either way: what
+// changes is the text in front of the reader's line, not the row's position, so a reader
+// watching a turn start does not find their field has moved.
+func stackLines(bar Bar, palette Palette, width int) []string {
+	lines := make([]string, fullStackRows)
+	lines[rowRule] = FillBar(rule, width)
+	lines[rowPrompt] = chromeLine(palette, promptRow(bar))
+	lines[rowBlank] = ""
+	lines[rowTopBar] = chromeLine(palette, bar.Top)
+	lines[rowBottomBar] = chromeLine(palette, bar.Bottom)
+	return lines
+}
+
+// promptRow is what the prompt row carries: the figure while a turn runs, and the
+// prompt and the reader's own text otherwise.
+//
+// The two are exclusive rather than both drawn, since a row carrying the figure and the
+// prompt behind it is a row where the reader cannot tell where they are typing to end.
+func promptRow(bar Bar) string {
+	if bar.Twiddle != "" {
+		return bar.Twiddle
 	}
+	return Prompt + bar.Field
+}
+
+// FillBar repeats a figure across the width of the terminal.
+//
+// It counts display columns rather than bytes, since the figure is three bytes to the
+// column and a byte count would produce a rule a third of the width it should be. The
+// remainder is padded with spaces rather than cut, so a rule is never a fraction of a
+// figure long.
+func FillBar(figure string, width int) string {
+	if width < 1 || figure == "" {
+		return ""
+	}
+	one := DisplayWidth(figure)
+	if one < 1 {
+		return ""
+	}
+	return strings.Repeat(figure, width/one) + strings.Repeat(" ", width%one)
 }
 
 // chromeLine wraps a stack row in the chrome role when colour is on.
@@ -215,20 +275,6 @@ func chromeLine(p Palette, line string) string {
 	return p.Sequence(RoleChrome) + line + p.Reset()
 }
 
-// DrawTwiddle writes the twiddle row in place, above the prompt.
-//
-// It is the only thing in the frame that redraws rather than appends, so it moves the
-// cursor up to its own row and writes there. Every other row is written once and left
-// alone, which is what makes the reader's own scrollback the transcript.
-//
-// The step rather than the time is the caller's, since the session owns when a frame is
-// due and a function that read the clock itself would be a second thing that has to agree
-// with the repaint rate.
-func DrawTwiddle(w *Screen, palette Palette, step int) {
-	w.Write(escapeMoveUp + escapeEraseLine)
-	w.Write(TwiddleHue(step) + Twiddle(step) + palette.Reset())
-}
-
 // Field is one bar field, a name and a figure.
 type Field struct {
 	// Name is what the reader reads.
@@ -238,13 +284,10 @@ type Field struct {
 	Value string
 }
 
-// RenderBar renders a bar from its fields, dropping whole fields when it will not fit
-// and cutting the context share rather than dropping it.
+// RenderBar renders a bar from its fields, dropping whole fields when it will not fit.
 //
 // A bar too narrow for its fields drops them from the right, which is the order the
-// fields were given in, and that order is how much a reader loses by losing each. The
-// context share is the exception and is cut, since it is the figure that says a compaction
-// is coming and a reader who cannot see it does not know to expect one.
+// fields were given in, and that order is how much a reader loses by losing each.
 //
 // Width is the terminal's, and a bar with no width given is not cut at all, since a caller
 // that has not asked the terminal yet is a caller that would rather see the whole bar
@@ -270,57 +313,4 @@ func joinWithin(parts []string, sep string, width int) string {
 		parts = parts[:len(parts)-1]
 	}
 	return strings.Join(parts, sep)
-}
-
-// RenderProvider renders the Provider bar from the figures a session reports.
-//
-// The field order is the one DESIGN.md 4.4 fixes, and Status carries the state rather
-// than having a field of its own, since a fifth field is what put paused in Status in the
-// first place.
-func RenderProvider(provider, model string, state State, detail, approval string) string {
-	return RenderBar([]Field{
-		{Name: "Provider", Value: provider},
-		{Name: "Model", Value: model},
-		{Name: "Status", Value: string(state) + detailSuffix(detail)},
-		{Name: "Approval", Value: approval},
-	}, 0)
-}
-
-// RenderCredits renders the Credits bar from the figures a session reports.
-//
-// The context share is the one field that is cut rather than dropped, and RenderBar
-// does not know which field is which, so the caller passes the figures in order and
-// this is where the order is recorded.
-func RenderCredits(credits, cost, contextUsed, in, out, host string) string {
-	return RenderBar([]Field{
-		{Name: "Credits", Value: credits},
-		{Name: "Cost", Value: cost},
-		{Name: "Context", Value: contextUsed},
-		{Name: "In", Value: in},
-		{Name: "Out", Value: out},
-		{Name: "Host", Value: host},
-	}, 0)
-}
-
-// detailSuffix renders the note beside a state.
-//
-// It is a parenthesised note rather than a fifth field, since a bar that grows a comma is
-// a bar no reader can scan, and a state spelled `paused, buffered 12` is a state rather
-// than a state and a note.
-func detailSuffix(detail string) string {
-	if detail == "" {
-		return ""
-	}
-	return " (" + detail + ")"
-}
-
-// orNone renders an empty string as a dash.
-//
-// A field with no value is a dash rather than nothing, so the bar holds its shape as
-// values arrive and a reader scanning it is not reading a row whose columns move.
-func orNone(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

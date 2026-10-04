@@ -3,7 +3,7 @@
 // The order of run is the startup contract, and it is the order DESIGN.md sets
 // out: parse the flags, read the bootstrap document if one was named, install the
 // default configuration, load it, settle the approval mode, resolve the working
-// directory, ask about that directory, open the frame, and report.
+// directory, ask about that directory, open the interface, and report.
 //
 // stdin, stdout and stderr are parameters rather than the process streams, so the
 // whole of startup is testable without a terminal. A test that needs a terminal to
@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"os"
 
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
@@ -35,32 +37,40 @@ var version = "0.0.0-dev"
 // and writeTrust for how an answer is recorded.
 var gate = ensureTrusted
 
-// draw is the frame being opened, as a variable rather than a call.
+// draw is the interface being opened, as a variable rather than a call.
 //
 // It is the same seam as gate, for the same reason and with the same cost: opening
-// the frame is a call into a terminal, and a test that cannot stand in for it is a
-// test that can only run on a machine with a terminal attached. Naming the call
-// here keeps the wiring visible and lets a test draw into a buffer.
+// the interface is a call into a terminal, and a test that cannot stand in for it is
+// a test that can only run on a machine with a terminal attached. Naming the call
+// here keeps the wiring visible and lets a test run the whole of startup without
+// one.
 //
-// See openFrame for why the frame is opened only when the streams are terminals and
-// the terminal reported a size.
-var draw = openFrame
+// See openInterface for why the interface is opened only when the streams are
+// terminals and the terminal reported a size.
+var draw = openInterface
 
 // tuiStreamsAreTerminal is the terminal check, as a variable rather than a call.
 //
 // It is a seam for the same reason draw is one, and it is a second seam rather than
 // a folding of the first because the two answer different questions: this one asks
-// whether the streams are terminals at all, and openFrame asks whether there is a
-// descriptor and a size to draw on. A test that stood in for both would not be
-// testing that the frame is opened when the reader is at a terminal, since the whole
+// whether the streams are terminals at all, and openInterface asks whether there is
+// a descriptor and a size to draw on. A test that stood in for both would not be
+// testing that the interface opens when the reader is at a terminal, since the whole
 // condition would be the stand-in.
 //
 // The real check is a termios read in internal/tui, and it is what runs outside a
 // test.
 var tuiStreamsAreTerminal = tui.StreamsAreTerminal
 
+// newTransport is the API client, as a variable rather than a call.
+//
+// It is a third seam for the same reason as the two above, and it is the one that
+// keeps a test from reaching the network: a test that stands in for the client can
+// exercise a whole turn without a credential and without a request.
+var newTransport = openrouter.New
+
 func main() {
-	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		// The interface is not open at this point, so a failure here has nowhere
 		// else to go. The message is on stderr because a reader who ran the program
 		// and got a failure has not asked for anything to be written to stdout.
@@ -70,7 +80,7 @@ func main() {
 }
 
 // run is the startup contract, and the order of it is the contract.
-func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("orcli", flag.ContinueOnError)
 	// Output is discarded rather than set to stderr: the flag package would then
 	// print the usage and the error, and the caller below prints one message. A bad
@@ -85,7 +95,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		mouse       = fs.Bool("mouse", false, "report the mouse")
 		bell        = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
 		color       = fs.Bool("color", false, "write colour")
-		dir         = fs.String("dir", "", "run in this directory rather than the current one")
+		dir         = fs.String("dir", "", "run in this directory rather than the current directory")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -171,7 +181,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// behalf and this directory is not theirs.
 	s.HasTools = gate(workDir, cfg, stdin, stdout, stderr)
 
-	// The frame is opened here, between the trust question and the report, so the
+	// The interface is opened here, between the trust question and the report, so the
 	// directory the reader just answered about is the one the session carries.
 	//
 	// A redirected run is told why rather than drawn on. The interface writes escape
@@ -180,19 +190,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// stub, since a stub that always says no tells a reader at a terminal that their
 	// terminal is not one.
 	if tuiStreamsAreTerminal(stdin, stdout) {
-		if err := draw(s.tuiSession(), stdout); err != nil {
+		if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout); err != nil {
 			return err
 		}
-		fmt.Fprintln(stderr,
-			"The frame is drawn. Nothing reads keys yet, so the log is all there is.")
-	} else {
-		fmt.Fprintf(stderr, "orcli: %v\n", tui.ErrNoTerminal)
+
+		printSession(stdout, s)
+		return nil
 	}
 
+	fmt.Fprintf(stderr, "orcli: %v\n", tui.ErrNoTerminal)
 	printSession(stdout, s)
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout,
-		"The interface is not built yet. Nothing reads keys and no turn is sent.")
+		"The interface needs a terminal. Nothing reads keys and no turn is sent.")
 	return nil
 }
 
@@ -263,14 +273,22 @@ func tuiApproval(mode config.Approval) tui.Approval {
 	}
 }
 
-// openFrame draws the log and the footer stack onto a terminal.
+// openInterface runs the interface over a terminal until the reader leaves.
 //
-// The size is read here rather than inside internal/tui because the descriptor is the
-// caller's: this is the program that opened stdout, so this is the program that can
-// name it. A terminal that reports no size is reported rather than drawn into, since
-// every row would be cut to no width and the reader would see a screen of empty lines
-// and no way to tell that from a log with nothing in it.
-func openFrame(s *tui.Session, stdout io.Writer) error {
+// The size is read here rather than inside internal/tui because the descriptor is
+// the caller's: this is the program that opened stdout, so this is the program that
+// can name it. A terminal that reports no size is reported rather than drawn into,
+// since every row would be cut to no width and the reader would see a screen of
+// empty lines and no way to tell that from a log with nothing in it.
+//
+// The dispatcher is built here rather than held on the session, since a command
+// needs the configuration and the held proposal and the interface needs neither. The
+// transport is built on the same seam, so a reader with no credential gets an
+// interface that opens and tells them so when they type a question, rather than one
+// that refused to start.
+func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
+	stdin io.Reader, stdout io.Writer) error {
+
 	out, ok := stdout.(*os.File)
 	if !ok {
 		return tui.ErrNoTerminal
@@ -281,7 +299,13 @@ func openFrame(s *tui.Session, stdout io.Writer) error {
 		return fmt.Errorf("read the terminal size: %w", tui.ErrNoSize)
 	}
 
-	return tui.Run(s, tui.NewScreen(out, size))
+	d := newDispatcherFor(cfg)
+	d.canAsk = func() bool { return canAsk(s) }
+
+	return tui.Start(ctx, s, tui.NewScreen(out, size),
+		d.Run,
+		ask(s, newTransport(cfg.APIKey), cfg.AttributionID),
+	)
 }
 
 // printSession reports a session as plain text.
@@ -416,6 +440,10 @@ configuration:
   OPENROUTER_API_KEY is ignored even when set. The file is found at
   ~/.orcli.json and then at ~/.config/orcli/orcli.json, and the first match wins.
   It must be mode 0600.
+
+in the interface:
+  Type a question and press enter. Type /cloudflare to manage DNS records, and
+  /cloudflare confirm to apply a change it showed you. /quit leaves.
 
 tools:
   A directory is asked about once and the answer is recorded. A reader who

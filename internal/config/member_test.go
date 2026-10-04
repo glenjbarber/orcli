@@ -64,7 +64,7 @@ func TestWriteColorPreservesTheRestOfTheFile(t *testing.T) {
 	h := home(t)
 	body := "{\n" +
 		"  \"api_key\": \"sk-or-v1-abc\",\n" +
-		"  \"OPENROUTER_TRUSTED\": [\"/a/b\", \"/c/d\"],\n" +
+		"  \"ORCLI_TRUSTED\": [\"/a/b\", \"/c/d\"],\n" +
 		"  \"somethingNew\": {\"nested\": [1, 2, {\"deeper\": true}]},\n" +
 		"  \"quoted\": \"a, } and a { inside a string\"\n" +
 		"}"
@@ -79,7 +79,7 @@ func TestWriteColorPreservesTheRestOfTheFile(t *testing.T) {
 
 	for _, want := range []string{
 		"\"api_key\": \"sk-or-v1-abc\"",
-		"\"OPENROUTER_TRUSTED\": [\"/a/b\", \"/c/d\"]",
+		"\"ORCLI_TRUSTED\": [\"/a/b\", \"/c/d\"]",
 		"\"somethingNew\": {\"nested\": [1, 2, {\"deeper\": true}]}",
 		"\"quoted\": \"a, } and a { inside a string\"",
 	} {
@@ -210,7 +210,7 @@ func TestSetMemberReplacesAValueInPlace(t *testing.T) {
 //
 // The trusted list holds paths, and a path can contain a brace or a colon.
 func TestSetMemberIgnoresANameThatIsAValue(t *testing.T) {
-	body := []byte(`{"OPENROUTER_TRUSTED": ["/a: {weird}/b"], "color": false}`)
+	body := []byte(`{"ORCLI_TRUSTED": ["/a: {weird}/b"], "color": false}`)
 
 	got, err := setMember(body, "color", "true")
 	if err != nil {

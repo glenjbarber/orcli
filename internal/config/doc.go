@@ -23,10 +23,16 @@
 // There are exactly three writers, and no others:
 //
 //	InstallDefault   startup, only when absent, exclusive create, 0600
-//	Trust            adds a directory to OPENROUTER_TRUSTED
+//	Trust            adds a directory to ORCLI_TRUSTED
 //	WriteColor       sets the top-level color key
 //
 // Neither runtime writer ever creates the file. A file made by a command would
 // hold no credential and would suppress first-time setup, which is worse than
 // the absence it was meant to remedy.
+//
+// The members this package names are its own: ORCLI_TRUSTED, ORCLI_READABLE and
+// the cloudflare block, beside the ordinary lowercase settings. The record of
+// what this client was allowed to do in a directory is a fact about this
+// program, not about who answers a request, so it is spelled with this
+// program's own prefix.
 package config

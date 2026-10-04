@@ -119,9 +119,10 @@ func AddTrusted(path string, dirs []string) error {
 // trustedKey is the member the trust record lives under.
 //
 // It is named once so a writer and a reader cannot disagree about it. The spelling
-// is the endpoint's rather than a name this client chose, so a file the endpoint
-// wrote is the same file this package reads.
-const trustedKey = "OPENROUTER_TRUSTED"
+// is this program's rather than the endpoint's, since the record is about what this
+// client was allowed to do in a directory and nothing to do with who answers a
+// request.
+const trustedKey = "ORCLI_TRUSTED"
 
 // readTrusted reads the trust list out of configuration bytes.
 //
@@ -149,8 +150,8 @@ func readTrusted(data []byte) ([]string, error) {
 
 // containsDir reports whether dir is already in the list, compared as written.
 //
-// The comparison is on the string rather than on a cleaned absolute path, unlike
-// the check in the gate. Here the question is whether this exact entry has been
+// The comparison is on the string rather than on a cleaned absolute path, unlike the
+// check in the gate. Here the question is whether this exact entry has been
 // added, and rewriting a reader's entry to a cleaned form would change a file they
 // are reading rather than adding to it.
 func containsDir(list []string, dir string) bool {

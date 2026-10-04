@@ -188,7 +188,7 @@ func init() {
 		{
 			Name:    "load",
 			Args:    "NAME",
-			Summary: "resume a conversation saved with /save",
+			Summary: "resume a conversation saved with /name",
 		},
 		{
 			Name:    "mouse",
@@ -239,6 +239,7 @@ func init() {
 			Name:    "exit",
 			Summary: "leave the interface",
 		},
+		cloudflareCommand,
 	}
 
 	byName = make(map[string]*Command, len(commands))

@@ -81,7 +81,7 @@ func TestAddTrustedKeepsTheCredentialIntact(t *testing.T) {
 // by hand before they believe it.
 func TestAddTrustedDoesNotDuplicate(t *testing.T) {
 	const dir = "/home/reader/project"
-	path := trustFile(t, `{"api_key":"k","OPENROUTER_TRUSTED":["`+dir+`"]}`)
+	path := trustFile(t, `{"api_key":"k","`+trustedKey+`":["`+dir+`"]}`)
 
 	if err := AddTrusted(path, []string{dir}); err != nil {
 		t.Fatalf("AddTrusted: %v", err)
@@ -96,7 +96,7 @@ func TestAddTrustedDoesNotDuplicate(t *testing.T) {
 // something. A file with a trust list in it is a file a reader has already used,
 // and the edit must not drop what is there.
 func TestAddTrustedAddsToAnExistingList(t *testing.T) {
-	path := trustFile(t, `{"api_key":"k","OPENROUTER_TRUSTED":["/home/reader/first"]}`)
+	path := trustFile(t, `{"api_key":"k","`+trustedKey+`":["/home/reader/first"]}`)
 
 	if err := AddTrusted(path, []string{"/home/reader/second"}); err != nil {
 		t.Fatalf("AddTrusted: %v", err)
@@ -218,16 +218,49 @@ func TestAddTrustedOnAMissingMember(t *testing.T) {
 
 // TestAddTrustedOnATrustListThatIsNotAList refuses rather than replacing it.
 //
-// A file whose OPENROUTER_TRUSTED is a string rather than an array is a file
-// somebody edited by hand, and overwriting their entry with a list of directories
-// this client chose is not an edit.
+// A file whose trust list is a string rather than an array is a file somebody
+// edited by hand, and overwriting their entry with a list of directories this
+// client chose is not an edit.
 func TestAddTrustedOnATrustListThatIsNotAList(t *testing.T) {
-	path := trustFile(t, `{"api_key":"k","OPENROUTER_TRUSTED":"/home/reader"}`)
+	path := trustFile(t, `{"api_key":"k","`+trustedKey+`":"/home/reader"}`)
 
 	if err := AddTrusted(path, []string{"/home/reader/project"}); err == nil {
 		t.Fatal("AddTrusted replaced a trust entry that was not a list, want a refusal")
 	}
 	if got := readFile(t, path); !strings.Contains(got, `"/home/reader"`) {
 		t.Errorf("the file was changed by a refused write:\n%s", got)
+	}
+}
+
+// TestTheTrustMemberIsSpelledForThisProgram holds the rename. The record of what
+// this client was allowed to do in a directory is a fact about this program, and
+// a member spelled for the endpoint would say the record belongs to the endpoint
+// rather than to the thing that obeyed it.
+func TestTheTrustMemberIsSpelledForThisProgram(t *testing.T) {
+	if trustedKey != "ORCLI_TRUSTED" {
+		t.Errorf("the trust member is %q, want ORCLI_TRUSTED", trustedKey)
+	}
+	if readableKey != "ORCLI_READABLE" {
+		t.Errorf("the readable member is %q, want ORCLI_READABLE", readableKey)
+	}
+}
+
+// TestAnOldMemberIsIgnoredRatherThanMisread is what the rename costs and why it is
+// safe. A file carrying the old spelling reads as though the reader approved
+// nothing, so every directory is asked about again, which is a question rather
+// than a refusal: the reader is told what is happening and can approve it.
+//
+// It is not read as a fault, because a fault at startup over a member this
+// version no longer uses would lock a reader out of their own configuration.
+func TestAnOldMemberIsIgnoredRatherThanMisread(t *testing.T) {
+	dir := t.TempDir()
+	path := trustFile(t, `{"api_key":"k","OPENROUTER_TRUSTED":["`+dir+`"]}`)
+
+	cfg, err := Parse([]byte(readFile(t, path)), path)
+	if err != nil {
+		t.Fatalf("a file carrying the old member was refused: %v", err)
+	}
+	if len(cfg.Trusted) != 0 {
+		t.Errorf("the old member was read as %v, want it ignored", cfg.Trusted)
 	}
 }

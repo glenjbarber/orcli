@@ -135,7 +135,7 @@ func TestLoadIgnoresTheEnvironmentKeyWhenTheFileHasNone(t *testing.T) {
 func TestLoadCarriesTheRestOfTheFileOnAMissingKey(t *testing.T) {
 	h := home(t)
 	writeConfigAt(t, h,
-		`{"model":"some/model","bell":true,"OPENROUTER_TRUSTED":["/tmp/one"]}`)
+		`{"model":"some/model","bell":true,"ORCLI_TRUSTED":["/tmp/one"]}`)
 
 	cfg, err := Load()
 	if !errors.Is(err, ErrNoAPIKey) {

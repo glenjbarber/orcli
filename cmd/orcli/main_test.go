@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -20,18 +21,23 @@ import (
 // worth stating: startup logic that reaches the terminal for its answer directly is
 // startup logic no test can call.
 //
-// The terminal check is not stood in for. It is a real termios read in
+// The terminal check is not stood in for here. It is a real termios read in
 // internal/tui, and the streams a test passes are buffers, which is the case a
 // reader reaches by piping the program and is therefore the case worth covering.
+//
+// The context is a background one that is never cancelled, since a test wants the run
+// to finish on its own rather than be stopped by a deadline the test did not ask for.
 func runIn(t *testing.T, trusted bool, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 
-	stand := func() { gate = func(string, config.Config, io.Reader, io.Writer, io.Writer) bool { return trusted } }
+	stand := func() {
+		gate = func(string, config.Config, io.Reader, io.Writer, io.Writer) bool { return trusted }
+	}
 	stand()
 	t.Cleanup(stand)
 
 	var out, errOut bytes.Buffer
-	err = run(args, strings.NewReader(""), &out, &errOut)
+	err = run(context.Background(), args, strings.NewReader(""), &out, &errOut)
 	return out.String(), errOut.String(), err
 }
 
@@ -87,6 +93,22 @@ func TestHelpFlagAndSubcommandAgree(t *testing.T) {
 	}
 }
 
+// TestTheUsageSaysWhatTheInterfaceDoes covers the usage a reader reads before the
+// interface has ever opened, since on a redirect it is the only thing telling them
+// what to do.
+func TestTheUsageSaysWhatTheInterfaceDoes(t *testing.T) {
+	out, _, err := runIn(t, false, "--help")
+	if err != nil {
+		t.Fatalf("run --help: %v", err)
+	}
+
+	for _, want := range []string{"Type a question", "/cloudflare", "/quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the usage does not carry %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestUnknownCommandIsRefusedByName covers the case where a script passes the wrong
 // word. It is refused rather than treated as a prompt, since a script that got this
 // wrong has a bug in it that an interactive session would hide.
@@ -128,8 +150,8 @@ func TestBadFlagIsReportedOnce(t *testing.T) {
 	}
 }
 
-// TestSessionReportsWhatItResolved covers the report, since it is the only output a
-// run produces today and it is the thing a reader will be looking at.
+// TestSessionReportsWhatItResolved covers the report, since on a redirected run it is
+// the only output there is and it is the thing a reader will be looking at.
 func TestSessionReportsWhatItResolved(t *testing.T) {
 	withHome(t, func() {
 		writeConfig(t, `{"api_key":"k"}`)
@@ -294,17 +316,12 @@ func TestABootstrapDirectoryIsRefused(t *testing.T) {
 	})
 }
 
-// TestARedirectedRunIsToldWhy covers the reason the terminal check is kept in a
-// program whose interface does not exist. A reader who pipes this gets different
-// behaviour and is entitled to be told which.
+// TestARedirectedRunIsToldWhy covers the reason the terminal check is kept. A reader
+// who pipes this gets different behaviour and is entitled to be told which.
 //
 // The streams here are buffers, so the check answers on its own rather than being
 // stood in for, which is the case a reader reaches by typing orcli into a pipe.
 func TestARedirectedRunIsToldWhy(t *testing.T) {
-	if !tui.TermiosSupported {
-		t.Skip("this build cannot ask a descriptor about its terminal state")
-	}
-
 	withHome(t, func() {
 		writeConfig(t, `{"api_key":"k"}`)
 
@@ -314,6 +331,24 @@ func TestARedirectedRunIsToldWhy(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "terminals") {
 			t.Errorf("a redirected run was not told why: %q", stderr)
+		}
+	})
+}
+
+// TestAQuotedBooleanIsRefusedByName covers the case that has bitten a reader more
+// than once. The report prints bell as the word on, a reader edits the file by hand,
+// and a string where a boolean belongs stops startup with a message about a value
+// rather than about what to write.
+func TestAQuotedBooleanIsRefusedByName(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k","bell":"on"}`)
+
+		_, _, err := runIn(t, false)
+		if err == nil {
+			t.Fatal("run accepted a quoted boolean")
+		}
+		if !strings.Contains(err.Error(), "bell") {
+			t.Errorf("the refusal is %q, want it to name the member", err)
 		}
 	})
 }

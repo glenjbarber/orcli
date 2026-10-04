@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,18 @@ func drawnAt(rows, cols int) (*Screen, *bytes.Buffer) {
 // plainPalette builds a palette with colour off, which is the default and the case every
 // assertion about text is made against.
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
+
+// itoa is here so a test can name a column without importing strconv for one call.
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// isRuleRow reports whether a drawn row is the footer's rule.
+//
+// A rule is full width since the reader's decision, so it is compared by its figure and
+// its measured width rather than against a single character. A single figure was the old
+// shape and comparing against one would fail on a rule that is drawn correctly.
+func isRuleRow(line string, width int) bool {
+	return line != "" && strings.Trim(line, rule) == "" && DisplayWidth(line) == width
+}
 
 // TestRowsAreWrittenInOrder is the property the log exists for. A reader comparing two
 // tool results is comparing their order, so a draw that reorders them misreports what
@@ -169,7 +182,6 @@ func TestTheTextAfterTheLastSpanIsWritten(t *testing.T) {
 		Text:  "a heading and a tail",
 		Spans: []Span{{Start: 0, End: 8, Role: RoleHeading}},
 	}}, palette)
-
 	if words := stripSequences(out.String()); !strings.Contains(words, "a heading and a tail") {
 		t.Errorf("the text did not survive intact: %q", words)
 	}
@@ -234,90 +246,37 @@ func TestASpanPastTheCutIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheStackHoldsThePromptAtTheBottom covers the order. The prompt is the last row, since
-// a reader who cannot see it cannot type, and the log ends above the stack.
-func TestTheStackHoldsThePromptAtTheBottom(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawStack(screen, Bar{Provider: "Provider: - | Model: -"}, plainPalette())
-
-	if got := out.String(); !strings.HasSuffix(got, Prompt+"\r\n") {
-		t.Errorf("the prompt is not the last row of the stack: %q", got)
+// TestTheRulesAreColumnsNotBytes covers the rule width at the level of the helper, since a
+// rule three bytes to the column is where a byte count would go wrong.
+func TestTheRulesAreColumnsNotBytes(t *testing.T) {
+	got := FillBar(rule, 10)
+	if want := strings.Repeat(rule, 10); got != want {
+		t.Errorf("FillBar at 10 columns is %q, want %q", got, want)
+	}
+	if n := len(got); n != 30 {
+		t.Errorf("the rule is %d bytes, want 30: three bytes to the column", n)
+	}
+	if got := FillBar(rule, 0); got != "" {
+		t.Errorf("FillBar at no width is %q, want it empty", got)
 	}
 }
 
-// TestTheScrollRegionEndsAboveTheStack is the piece with no precedent in the tree. The
-// region has to end where the stack begins, or the first row written scrolls the prompt
-// off the screen.
-//
-// Twenty-four rows with a nine row stack leaves fifteen for the log.
-func TestTheScrollRegionEndsAboveTheStack(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	screen.SetScrollRegion(logRows(24))
+// TestNoScrollRegionIsWritten covers the reader's decision that this program manages only
+// the bottom of the terminal. There is no DECSTBM in a draw, since the terminal owns the
+// rows above the footer and the reader's own scrollback is the transcript.
+func TestNoScrollRegionIsWritten(t *testing.T) {
+	screen, out := drawnAt(40, 80)
+	s := New(Options{Model: "stealth/space-bunny-alpha", Provider: "openrouter.ai"})
+	s.Deliver("a reply", 0)
 
-	if got, want := out.String(), "\x1b[1;15r"; got != want {
-		t.Errorf("the scroll region is %q, want %q", got, want)
+	if err := Run(s, screen); err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-}
-
-// TestTheScrollRegionFollowsAResize covers the recomputation. A region left at the old
-// size clips the log to a height the screen no longer has, which is a log that stops
-// growing with no way to see why.
-//
-// Twelve rows still takes the nine row stack, so the log takes the three above it.
-func TestTheScrollRegionFollowsAResize(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	screen.SetSize(WindowSize{Rows: 12, Cols: 80})
-
-	if got, want := out.String(), "\x1b[1;3r"; !strings.HasSuffix(got, want) {
-		t.Errorf("after a resize the region is %q, want it to end with %q", got, want)
-	}
-}
-
-// TestAShortTerminalKeepsThePrompt covers the replacement for the degradation ladder that
-// went with the frame. The prompt is held to the end; everything else goes first.
-func TestAShortTerminalKeepsThePrompt(t *testing.T) {
-	screen, out := drawnAt(3, 80)
-	DrawStack(screen, Bar{Provider: "Provider: -"}, plainPalette())
 
 	got := out.String()
-	if !strings.Contains(got, Prompt) {
-		t.Errorf("a three row terminal lost the prompt: %q", got)
-	}
-	if strings.Contains(got, "Provider:") {
-		t.Errorf("a three row terminal kept a bar it had no room for: %q", got)
-	}
-}
-
-// TestTheTwiddleMovesInPlace covers the one in-place redraw in the frame. It has to move
-// the cursor up and clear its row, since two braille cells do not cover a row and a figure
-// drawn over the last one leaves a smear rather than a turn.
-func TestTheTwiddleMovesInPlace(t *testing.T) {
-	screen, out := drawnAt(24, 80)
-	DrawTwiddle(screen, plainPalette(), 0)
-
-	got := out.String()
-	if !strings.Contains(got, escapeMoveUp) {
-		t.Errorf("the twiddle did not move the cursor: %q", got)
-	}
-	if !strings.Contains(got, escapeEraseLine) {
-		t.Errorf("the twiddle did not clear its row: %q", got)
-	}
-	if !strings.Contains(got, Twiddle(0)) {
-		t.Errorf("the figure was not written: %q", got)
-	}
-}
-
-// TestTheTwiddleIsTwoCellsWithOppositeHues covers the decision that makes two cells read as
-// one figure rather than two spinners. The cells are half a period apart and the hue
-// follows the character index, so the two are always opposite hues.
-func TestTheTwiddleIsTwoCellsWithOppositeHues(t *testing.T) {
-	for step := range 10 {
-		figure := Twiddle(step)
-		if got := len([]rune(figure)); got != 2 {
-			t.Errorf("step %d drew %d cells, want 2", step, got)
-		}
-		if TwiddleHue(step) == TwiddleHue(step+5) {
-			t.Errorf("step %d and step %d share a hue, want them opposite", step, step+5)
+	for _, seq := range []string{"\x1b[1;31r", "\x1b[1;33r", "\x1b[1;34r", "\x1b[1;38r"} {
+		if strings.Contains(got, seq) {
+			t.Errorf("a scroll region was written: %q", seq)
 		}
 	}
 }
@@ -336,7 +295,7 @@ func TestARunRefusesWhatItCannotDraw(t *testing.T) {
 // TestARunWritesTheLogAndTheStack covers the ordinary path end to end, since Run is the one
 // call a program makes and nothing else exercises it.
 func TestARunWritesTheLogAndTheStack(t *testing.T) {
-	screen, out := drawnAt(24, 80)
+	screen, out := drawnAt(40, 80)
 	s := New(Options{Model: "stealth/space-bunny-alpha", Provider: "openrouter.ai"})
 
 	if err := Run(s, screen); err != nil {
@@ -347,17 +306,14 @@ func TestARunWritesTheLogAndTheStack(t *testing.T) {
 	if !strings.Contains(got, "orcli") {
 		t.Errorf("the log was not written:\n%s", got)
 	}
-	if !strings.Contains(got, Prompt) {
-		t.Errorf("the stack was not written:\n%s", got)
-	}
 	if !strings.Contains(got, "openrouter.ai") {
-		t.Errorf("the Provider bar is missing:\n%s", got)
+		t.Errorf("the bottom bar is missing:\n%s", got)
 	}
 	if !strings.Contains(got, string(StateIdle)) {
 		t.Errorf("the Status field is missing the state:\n%s", got)
 	}
-	if !strings.Contains(got, "\x1b[1;15r") {
-		t.Errorf("the scroll region was not set:\n%s", got)
+	if !strings.Contains(got, Prompt) {
+		t.Errorf("the prompt row is missing:\n%s", got)
 	}
 }
 
@@ -381,11 +337,103 @@ func TestARedirectedRunWritesWords(t *testing.T) {
 	}
 }
 
+// TestTheBottomBarCarriesIdentityAndApproval covers the field order the reader settled. The
+// bottom bar is the one nearer the bottom of the screen. Session names which session the
+// field is typed into, the two bracketed words name the ways the terminal is taking input,
+// and the settings follow: Provider, Model, Approval, Verbosity.
+//
+// Approval is last of the settings because Approval says whether programs run without
+// asking, which is the last thing a reader should lose. Verbosity goes first.
+func TestTheBottomBarCarriesIdentityAndApproval(t *testing.T) {
+	got := RenderBottom("Session 1", true, false,
+		"openrouter.ai", "stealth/space-bunny-alpha", "3", "ask")
+
+	for _, want := range []string{
+		"Session 1",
+		"[Mouse]",
+		"Provider: openrouter.ai",
+		"Model: stealth/space-bunny-alpha",
+		"Approval: ask",
+		"Verbosity: 3",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the bottom bar does not carry %q: %q", want, got)
+		}
+	}
+
+	// The bracketed words are not names and values. `Mouse: on` reads as a preference a
+	// reader could be trying to set and `[Mouse]` reads as a thing happening now.
+	if strings.Contains(got, "Mouse:") {
+		t.Errorf("the mouse is a name and value rather than a bracketed word: %q", got)
+	}
+
+	if strings.Index(got, "Approval") > strings.Index(got, "Verbosity") {
+		t.Errorf("Approval is not ahead of Verbosity: %q", got)
+	}
+}
+
+// TestTheBottomBarLeavesOutWhatIsOff covers the two bracketed words again. A bar carrying
+// [Mouse] while the mouse is off would be naming something that is not happening.
+func TestTheBottomBarLeavesOutWhatIsOff(t *testing.T) {
+	got := RenderBottom("Session 1", false, false,
+		"openrouter.ai", "stealth/space-bunny-alpha", "3", "ask")
+
+	for _, unwanted := range []string{"[Mouse]", "[Copy]"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the bottom bar carries %q while it is off: %q", unwanted, got)
+		}
+	}
+}
+
+// TestTheTopBarCarriesTheChangingFields covers the other bar. It is nearer the log and
+// carries what changes second by second, in the order Status, Reasoning, Context, In, Out,
+// Cost, Credits.
+func TestTheTopBarCarriesTheChangingFields(t *testing.T) {
+	got := RenderTop("working", "3", "18,400", "2,104", "916", "$0.0181", "$4.82")
+
+	for _, want := range []string{
+		"Status: working",
+		"Reasoning: 3",
+		"Context: 18,400",
+		"In: 2,104",
+		"Out: 916",
+		"Cost: $0.0181",
+		"Credits: $4.82",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the top bar does not carry %q: %q", want, got)
+		}
+	}
+	if strings.Index(got, "Status") > strings.Index(got, "Reasoning") {
+		t.Errorf("Status is not the first field on the top bar: %q", got)
+	}
+}
+
+// TestTheTopBarKeepsStatusLongest covers the reason the order is what it is. The fields
+// are dropped from the right, so the one field that changes second by second is the last
+// to go on the bar that changes most.
+func TestTheTopBarKeepsStatusLongest(t *testing.T) {
+	// A width that fits Status and nothing else.
+	narrow := RenderBar([]Field{
+		{Name: "Status", Value: "working"},
+		{Name: "Reasoning", Value: "3"},
+	}, 20)
+	if !strings.Contains(narrow, "Status") {
+		t.Errorf("a narrow top bar lost Status: %q", narrow)
+	}
+	if strings.Contains(narrow, "Reasoning") {
+		t.Errorf("a narrow top bar kept a field past Status: %q", narrow)
+	}
+}
+
 // TestAFieldWithNoValueIsADash covers the reporting rule. A bar that shifts shape as values
 // arrive is a bar no reader can scan.
 func TestAFieldWithNoValueIsADash(t *testing.T) {
-	got := RenderProvider("", "", StateIdle, "", "")
-	for _, want := range []string{"Provider: -", "Model: -", "Status: idle", "Approval: -"} {
+	got := RenderBottom("Session 1", false, false, "", "", "", "")
+
+	for _, want := range []string{
+		"Provider: -", "Model: -", "Approval: -", "Verbosity: -",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the bar does not carry %q: %q", want, got)
 		}
@@ -395,7 +443,7 @@ func TestAFieldWithNoValueIsADash(t *testing.T) {
 // TestTheStatusCarriesANoteRatherThanAFifthField covers the decision that put paused in
 // Status. A bar that grows a comma is a bar no reader can scan.
 func TestTheStatusCarriesANoteRatherThanAFifthField(t *testing.T) {
-	got := RenderProvider("p", "m", StatePaused, "buffered 12 rows", "ask")
+	got := RenderTop("paused (buffered 12 rows)", "", "", "", "", "", "")
 
 	if !strings.Contains(got, "Status: paused (buffered 12 rows)") {
 		t.Errorf("the note is not beside the state: %q", got)
@@ -433,6 +481,21 @@ func TestABarWithNoWidthIsNotCut(t *testing.T) {
 	}
 }
 
+// TestTheTwiddleIsTwoCellsWithOppositeHues covers the decision that makes two cells read as
+// one figure rather than two spinners. The cells are half a period apart and the hue
+// follows the character index, so the two are always opposite hues.
+func TestTheTwiddleIsTwoCellsWithOppositeHues(t *testing.T) {
+	for step := range 10 {
+		figure := Twiddle(step)
+		if got := len([]rune(figure)); got != 2 {
+			t.Errorf("step %d drew %d cells, want 2", step, got)
+		}
+		if TwiddleHue(step) == TwiddleHue(step+5) {
+			t.Errorf("step %d and step %d share a hue, want them opposite", step, step+5)
+		}
+	}
+}
+
 // stripSequences removes the escapes from a rendered row, for measuring its width and
 // comparing its words.
 //
@@ -451,4 +514,19 @@ func stripSequences(s string) string {
 		b.WriteRune(runes[i])
 	}
 	return b.String()
+}
+
+// stackRowsOnly splits what DrawStack wrote into its rows, with the sequences removed.
+//
+// It is here so an assertion about the layout can name a row by where it sits rather than
+// by searching the whole output for a string that might appear on any of them.
+func stackRowsOnly(s string) []string {
+	stripped := stripSequences(s)
+	parts := strings.Split(stripped, "\r\n")
+
+	// The split leaves a trailing empty element for the final line ending.
+	if len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
 }

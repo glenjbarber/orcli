@@ -14,7 +14,7 @@ import (
 //
 // It takes the dispatcher rather than reaching for it through a package variable, so
 // two dispatchers in one test run cannot reach each other's held proposal.
-type handler func(ctx context.Context, d *dispatcher, args string) (string, error)
+type handler func(ctx context.Context, d *dispatcher, args string) (tui.Result, error)
 
 // dispatcher runs the commands and holds what one command leaves for the next.
 //
@@ -47,14 +47,22 @@ type dispatcher struct {
 	// cannot reach each other's transport.
 	client    *cloudflare.APIClient
 	newClient func(key string) *cloudflare.APIClient
+
+	// canAsk reports whether a model can be asked at all, which decides whether
+	// /cloudflare sends its guidance to the model or falls back to its own text.
+	canAsk func() bool
 }
 
 // newDispatcherFor builds a dispatcher over a configuration.
 func newDispatcherFor(cfg config.Config) *dispatcher {
 	d := &dispatcher{cfg: cfg, newClient: cloudflare.New}
+	d.canAsk = func() bool { return false }
 	d.commands = map[string]handler{
-		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (string, error) {
+		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.cloudflare(ctx, args)
+		},
+		"quit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return tui.Result{Quit: true}, nil
 		},
 	}
 	return d
@@ -64,21 +72,25 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 //
 // A command the dispatcher does not have is reported by name, and the two cases are
 // told apart. The table in internal/tui lists thirty names and this build implements
-// one, so a reader who typed /copy is told the name is in the table and this build does
-// not run it, rather than being told there is no such command: those are different
-// faults and a reader told the second goes looking for a typo.
-func (d *dispatcher) Run(ctx context.Context, line string) (string, error) {
+// two, so a reader who typed /copy is told the name is in the table and this build
+// does not run it, rather than being told there is no such command: those are
+// different faults and a reader told the second goes looking for a typo.
+//
+// A line that is not a command is not this function's business. The loop sends a
+// question to the model and a command here, and a dispatcher that also answered
+// questions would be two things deciding what a line means.
+func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 	name, args, ok := tui.IsCommand(line)
 	if !ok {
-		return "", nil
+		return tui.Result{}, nil
 	}
 
 	h, known := d.commands[name]
 	if !known {
 		if _, listed := tui.Lookup(name); listed {
-			return "", fmt.Errorf("/%s is in the table but this build does not run it yet", name)
+			return tui.Result{}, fmt.Errorf("/%s is in the table but this build does not run it yet", name)
 		}
-		return "", fmt.Errorf("unknown command /%s", name)
+		return tui.Result{}, fmt.Errorf("unknown command /%s", name)
 	}
 
 	return h(ctx, d, args)
@@ -97,14 +109,22 @@ func (d *dispatcher) cloudflareKey() (string, error) {
 // The client is built rather than handed in, since a handler that took one would have
 // every caller construct it, and a caller that forgot the credential filter would be a
 // caller whose diagnostics carry the key.
+//
+// An empty key is refused here, before anything is built and before any request is made.
+// The check has to be at this level because the caller has to know that no provider is
+// set up in order to ask the reader, and a refusal raised from deeper in would arrive
+// too late to be answered differently.
 func (d *dispatcher) cloudflareClient() (*cloudflare.APIClient, error) {
-	if d.client != nil {
-		return d.client, nil
-	}
-
 	key, err := d.cloudflareKey()
 	if err != nil {
 		return nil, err
+	}
+	if key == "" {
+		return nil, cloudflare.ErrNoCredential
+	}
+
+	if d.client != nil {
+		return d.client, nil
 	}
 	d.client = d.newClient(key)
 	return d.client, nil
@@ -115,9 +135,18 @@ func (d *dispatcher) cloudflareClient() (*cloudflare.APIClient, error) {
 // Every outcome is a result: an unknown sub-command, a missing flag, and an API refusal
 // are all text the caller shows, which is what AGENTS.md holds: a call always produces a
 // result.
-func (d *dispatcher) cloudflare(ctx context.Context, args string) (string, error) {
+func (d *dispatcher) cloudflare(ctx context.Context, args string) (tui.Result, error) {
+	// The provider is checked before the sub-command is even read, since a reader who
+	// has not set one up is not helped by being told which of five sub-commands this
+	// build has.
+	if _, err := d.cloudflareKey(); err != nil {
+		return tui.Result{}, err
+	} else if key, _ := d.cloudflareKey(); key == "" {
+		return d.notSetUp(), nil
+	}
+
 	if strings.TrimSpace(args) == "" {
-		return d.cloudflareUsage(), nil
+		return tui.Result{Text: d.cloudflareUsage()}, nil
 	}
 
 	action, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
@@ -127,11 +156,59 @@ func (d *dispatcher) cloudflare(ctx context.Context, args string) (string, error
 	case "dns":
 		return d.cloudflareDNS(ctx, rest)
 	case "zone", "cache", "page-rules", "account":
-		return "", fmt.Errorf("/cloudflare %s is in the design and not built yet", action)
+		return tui.Result{}, fmt.Errorf("/cloudflare %s is in the design and not built yet", action)
 	default:
-		return "", fmt.Errorf("/cloudflare %s is not a sub-command", action)
+		return tui.Result{}, fmt.Errorf("/cloudflare %s is not a sub-command", action)
 	}
 }
+
+// notSetUp is what /cloudflare does when no provider is configured.
+//
+// No API call is made at all. Not a call that fails and not a call with an empty
+// credential: no call, because there is nothing to authenticate with and a request
+// without it is a request a third party records as a failed attempt against the
+// reader's address.
+//
+// The guidance goes to the model rather than being carried as a string in the binary,
+// since the configuration syntax can change and the binary does not. The client keeps
+// the one fact it is certain of, which is that the provider is not set up, and asks the
+// model for the rest: the shape of the block, where the file is, what mode it carries,
+// and an example with a sample key.
+//
+// A reader with no model and no credential cannot be answered by a model, so the
+// fallback is this client's own short text. That text is the thing that drifts, which
+// is why it is the fallback and not the default.
+func (d *dispatcher) notSetUp() tui.Result {
+	if d.canAsk != nil && d.canAsk() {
+		return tui.Result{Ask: cloudflareAsk}
+	}
+	return tui.Result{Text: cloudflareAskFallback}
+}
+
+// cloudflareAsk is the question sent to the model when the provider is not set up.
+//
+// The wording is what the reader sees, since Begin writes the question into the log as
+// a row before the answer arrives: a question phrased for a model but read by a person
+// has to be worth reading.
+const cloudflareAsk = `The Cloudflare provider is not set up in the configuration file, so /cloudflare cannot run. Tell me how to add one: the exact JSON shape of the cloudflare block, where the configuration file is found and what mode it must carry, and an example with a sample API key.`
+
+// cloudflareAskFallback is what the client says when there is no model to ask.
+//
+// It is deliberately short and it names only what this client is certain of. The
+// example is a placeholder and never a real key: a string in a binary that looks like a
+// credential is a string a reader might paste somewhere, and a placeholder cannot be.
+const cloudflareAskFallback = `The Cloudflare provider is not set up, so /cloudflare cannot run.
+
+Put a cloudflare object in your configuration file alongside "api_key":
+
+  {
+    "api_key": "sk-or-v1-...",
+    "cloudflare": {
+      "api_key": "YOUR-CLOUDFLARE-API-KEY"
+    }
+  }
+
+The file is ~/.orcli.json or ~/.config/orcli/orcli.json and must be mode 0600.`
 
 // cloudflareUsage is what /cloudflare alone reports.
 //
@@ -166,36 +243,40 @@ var dnsFlags = map[string]bool{
 }
 
 // cloudflareDNS runs one dns action.
-func (d *dispatcher) cloudflareDNS(ctx context.Context, args string) (string, error) {
+func (d *dispatcher) cloudflareDNS(ctx context.Context, args string) (tui.Result, error) {
 	client, err := d.cloudflareClient()
 	if err != nil {
-		return "", err
+		return tui.Result{}, err
 	}
 
 	verb, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
 	parsed, err := cloudflare.ParseDNS(verb, strings.TrimSpace(rest), dnsFlags)
 	if err != nil {
-		return "", err
+		return tui.Result{}, err
 	}
 
 	zone, err := parsed.Require("zone")
 	if err != nil {
-		return "", err
+		return tui.Result{}, err
 	}
 
 	switch parsed.Verb {
 	case "list":
 		records, err := client.ListRecords(zone)
 		if err != nil {
-			return "", err
+			return tui.Result{}, err
 		}
-		return renderRecords(zone, records), nil
+		return tui.Result{Text: renderRecords(zone, records)}, nil
 
 	case "add", "edit", "delete":
-		return d.propose(client, parsed, zone)
+		text, err := d.propose(client, parsed, zone)
+		if err != nil {
+			return tui.Result{}, err
+		}
+		return tui.Result{Text: text}, nil
 
 	default:
-		return "", fmt.Errorf("/cloudflare dns %s is not a sub-command", parsed.Verb)
+		return tui.Result{}, fmt.Errorf("/cloudflare dns %s is not a sub-command", parsed.Verb)
 	}
 }
 
@@ -299,14 +380,14 @@ func (d *dispatcher) hold(p cloudflare.Proposal, before cloudflare.Record, exist
 // failed confirmation does not leave a change held that the reader has already tried and
 // failed to apply. What is applied is the record the proposal carries, which is the one
 // the diff was made from, so nothing is rebuilt from arguments typed a second time.
-func (d *dispatcher) cloudflareConfirm(ctx context.Context) (string, error) {
+func (d *dispatcher) cloudflareConfirm(ctx context.Context) (tui.Result, error) {
 	if d.pending == nil {
-		return "", fmt.Errorf("there is nothing to confirm: /cloudflare proposes a change first")
+		return tui.Result{}, fmt.Errorf("there is nothing to confirm: /cloudflare proposes a change first")
 	}
 
 	client, err := d.cloudflareClient()
 	if err != nil {
-		return "", err
+		return tui.Result{}, err
 	}
 
 	p := *d.pending
@@ -316,26 +397,27 @@ func (d *dispatcher) cloudflareConfirm(ctx context.Context) (string, error) {
 	case cloudflare.AddRecord:
 		record, err := client.CreateRecord(p.Zone, p.Proposed)
 		if err != nil {
-			return "", err
+			return tui.Result{}, err
 		}
-		return fmt.Sprintf("added %s %s in %s as %s",
-			record.Type, record.Name, p.Zone, shortID(record.ID)), nil
+		return tui.Result{Text: fmt.Sprintf("added %s %s in %s as %s",
+			record.Type, record.Name, p.Zone, shortID(record.ID))}, nil
 
 	case cloudflare.EditRecord:
 		record, err := client.UpdateRecord(p.Zone, p.RecordID, p.Proposed)
 		if err != nil {
-			return "", err
+			return tui.Result{}, err
 		}
-		return fmt.Sprintf("changed %s in %s to %s", record.Name, p.Zone, record.Content), nil
+		return tui.Result{Text: fmt.Sprintf("changed %s in %s to %s",
+			record.Name, p.Zone, record.Content)}, nil
 
 	case cloudflare.DeleteRecord:
 		if err := client.DeleteRecord(p.Zone, p.RecordID); err != nil {
-			return "", err
+			return tui.Result{}, err
 		}
-		return fmt.Sprintf("removed %s from %s", p.Name, p.Zone), nil
+		return tui.Result{Text: fmt.Sprintf("removed %s from %s", p.Name, p.Zone)}, nil
 
 	default:
-		return "", fmt.Errorf("the held change is not one this build knows")
+		return tui.Result{}, fmt.Errorf("the held change is not one this build knows")
 	}
 }
 

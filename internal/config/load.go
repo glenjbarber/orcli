@@ -86,7 +86,7 @@ type Config struct {
 	// Trusted is the list of directories a permission ticket has been issued
 	// for. A ticket is issued once and recorded here, so a session in a
 	// directory is not asked about it again.
-	Trusted []string `json:"OPENROUTER_TRUSTED,omitempty"`
+	Trusted []string `json:"ORCLI_TRUSTED,omitempty"`
 
 	// Readable is the list of directories that may be read from outside the
 	// working directory.
@@ -95,7 +95,7 @@ type Config struct {
 	// written there. It is a read-only reach: a path resolving inside one of
 	// these can be listed and read while the working directory continues to be
 	// the only place anything is written and the only place a program is run.
-	Readable []string `json:"OPENROUTER_READABLE,omitempty"`
+	Readable []string `json:"ORCLI_READABLE,omitempty"`
 
 	// Cloudflare is the block holding what the Cloudflare commands need.
 	//
@@ -243,9 +243,9 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readInt(value, &c.Verbosity)
 		case "approval":
 			err = readString(value, &c.Approval)
-		case "OPENROUTER_TRUSTED":
+		case trustedKey:
 			err = readStrings(value, &c.Trusted)
-		case "OPENROUTER_READABLE":
+		case readableKey:
 			err = readStrings(value, &c.Readable)
 		case cloudflareKey:
 			c.Cloudflare, err = readCloudflare(value)
