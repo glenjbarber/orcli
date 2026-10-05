@@ -1,0 +1,122 @@
+# 0008 The screen is a live view, a status window and a pane view
+
+- Status: accepted. Three questions it raises are open and are listed at the
+  end
+- Date: 2026-10-05
+- Supersedes: 0001, in the part where it settled one frame for one
+  conversation, and 0007, in the part where it settled a multiplexer of
+  side-by-side panes with a global status line. The parts of 0007 that survive
+  are named below
+
+## Context
+
+0001 settled a program that owns the whole screen and draws every row of it
+for one conversation. 0007 replaced that with a multiplexer: a session per
+pane, pane 0 as `tty0`, `Ctrl+B` as the prefix, and a global status line,
+leaving the arrangement of the panes to be designed later.
+
+The reader has now given that arrangement, and it is not the `tmux` one. The
+screen is in three vertical parts rather than a tiling of panes:
+
+1. the live view, at the top, which is where the model's output goes;
+2. a status window beneath it, broken into multiline sections;
+3. a pane view beneath that, carrying a pane number and pane activity.
+
+The third part is a list rather than a rectangle. A reader scrolls the live
+view, finds a numbered block, copies it, and pastes it back, so the parts of
+the screen that are read at different moments are stacked rather than tiled.
+
+Two other records are affected. `staged/status-interrupt.txt` is superseded by
+0006 and is named there. The frame that 0001 settled is gone, and 0001 is
+superseded rather than corrected, since a record edited to agree with a
+replacement is not a record.
+
+## Decision
+
+**The screen is three parts, top to bottom: live view, status window, pane
+view.** Each is a region of the screen. The live view is the tallest and is
+the one a reader reads.
+
+**The live view is where the model writes.** It shows the question, the tool
+calls, the answers, the reply, and the errors the model produced. A reader who
+wants one of those is looking at this region and not at a pane they have to
+switch to.
+
+**The status window is broken into multiline sections.** A section is a named
+block that occupies the rows it needs rather than one row of columns, so a
+figure that needs three lines takes three lines and a figure that needs none
+takes none. The candidates for sections are model, state, cost, the focused
+pane, and the pane count, and the reader has not chosen the set.
+
+**The pane view carries a pane number and pane activity.** Activity is a bell,
+so a reader can see at a glance which panes have something new in them
+without switching to each one. The pane view is how a reader finds the pane
+they want.
+
+**`/pane N` switches to pane N. `/pane next` and `/pane previous` step through
+the panes**, wrapping at both ends, as `tmux` does. This is the pane
+switching the reader asked to be reminded of, and it is written into the
+records here so it is not rediscovered.
+
+**A pane is still a session and pane 0 is still the main session.** That part
+of 0007 stands. What changes is that panes are listed rather than tiled, so a
+pane is reached by naming it rather than by moving a boundary.
+
+**`/paste` sends the reader's most recent copy back to the model.** The reader
+scrolls the live view, finds a numbered fenced block, runs `/copy N M`, and
+then runs `/paste` to put exactly that block in front of the model. The
+selection is the whole point of the two commands together, so `/paste` pastes
+what was last copied and nothing else. A reader who scrolls back and copies a
+block has one thing to do next and it is this.
+
+**`/paste` with nothing copied is refused by name.** A paste that silently
+sends an empty message is a turn spent on nothing, and the reader cannot tell
+it from a model that refused to answer.
+
+## Consequences
+
+The three parts compete for rows, so the layout has to say which part yields
+when the terminal is short. That is a decision and it is open. The live view
+should yield last, since a reader reading history is using it, and a status
+window that cannot be read is a worse failure than a shorter live view.
+
+The pane view is a list, so a reader with many panes cannot see them all at
+once and the view has to scroll or fold. Which, is open.
+
+`/pane` becomes the primary way to change panes and `Ctrl+B` is no longer the
+only one. That is not a contradiction, since a prefix that steps panes and a
+command that names one are two ways at the same thing, and the prefix is not
+described here.
+
+The pane view carries a bell, so something has to ring it. A bell that rings
+on every arrival is a bell the reader stops hearing, and what rings it is
+open.
+
+## What is open
+
+- What the status window sections are, in what order, and how many rows the
+  window takes when the terminal is short.
+- What rings the pane bell. Arrival of a reply, a reply needing an answer, or
+  an error are three different things and they are not the same.
+- Whether a pane view with more panes than rows scrolls, folds, or shows a
+  count.
+
+## Alternatives considered
+
+Tiled panes, as `tmux` draws them. Rejected for the reason in the context. The
+reader copies a block out of the live view and pastes it back, and that is one
+region being read and one region being typed into, which stacking serves and
+tiling does not.
+
+One region with a status bar at the bottom, which is what the tree draws.
+Rejected. The status window is multiline and has sections, and a bar cannot
+carry a section.
+
+A `/paste` that asks for what to paste. Rejected. The reader has just copied
+it, and a prompt asking them to choose between one thing and nothing is a
+prompt that exists to be dismissed.
+
+## Notes
+
+Nothing in the tree has changed in writing this. The frame in the tree is the
+one 0001 settled, and it is superseded by this record rather than repaired.

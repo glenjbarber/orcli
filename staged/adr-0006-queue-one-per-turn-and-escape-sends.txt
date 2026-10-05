@@ -1,0 +1,173 @@
+# 0006 A queued message is sent one per turn, and escape sends the next one now
+
+- Status: accepted. The storage for the queue is open and is written below as
+  the question it is rather than as a decision
+- Date: 2026-10-05
+- Supersedes: the escape rule in `staged/status-interrupt.txt`, which made
+  escape an unqualified interrupt that sends nothing
+
+## Context
+
+The queue already had two rules and they did not describe the same program.
+
+`staged/status-interrupt.txt` settled escape first, deliberately, as an
+interrupt that sends nothing, and held `[enter][enter]` back as the gesture
+that interrupts and drains the queue. That record was written when the only
+reason to interrupt was to stop spending, and it said so: an interrupt that
+interrupts nothing is a no-op.
+
+The reader's workflow has a second reason to interrupt. A reader who has
+watched a model think for a while does not only want it stopped; they want
+the question they queued thirty seconds ago answered now. A record that makes
+escape stop without sending leaves that reader pressing a key that costs a
+turn and buys nothing.
+
+There was also a gap the earlier record did not close. It said the queue is
+claimed by `[enter][enter]` and that `settleTurn` drains it only when the turn
+ended on its own, and it did not say what happens to a drain that begins while
+another request is still streaming. A queue sent all at once puts three
+questions into one request, and the reader cannot tell from the transcript
+which answer belongs to which question.
+
+## Decision
+
+**A message typed while the model is working is queued.** One queue per
+session, first in first out, held in the session rather than in the input
+goroutine, so a turn can ask about it without asking the reader.
+
+**Escape sends the head of the queue immediately, bypassing the wait.** It is
+an update to the request in flight rather than a new request, so the calls
+already made and answered in that request stay answered, which is the reason
+`DESIGN.md` section 7 gives for the update shape.
+
+**A message sent by escape is dropped from the queue when the model has
+processed it, not when it is sent.** Removing it at send time would report an
+empty queue for a request that has not yet read it, and a reader pressing
+escape twice would see nothing to send and have no way to tell whether the
+first press landed or was refused.
+
+**When the turn settles, the queue is sent one message per turn.** The first
+queued message starts the next turn, that turn is allowed to settle, and only
+then does the next message start. The queue is not drained in one pass.
+
+**One queue belongs to the session, not to a pane.** A reader who opens a pane
+and types into it is still in the same conversation, and a second queue is a
+second thing to look at.
+
+## Consequences
+
+Escape no longer means only "stop". A reader who wanted a stop and nothing
+else now has to press it while the queue is empty, which is a state the reader
+can see. That is the cost of one key doing two things, and it is paid
+deliberately rather than by adding a second key.
+
+The queue length becomes meaningful. Before this, a queued message was shown
+and then gone; now a message stays visible until a model has read it, so the
+queue is the record of what has not been answered as well as what has not been
+sent.
+
+A turn that settles with several messages queued starts several turns, which
+spends allowance at a rate the reader did not choose all at once. A reader who
+queued four messages while a long turn ran gets four turns after it, and the
+status field is where that becomes visible.
+
+Dropping on processing rather than on sending means the queue needs to know
+what the model has consumed, which the request in flight knows and the session
+does not. The turn hands that back, and a turn that dies without handing
+anything back leaves its message queued rather than lost.
+
+## The queue in SQLite
+
+Open. The reader asked whether the queue should be in SQLite and answered
+that it would help for the simulation of daemonizing.
+
+The reasons for it are real. A message typed and not yet sent is work in
+progress that a crash loses, and the crash log the reader also asked for wants
+the same store. A queue that survives a restart is also what makes the
+daemonizing simulation honest, since a process that may be replaced at any
+moment cannot hold its pending work in a field of its own.
+
+The reasons against it are also real. The queue is small and short lived, and
+`internal/saved` already uses SQLite through a pure Go driver chosen so
+`bmake crossbuild` keeps working with no cgo. Putting the queue in the session
+store makes every keystroke that queues a write, and a reader who queues four
+messages in a second pays four writes.
+
+What has to be decided before it is built: whether the queue lives in the same
+file as the conversation or beside it, whether a queued message is durable
+before it is sent or only after, and what a reader sees on restart for a queue
+that was there.
+
+## Alternatives considered
+
+Escape sends the whole queue, as `[enter][enter]` was to. Rejected for the
+reason in the context: three questions in one request cannot be attributed in
+the transcript, and the queue exists precisely so a reader can see which answer
+answers which question.
+
+Escape stops and sends, with the queue emptied at send time. Rejected above.
+The reader has to be able to see what the model has not read yet.
+
+A second key for send-now, leaving escape a plain stop. One key doing two
+things is a cost; two keys for two things is a cost the reader pays in
+remembering. Recorded rather than dismissed, since it is the choice a reader
+who hates ambiguity would make.
+
+## The scroll mode, clarified
+
+The reader's workflow says that in scrolled mode the receive buffer halts and
+the recent live refresh updates from the API are discarded, and that the live
+activity output is displayed when scrolling is off.
+
+That resolves the collision recorded in the earlier state of this work, and
+the resolution is narrower than it looks. Two different things are being
+discarded, and only one of them is a row.
+
+Transcript rows arriving from a running turn are held in the receive queue in
+the session and folded when the reader returns, which is what 0005 settled.
+They are not discarded.
+
+The live activity readout, which is the progress reporting the endpoint sends
+while a model works, is suppressed while the reader is scrolled away from the
+live edge. It is a reading of the present, and a reader reading history is not
+present.
+
+So `[scrollback]` marks a screen where rows are held rather than dropped and
+where the progress readout is not running, and both end when the viewport
+returns to the live edge.
+
+## A shell line on its own is not sent
+
+Open, and recorded here because it arrived with this workflow rather than
+with the queue.
+
+The reader's rule: an input line that is alone in its string and looks like a
+shell command is a no-op, unless it is directly in response to a question the
+model asked. `ls` followed by enter in the wrong terminal window is clearly a
+mistake and should do nothing.
+
+Two things are unresolved and both are the reader's.
+
+First, what makes a line a shell line. A line is shell-like when it names a
+program and not a command this program has, but the command table is the list
+of what this program answers to, so a reader typing a program the model just
+mentioned would be typing a shell line that is not a mistake.
+
+Second, what "directly in response to a question" means, since it is the only
+exception and a rule with an undefined exception is not a rule. The obvious
+reading is that the model asked for something in its last reply and the reader
+is answering it, which is a judgement about the conversation and not a fact
+the input layer can read off a line.
+
+This belongs to the introductory setup rather than to the input layer, since
+the reader described it as part of what the model is told at startup.
+
+## Notes
+
+Nothing in the tree has been changed in writing this. There is no code, no
+commit for the interface, and the frame in the tree is still the one 0001
+settled.
+
+`tview` is the only third-party interface library named in any record. A
+library named `tvlist` appears in no file in the repository and no record here
+claims to have considered it.

@@ -1,8 +1,9 @@
 # Decision records
 
-Five records, one file each, written at the reader's instruction on 2026-10-05
-after the work that carried them was merged. Each says what was replaced, what
-replaced it, what was rejected, and what it costs.
+Eleven records, one file each. Five were written at the reader's instruction on
+2026-10-05 after the work that carried them were merged. Six were written on
+2026-10-05 for the interface being designed, and all six describe something
+not in the tree.
 
 | Record | Decision | Supersedes |
 | --- | --- | --- |
@@ -11,34 +12,71 @@ replaced it, what was rejected, and what it costs.
 | [0003](adr-0003-first-request-is-the-probe.txt) | the first request is the connection test | a command that tested the connection, with no handler |
 | [0004](adr-0004-model-choice-records-replaced.txt) | a choice records the model it replaced | a writer that set the model and recorded nothing about the previous one |
 | [0005](adr-0005-consider-tview.txt) | consider tview for the interface | nothing. Proposed, and it supersedes nothing |
+| [0006](adr-0006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
+| [0007](adr-0007-the-interface-is-a-multiplexer.txt) | the interface is a multiplexer of sessions | 0001, where one program drew one screen for one conversation |
+| [0008](adr-0008-live-view-status-pane-view.txt) | the screen is a live view, a status window and a pane view | 0001 and the pane arrangement of 0007 |
+| [0009](adr-0009-live-view-contents-and-the-prompt.txt) | what the live view shows, and the prompt is a joke | nothing |
+| [0010](adr-0010-interface-api.txt) | the interface and its commands | 0008 and 0009, and the pane arrangement of 0007. This is the API document |
+| [0011](adr-0011-editing-keys-and-input-history.txt) | the editing keys, and a history with no duplicates | nothing. It fills a gap 0010 left |
 
 They are numbered so a later record can supersede an earlier one by name, and
-they cross-refer rather than repeat, so a reader who has read 0001 does not read
-it again in 0003.
+they cross-refer rather than repeat, so a reader who has read one does not read
+it again.
 
 ## Reading order
 
-0001 and 0002 are the frame and go together: 0001 removes a seam and 0002 decides
-what a row carries once the seam is gone. 0003 and 0004 are the connection and
-the model, and 0004 refers back to 0003 because a probe and a move are different
-acts.
+0001 and 0002 are the frame that is being replaced and go together. 0010
+supersedes both in what it describes, and both stand as records of a decision
+that was taken and then replaced.
 
-0005 is a proposal rather than a decision, and it is written last because it
-reopens what 0001 settled. It is the only record here that describes something
-not in the tree, and it is the only one whose status is proposed.
+0003 and 0004 are the connection and the model. 0004 refers back to 0003
+because a probe and a move are different acts. Both describe behaviour in the
+tree and neither is affected by the redesign.
+
+0005 is a proposal about the external library and is the only record of the
+first five that describes something not in the tree. Its line counts measure
+the frame this redesign replaces rather than a plan.
+
+0006 stands. 0007 stands for a session per pane, pane 0 as main, `Ctrl+B` as a
+non-latching prefix, program-owned scrollback, and a session log that survives
+a crash. 0008 and 0009 are superseded by 0010, and both stand as records of a
+decision that was taken and then replaced.
+
+0010 is the API. It answers the questions 0007 and 0008 left open, it gives
+the screen in full, and where it is silent a question is still open and is
+listed at its end.
+
+0011 fills the one gap 0010 left in the keys a reader touches, and it is read
+with 0010 rather than after it.
+
+## What is superseded, and where it went
+
+The frame in the tree is described by 0001 and 0002. 0010 replaces it.
+
+`staged/status-interrupt.txt` made escape an unqualified interrupt that sends
+nothing. 0006 supersedes it.
+
+The nine-row footer that `staged/status-*.txt` records describe existed only in
+uncommitted work in a worktree that was removed. It is not in the tree and
+nothing supersedes it.
+
+The prompt was `root@localhost $ ` in 0009 and is `root@lolhost @ ` in 0010.
+The reader wrote both and marked the second as deliberate.
 
 ## What these records are not
 
-They are not a specification. The files under `doc/` describe the interface as it
-is, and these records say why it is that way rather than what it does.
+They are not a specification. `DESIGN.md` describes the interface being built,
+and these records say why it is that way rather than what it does. 0010 and
+0011 together are the closest thing to a specification here, and they are still
+records of decisions.
 
-They are not exhaustive. Four decisions were taken that changed what the
-interface does, and those four are recorded here. Smaller ones live in the
-comments on the code that carries them, which is where the next reader will
-already be.
+They are not exhaustive. Smaller decisions live in the comments on the code
+that carries them.
 
 They are not rewritten when the code changes. A record that is edited to agree
 with the code is no longer a record of what was decided, and the thing worth
-keeping is the rejected alternatives and the corrections. Two records here carry
-a correction rather than a deletion: 0005 keeps the belief its first draft held
-about the clipboard and says it was wrong.
+keeping is the rejected alternatives and the corrections. Five records here
+carry a correction or a replacement rather than a deletion: 0005 keeps the
+belief its first draft held about the clipboard, 0006 keeps the escape rule it
+replaced, 0008 keeps the tiling it rejected, 0009 keeps the prompt 0010
+replaced, and 0010 keeps the keys it did not mention.

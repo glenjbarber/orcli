@@ -1,0 +1,96 @@
+# 0009 What the live view shows, and what is a joke
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It records decisions 0007 and 0008 left open
+
+## Context
+
+0008 settled the arrangement of the screen and left the live view's contents
+unnamed. The reader has now said what goes in it, and three of those things
+are decisions about what a reader sees rather than about where it sits.
+
+The prompt is the fourth. It has been removed once already. The nine-row layout
+that entries in the ledger record dropped `root@localhost $ ` because the
+reader took it out, and it is coming back with the reader's own words attached
+to it: as a joke.
+
+## Decision
+
+**The prompt is `root@localhost $ `.** It is a joke and it is drawn as one. It
+is not derived from the reader's hostname, their user, or the directory, since
+a prompt that computed itself would have to be honest and this one is not.
+
+**Output errors are shown in the live view**, as rows beside the tool call or
+reply they came from. An error a model produced is part of what the model
+produced, and a reader who cannot see it will believe the tool worked.
+
+**Input errors are shown in the input field and clear themselves.** They do not
+become a row in the live view, since a row is the record of what happened and
+an input error never became a question. They clear on a timeout rather than on
+the next keystroke, so a reader who looked away sees the field recover.
+
+**Tool output is toggle-able with `/verbose`, and it is off by default.** A
+line such as `[fs] read_file [...]` is the shape of it. A reader who wants to
+see what the model did reads it; a reader who wants the answer does not have
+to scroll past it.
+
+**A tool line carries an icon where a terminal can draw one.** A shell command
+is a terminal icon. This is conditional in the design rather than in the record:
+a figure the terminal cannot draw is a figure the program must fall back from,
+and the fallback is a decision about the palette rather than about the row.
+
+**The twiddle is a three by two block of single-dot Braille characters
+carrying a new twiddle**: a horizontally scrolling swirl-in, swirl-out,
+swirl-in effect whose colour shifts counter-clockwise. This replaces the
+two-cell lemniscate walk that the frame in the tree draws, and it replaces the
+figure-eight specification in the reader's earlier notes. The earlier figure
+was two loops in opposite directions; this one is three segments across six
+cells, and the two are not the same animation.
+
+## Consequences
+
+A prompt that lies about the hostname is harmless and a prompt that is honest
+would be confusing, since the program is not a shell and the reader is not root.
+The joke is load-bearing: it says what the field is and nothing about the
+machine.
+
+Input errors clearing on a timeout means the field has a state that is not its
+contents. A reader who typed something wrong and looked away sees it recover,
+which is the point, and a reader who wants it to stay has to read it faster.
+
+Tool output off by default means a long run of file reads is invisible until
+`/verbose`. That is what the reader asked for, and it costs a reader who wants
+to watch the model work.
+
+The twiddle is six cells rather than two, so it takes three columns where the
+tree's takes two. Anything laid out against the twiddle has to account for
+that, and the layout is open.
+
+Colour shifting counter-clockwise is one less thing to derive. The tree
+interpolates between six primaries over four seconds; a hue rotation with a
+direction is shorter and is what is specified.
+
+## What is open
+
+- How long an input error stays before it clears. It is a timeout the reader
+  will form a feel for, and the first value will be wrong.
+- Which tools get an icon, and what the icon is when the terminal cannot draw
+  one.
+
+## Alternatives considered
+
+Input errors as rows in the live view. Rejected in the decision: a row is the
+record of what happened, and an input error never became a question.
+
+A prompt computed from the environment. Rejected: it would have to be honest,
+and the reader named a joke.
+
+Tool output on by default. Rejected for the reason the reader gave, which is
+that it is what makes a reply unreachable without scrolling.
+
+## Notes
+
+Nothing in the tree has changed in writing this. The twiddle in the tree is the
+lemniscate, the prompt in the tree is the empty string, and neither is what
+this record settles.

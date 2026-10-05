@@ -1,0 +1,289 @@
+# 0010 The interface and its commands
+
+- Status: accepted. This is the API document for the interface being built.
+  Nothing in it is in the tree
+- Date: 2026-10-05
+- Supersedes: 0008 and 0009, and the parts of 0007 they replaced. The parts of
+  0007 that stand are named under what survives
+
+## Context
+
+0001 through 0005 record a frame that is being replaced and two behaviours in
+the tree that stand. 0006 settled the message queue. 0007 settled a
+multiplexer of sessions with tiled panes. 0008 and 0009 settled an
+arrangement of the screen that this record replaces, because the reader has
+now given the arrangement in full and named two fields that were open in it.
+
+This record is the exact API. Where an earlier record said "open", this one
+answers. Where this one is silent, the question is still open and is listed.
+
+## The screen
+
+Top to bottom, seven regions. The order is the reader's, given as a correction
+to an earlier draft that had the pane-number bar first.
+
+```
+live window
+scrollback indicator
+mouse indicator
+status bar 1:  Provider | Model | Status | Bell | Verbosity
+status bar 2:  Hostname | Context | Autosave | Stealth | Approval
+prompt:        root@lolhost @ <input>
+pane bar:      0 | 1 | 2
+```
+
+**Approval is in status bar 2 and not in status bar 1.** The reader's draft
+named it in both and then wrote "it is not twice, it should go here", so it is
+carried once, in the second bar. Recorded as a reading rather than a
+correction, since a draft that contradicted itself needed resolving and this is
+the resolution.
+
+**The two status bars do not swap.** The reader wrote "hold the swapping of
+the status bars" against a draft that reversed them, so bar 1 is bar 1.
+
+**Status carries colour when the pane is active.** Inactive panes carry the
+same field in the terminal's default colour, so a reader reading the pane bar
+can see which pane is focused without switching to it.
+
+**Verbosity falls off when the bar is too narrow.** It is the last field in bar
+1 and the first to go, since the bar is about the model answering and not about
+how much of it.
+
+## The prompt
+
+`root@lolhost @ ` and a space before the caret.
+
+This replaces `root@localhost $ ` from 0009. The reader wrote it twice and
+then wrote "updated, not a typo", so `lolhost` and `@` are deliberate and are
+not corrected.
+
+The prompt is not computed. It is not the reader's user, their host or their
+directory, and a reader who runs this on a machine whose host is `lolhost`
+still gets `lolhost`.
+
+## The pane bar
+
+`0 | 1 | 2` and one entry per pane, in numeric order.
+
+**The pane bar is below the prompt.** The reader inverted the earlier draft,
+which had pane numbers as the first bar, and stated the position twice. The
+final list of regions did not repeat it, so the earlier statement stands: it is
+the bottom region.
+
+**The bar is how a reader finds a pane.** A pane view with more panes than the
+bar has columns scrolls, and the bar shows what it is showing and how many
+there are. Whether it scrolls or folds is still open.
+
+## Panes
+
+**Pane 0 is the main session.** It exists at startup and cannot be closed.
+
+**A new pane takes the lowest available numeric ID.** Not the next unused
+number, the lowest unused one. With panes 0, 1 and 2 open, closing 1 and
+opening a pane gives 1, not 3.
+
+**Panes do not renumber.** Closing pane 2 of five leaves panes 0, 1, 3 and 4.
+A number means the pane that was given it, so a reader who learned what pane 3
+is does not find something else there later.
+
+**A pane ID is not a level.** `internal/tui/levels.go` retires a level rather
+than returning it to a pool, and says why: a reader who copied level 3 an hour
+ago and types `/copy 3` now would get whatever took the number. Pane IDs are
+reused and levels are not, and that is not a contradiction to be resolved but
+two different guarantees for two different readers. A pane ID is how a reader
+navigates and may be reused; a level is how a row is attributed and may not.
+
+## Commands
+
+| Command | Effect |
+| --- | --- |
+| `/pane N` | switch to pane N |
+| `/pane next` | next pane, wrapping |
+| `/pane previous` | previous pane, wrapping |
+| `/close` | close the focused pane |
+| `/copy` | copy the entire reply to the paste buffer |
+| `/copy N` | copy N replies back |
+| `/copy N M` | copy fenced block M of reply N |
+| `/paste` | send the last copy to the model |
+| `/restore` | load the last-known session |
+| `/verbose` | toggle tool output |
+| `/permit [dir]` | allow read to a directory, for the focused pane |
+| `/deny [dir]` | refuse read to a directory, for the focused pane |
+| `/approve` | settle the focused pane's approval as yes |
+| `/reject` | settle the focused pane's approval as no |
+| `/stealth` | what `/cognito` was |
+| `/model [NAME\|last]` | choose a model, or go back to the one before |
+| `/btw QUESTION` | an ephemeral one-off request with no pane |
+
+`/deny` is both the opposite of `/permit` and one of the per-pane permission
+commands. That is coherent rather than a collision: `/permit [dir]` and
+`/deny [dir]` take a directory and answer whether the pane may read it, while
+`/approve` and `/reject` take no argument and answer the pane's own approval.
+
+`/paste` pastes what was last copied and is refused by name when nothing has
+been copied. A reader scrolls the live window, copies a block, and pastes
+exactly that block back to the model.
+
+## Permissions
+
+`/permit`, `/deny`, `/approve` and `/reject` are per-pane. A pane opened with
+no tools is a pane with no permission, and a reader who permits a directory in
+pane 1 has not permitted it in pane 2.
+
+**The directory list is a SQLite database.** Permitted and refused directories
+are stored as rows rather than as lines in the configuration file, so a reader
+with several hundred directories can add and remove them without rewriting a
+JSON document, and the store can be queried.
+
+The database holds at least a pane, a path, a verdict and a moment. Whether the
+verdict is one column with two values or two columns is a question of the
+schema and is not settled here.
+
+**The reader is reminded of the pane's permissions and the path to escalating
+at startup.** That is step two of the workflow and it is a requirement rather
+than an intention.
+
+## Commit attribution
+
+**A model should use `git config get` to determine its commit attribution, and
+that attribution is stored in `.orcli.json`.**
+
+So the attribution is read from the reader's own git configuration rather than
+assumed, and the value the program used is written where it can be seen. The
+member name is not settled and is open.
+
+## Session restoration
+
+**`/restore` loads the last-known session.**
+
+**The latest session for an identifier is a symlink named
+`%SOME_IDENTIFIER%.latest`,** pointing at the session file it names. The
+symlink is what `/restore` follows, so restoring is not a search through a
+directory for the newest file and does not depend on the clock.
+
+`%SOME_IDENTIFIER%` stands for whatever identifies the session's subject: the
+directory, the model, or the reader's own name. Which one is open, and the
+name is not decided.
+
+**Context has to survive a restart for a restore to be worth anything,** which
+is the reason this is in the record. A session restored with its transcript
+but not its context is a transcript the reader has to read rather than a
+conversation the reader resumes. What context is carried, and how much of it,
+is open.
+
+## The twiddle
+
+**A three by two block of single-dot Braille characters.** Six cells, three
+columns.
+
+**The colour cycles as the model works.** On a dark terminal the cycle is
+yellow, cyan, bright blue. On a light terminal the opposite palette.
+
+**The colours are xterm256-compatible and fall back to the sixteen ANSI
+colours.** Bright blue is a named ANSI colour in the sixteen, so the cycle
+works on a terminal with eight colours and is the same figure on one with
+two hundred and fifty six.
+
+## The thinking word
+
+**The word beside the twiddle alternates on a timer, through
+developer-friendly phrases.** One of them is `No Segmentation Fault (no core
+dumped)`.
+
+**The timer resets on every new update from the OpenRouter API, or every seven
+seconds, whichever is shorter.** So a fast stream changes the phrase often and
+a slow one still changes it, and a phrase that never changed would be a
+decoration rather than a report that something is happening.
+
+`thinking` is one of the phrases rather than the only one, since a reader who
+has seen `thinking` for two minutes learns nothing from it.
+
+The full set of phrases is open. One is given.
+
+## Output that is suppressed and output that is not
+
+**Tool output is off by default and `/verbose` turns it on.** A line such as
+`[fs] read_file [...]` is the shape of it.
+
+**A tool line carries an icon where the terminal can draw one.** A shell
+command is a terminal icon.
+
+**Output errors are shown in the live window,** beside the tool call or reply
+they came from. An error the reader cannot see is an error the reader believes
+did not happen.
+
+**Input errors are shown in the input field and clear on a timeout.** How long
+they stay is open.
+
+## Scrolling
+
+**The program owns the scrollback.** The terminal's buffer is shared by
+everything on the screen, so a pane that used it would put every pane's history
+into a place no pane owns.
+
+**Rows arriving from a running turn are held, not discarded,** in a queue in
+the session, folded into the live window when the reader returns to the live
+edge.
+
+**The live activity readout is suppressed while the reader is scrolled away.**
+`[scrollback]` is shown while it is suppressed, and both end when the viewport
+reaches the live edge. Transcript rows are deferred and kept; live activity is
+not shown. Those are two different things.
+
+**The mouse indicator is its own region** and says whether the wheel is being
+read, since a reader whose wheel stopped working needs to know whether the
+program stopped reading it or the terminal stopped sending it.
+
+## Messages while a model is working
+
+**A message typed while the model is working is queued,** first in first out.
+
+**Escape sends the head of the queue now,** as an update to the request in
+flight.
+
+**A message sent by escape leaves the queue when the model has processed it,**
+not when it is sent.
+
+**When the turn settles, queued messages are sent one per turn.**
+
+Where the queue lives is open. SQLite was raised for it and would make
+pending work survive a crash.
+
+## What survives from earlier records
+
+From 0007: a session per pane, pane 0 as the main session, `Ctrl+B` as a
+non-latching prefix, program-owned scrollback, and a session log that survives
+a crash.
+
+From 0006: the whole of it.
+
+From 0003 and 0004: the first request as the connection probe, and a choice
+recording the model it replaced.
+
+## What is open
+
+- Which region yields first when the terminal is short, and how many rows each
+  takes.
+- What rings the pane bell.
+- Whether the pane bar scrolls or folds.
+- The `Ctrl+B` command set, and whether the prefix is escapable.
+- The clipboard path on macOS Terminal.app with Secure Keyboard Entry, and
+  whether copy is owned by the session or the terminal.
+- Whether `/copy last` exists, and whether a fenced block is numbered per
+  reply or per session.
+- Where the message queue lives.
+- What `%SOME_IDENTIFIER%` is.
+- The set of thinking phrases beyond the one given.
+- How long an input error stays.
+- Which tools get an icon.
+- The member name for the commit attribution in `.orcli.json`.
+
+## Notes
+
+`AGENTS.md` is to be read by default, and every reference to reading
+`.orcli.md` in the source is to be retired. This is recorded here because it is
+a change to how the repository is worked in rather than a decision about the
+interface, and `AGENTS.md` is where it belongs.
+
+Nothing in the tree has changed. There is no pane, no prefix, no queue and no
+restore.
