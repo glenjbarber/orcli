@@ -1,6 +1,6 @@
 # Decision records
 
-Four decisions, one file each, written at the reader's instruction on 2026-10-05
+Five records, one file each, written at the reader's instruction on 2026-10-05
 after the work that carried them was merged. Each says what was replaced, what
 replaced it, what was rejected, and what it costs.
 
@@ -10,6 +10,7 @@ replaced it, what was rejected, and what it costs.
 | [0002](adr-0002-one-character-field.txt) | a status field is one character | bars that dropped whole fields when too narrow |
 | [0003](adr-0003-first-request-is-the-probe.txt) | the first request is the connection test | a command that tested the connection, with no handler |
 | [0004](adr-0004-model-choice-records-replaced.txt) | a choice records the model it replaced | a writer that set the model and recorded nothing about the previous one |
+| [0005](adr-0005-consider-tview.txt) | consider tview for the interface | nothing. Proposed, and it supersedes nothing |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read 0001 does not read
@@ -18,9 +19,13 @@ it again in 0003.
 ## Reading order
 
 0001 and 0002 are the frame and go together: 0001 removes a seam and 0002 decides
-what a row carries once the seam is gone. 0003 and 0004 are the connection and the
-model, and 0004 refers back to 0003 because a probe and a move are different
+what a row carries once the seam is gone. 0003 and 0004 are the connection and
+the model, and 0004 refers back to 0003 because a probe and a move are different
 acts.
+
+0005 is a proposal rather than a decision, and it is written last because it
+reopens what 0001 settled. It is the only record here that describes something
+not in the tree, and it is the only one whose status is proposed.
 
 ## What these records are not
 
@@ -34,4 +39,6 @@ already be.
 
 They are not rewritten when the code changes. A record that is edited to agree
 with the code is no longer a record of what was decided, and the thing worth
-keeping is the rejected alternatives.
+keeping is the rejected alternatives and the corrections. Two records here carry
+a correction rather than a deletion: 0005 keeps the belief its first draft held
+about the clipboard and says it was wrong.
