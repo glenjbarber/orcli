@@ -1,4 +1,4 @@
-# 0004 A choice records the model it replaced
+# 0000004 A choice records the model it replaced
 
 - Status: accepted
 - Date: 2026-10-05
@@ -34,7 +34,7 @@ Going back with nothing to go back to is refused by name rather than writing an
 empty model, since an empty model is a session that cannot ask anything and is not
 one a reader chose.
 
-A confirmation does not record the model it replaced. See 0003: a first request
+A confirmation does not record the model it replaced. See 0000003: a first request
 is a probe rather than a move, and treating it as one would send a reader back to
 a model they never chose.
 

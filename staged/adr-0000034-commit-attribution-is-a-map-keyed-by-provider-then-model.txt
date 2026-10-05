@@ -1,0 +1,84 @@
+# 0000034 Commit attribution in .orcli.json is a map keyed by provider, then model
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 20 in `QUESTIONS.md`
+
+## Context
+
+Question 20 asked for the member name carrying commit attribution in
+`.orcli.json`: a model reads its commit attribution with `git config get`
+and the value used is written there. `.orcli.json` already has a field
+named `AttributionID`, `json:"attribution_id"`, and it is not this: its own
+comment in `internal/openrouter/events.go` says it "names who asked, for
+the provider's own record of the request," which is OpenRouter's own
+attribution for an API call, not a git commit's co-author line. A new
+field was needed that would not collide with, or be mistaken for, the
+existing one.
+
+The reader also wants the stored value to vary by provider and by model
+within a provider, rather than being a single value for the whole file.
+
+## Decision
+
+**The field is `commit_attribution`, and its value is a map keyed by
+provider, then by model.**
+
+```json
+{
+  "commit_attribution": {
+    "anthropic": {
+      "claude-sonnet-4.5": "Space Bunny Alpha"
+    }
+  }
+}
+```
+
+The leaf is the attribution string itself, read once with `git config get`
+and written here as what was used.
+
+## Reasoning
+
+`commit_attribution` as the name is specific enough not to be confused with
+`attribution_id`, which sits in the same file for a different purpose.
+
+Two levels of nesting, provider then model, rather than one flat value,
+because the reader wants the value to vary per model: a reader using more
+than one provider, or more than one model within a provider, gets a
+separate stored attribution for each rather than one value standing in for
+all of them.
+
+## Consequences
+
+A reader who switches models gets no attribution recorded until a commit is
+made under the new model, since the map only holds what has actually been
+read and used, not every provider and model that might ever be chosen.
+
+The structure reads one level deeper than every other field in
+`.orcli.json`, all of which are flat scalars or, in `Trusted` and
+`Readable`, a flat list. This is the one nested field in the file, and that
+is a direct consequence of the reader wanting the value to vary along two
+axes rather than being a decision made for its own sake.
+
+## Alternatives considered
+
+A single flat `commit_attribution` string, one value for the whole file.
+Rejected: it cannot hold a different value per provider or per model, which
+the reader wants.
+
+Provider and model as the outer two levels, each model object holding its
+own `commit_attribution` field rather than the reverse nesting. Considered
+directly as the alternative shape and not taken; the reader chose
+`commit_attribution` as the top-level wrapper instead.
+
+## What this leaves open
+
+Nothing from question 20.
+
+## Notes
+
+Nothing in the tree has changed. `.orcli.json`'s current fields, read from
+`internal/config/load.go`, are `api_key`, `model`, `provider`,
+`attribution_id`, `mouse`, `bell`, `color`, `verbosity`, `approval`,
+`ORCLI_TRUSTED`, `ORCLI_READABLE`, and `cloudflare`. `commit_attribution` is
+not among them; this record describes it, it does not add it.

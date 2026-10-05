@@ -1,0 +1,111 @@
+# Record status vocabulary
+
+Five words, used in this order of strength: `accepted`, `proposed`,
+`UNCONFIRMED`, `SUPERCEDED`, `rejected`.
+
+## accepted
+
+The record was taken and is current. It is what the interface is built to.
+
+## proposed
+
+The record argues for something rather than settling it, and nothing is built
+to it yet. 0000005 is the only one: a proposal about tview, superseded by nothing
+and superseding nothing.
+
+## UNCONFIRMED
+
+The record settles what is ruled out without settling what is taken. It
+differs from `proposed` in direction: a proposed record argues for a
+candidate that nothing yet builds to, while an unconfirmed record narrows the
+field by eliminating candidates and leaves what remains undecided. A reader
+of an unconfirmed record learns what will not be built and does not learn
+what will.
+
+An unconfirmed record is expected to be followed by another, later, that
+either settles the remaining question (becoming `accepted`) or narrows it
+further (staying `UNCONFIRMED`, with a new record named as the reason it is
+still that way). It is not a placeholder for forgetting to decide; it is
+written when elimination itself is worth keeping even though the choice is
+not made.
+
+0000024 is the only one so far: `pbcopy` and OSC 52 on Terminal.app are ruled
+out, and the clipboard path itself is not.
+
+## SUPERCEDED
+
+The record was taken and a later one replaced part or all of it. The file is
+kept and is not edited. What it says is what was decided at the time, and the
+thing worth keeping is the replaced alternative rather than a version that
+agrees with the current code.
+
+A superseded record is read to find what was replaced, not to find what to
+build. A reader who is about to build from a superseded record has made a
+mistake and the record itself is what would have prevented it, since it names
+its replacement in the header.
+
+## rejected
+
+The record was considered and not taken. There are none. A decision not taken
+belongs in `QUESTIONS.md` and then in `ANSWERS.md` when it is settled, and a
+record is written for what was decided rather than for what was passed over.
+`QUESTIONS.md` is the record of what is still open and `ANSWERS.md` is the
+record of what was answered and what it cost.
+
+## What a status line carries
+
+```
+- Status: accepted
+- Status: accepted, and SUPERCEDED by 0000010
+- Status: proposed
+- Status: accepted, and SUPERCEDED by 0000006, in the part where it made escape an
+  unqualified interrupt that sends nothing
+```
+
+The word is capitalised because it is a state and not a sentence, and it is
+carried in the header rather than in the prose so that a reader scanning
+headers sees which records are current without reading sixteen files.
+
+A record that supersedes something names it in the same header, under
+`Supersedes`, and the two lines are read together. A reader who has only the
+superseding record learns what it replaced, and a reader who has only the
+superseded record learns what replaced it.
+
+## What is not a status change
+
+A record that narrows, extends or corrects an earlier one without replacing it
+is not a supersession. 0000011 fills a gap 0000010 left and 0000012 to 0000016 answer
+questions rather than replacing anything. All of them are `accepted`, and each
+names what it extends.
+
+A correction inside a record is not a status change either. 0000005 keeps the belief
+its first draft held about the clipboard, and 0000006 keeps the escape rule it
+replaced. Both are `accepted`, and a record edited to agree with later code is
+no longer a record of what was decided.
+
+## The records that carry each value
+
+| Record | Status | Replaced by |
+| --- | --- | --- |
+| 0000001 | accepted, and SUPERCEDED | 0000008, in the frame part. 0000010 in the rest |
+| 0000002 | accepted, and SUPERCEDED | 0000010 |
+| 0000003 | accepted | nothing. It describes behaviour in the tree |
+| 0000004 | accepted | nothing. It describes behaviour in the tree |
+| 0000005 | proposed | nothing. It supersedes nothing |
+| 0000006 | accepted | nothing, since 0000012 settles where the queue lives and 0000006 never decided that |
+| 0000007 | accepted, in part SUPERCEDED | 0000008 for the arrangement, 0000010 for the rest |
+| 0000008 | accepted, and SUPERCEDED | 0000010 |
+| 0000009 | accepted, and SUPERCEDED | 0000010 |
+| 0000010 | accepted | nothing. It is the API |
+| 0000011 | accepted | nothing. It fills a gap 0000010 left |
+| 0000012 | accepted | nothing. It settles question 1 |
+| 0000013 | accepted | nothing. It settles question 2 |
+| 0000014 | accepted | nothing. It settles question 3 |
+| 0000015 | accepted | nothing. It settles question 4 |
+| 0000016 | accepted | nothing. It settles question 5 |
+
+Two of the records 0000003 and 0000004 describe the frame as it was before this
+redesign and are marked `accepted` rather than `SUPERCEDED`, because the
+behaviour they describe is in the tree and the redesign does not touch it. A
+record is superseded when its decision is replaced, not when the code it
+described is later rebuilt.

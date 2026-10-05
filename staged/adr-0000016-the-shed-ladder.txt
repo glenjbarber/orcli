@@ -1,0 +1,103 @@
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles the shed order question 5 asked, for the six
+  regions the screen now has
+
+## Context
+
+`QUESTIONS.md` question 5 asked which of seven regions yields first when the
+terminal is short: live window, scrollback indicator, mouse indicator, status
+bar 1, status bar 2, prompt, pane bar. The prompt was held to the end because
+a session with nowhere to type is a session with no way to go on, and the live
+window was to yield last because a reader reading history is using it.
+
+The reader named Verbosity as the field that falls off bar 1 and left bar 2
+undecided. Six further questions were put as yes or no, each with a
+recommendation, and the reader answered them one at a time.
+
+`DESIGN.md` and `staged/adr-0000010-interface-api.txt` both draw seven regions and
+are behind the documentation work in progress. This record describes the six
+the reader answered about and names the disagreement rather than drawing a
+screen that does not exist.
+
+## Decision
+
+**The ladder, in order of what is given up first.**
+
+1. The scrollback indicator and the mouse indicator.
+2. The fields of each bar, from the right: Verbosity then Bell on bar 1, and
+   Approval, Stealth, Autosave, Context, Hostname on bar 2.
+3. A bar, whole, at one field left.
+4. The live window, which keeps at least one row and goes no lower.
+
+**The prompt is never dropped and never clipped.** It is drawn last so it is
+the row that survives, and it is the only region with no threshold at all.
+
+**A shed region returns when the terminal grows.** The layout pass runs on every
+resize, so a region returning is the absence of a shed rather than a second
+piece of work, and no second resize is needed to bring it back.
+
+## Reasoning
+
+**The indicators go first because they are the cheapest thing to lose.** They
+report a mode rather than an activity, and both report nothing in the state
+where the terminal is short. The reader held the prompt because the session has
+nowhere to go on and held the live window because a reader reading history is
+using it; both of those are the reader's present activity, and an indicator is
+not.
+
+**The bars shed from the right rather than emptying gradually.** Bar 1 sheds
+Verbosity first, which the reader had already named. Carried to its end, bar 2
+sheds Approval, Stealth, Autosave, Context, Hostname. A bar is never left as one
+floating field, so whether a field is present does not depend on how the bar
+happens to be sized.
+
+**The live window keeps a row.** Zero rows cannot tell a program that is
+thinking from a program that has stopped, and one row is the whole difference
+between idle and dead. It yields last because a reader reading history is using
+it, which is the reason the question gave.
+
+**Returning is free.** The layout already recomputes on resize, so this is a
+consequence of how the layout is written rather than a second mechanism.
+
+## Consequences
+
+A reader at a narrow terminal loses the two things that tell them the terminal
+is the problem. A reader who has not noticed has a live window and a prompt and
+no way to know why the screen is smaller than they left it.
+
+The live window losing its last row is not reachable. The prompt cannot be
+reached at all.
+
+## What this leaves open
+
+Nothing. Every region on the current screen has a place in the ladder.
+
+The pane bar would have sat below the bars had it stayed, and its place in the
+ladder is recorded by its absence rather than settled.
+
+## Alternatives considered
+
+Indicators last. Rejected. A reader told `[scrollback]` is losing a row while
+the Provider and Model they came to look at keep theirs has been told the wrong
+thing about what matters.
+
+Bars emptying one field at a time with no floor. Rejected, because a field's
+presence would then depend on the exact width, and a resize that gains one
+column would bring back the field a reader had stopped expecting.
+
+The live window shed last of everything including the prompt. Rejected. The
+prompt was named as held by the reader and the window as yielding last of the
+rest, and putting the window below the prompt inverts the second without being
+asked to.
+
+## Notes
+
+Nothing in the tree has changed. The frame in `internal/tui` is being replaced
+and this record describes no code.
+
+The pane zero broker direction, in section 16 of
+`distributed-llm-system-scope-2026-10-05.txt` and in
+`orcli-broker-resume-notes.md`, makes the pane bar's withdrawal part of a larger
+move rather than a local one. It is recorded in `ANSWERS.md` and is not
+superseded by this record.

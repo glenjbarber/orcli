@@ -1,0 +1,81 @@
+# 0000036 A plain, append-only log beside the session survives a crash
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 22 in `QUESTIONS.md`
+
+## Context
+
+Question 22 asked what survives a crash and where it is written, and named
+the reason a new answer was needed: autosave already writes after a clean
+turn and after an idle period, and a crash does not wait for either, so the
+two are different cases. A crash between two autosave checkpoints loses
+whatever arrived in that gap if nothing else is written.
+
+0000013 already located the session file, keyed on the slugified working
+directory with a `.latest` symlink beside it. 0000012 already rejected a
+transactional write per item for the message queue, on the reasoning that
+every queued message becoming a SQLite write puts a cost on the path that
+runs most often, for a guarantee a cheaper mechanism gives as well.
+
+## Decision
+
+**What survives a crash is every row as it arrives**, not only what the
+last autosave checkpoint captured. Recovery reaches up through the last row
+actually received, not back to the last clean turn or idle period.
+
+**It is written to a plain, append-only file, one per session, flushed
+after every row.** This file is not the SQLite store autosave already
+writes to. It sits beside the session file, in the same directory 0000013
+already locates by the slugified working directory.
+
+## Reasoning
+
+The same cost 0000012 weighed for the queue applies here: a transactional
+write to SQLite for every row arriving during a live turn puts the highest-
+frequency path in this design behind a write that a flat append-only file
+achieves more cheaply, for the same durability a reader asking "what has
+this session received" actually needs. The row is not structured state
+needing a schema; it is a log line needing to exist on disk before the next
+one is written over it by a crash.
+
+Placing it beside the session file rather than inventing a new location
+keeps recovery a two-source read rather than a new lookup: the SQLite
+session for whatever the last autosave captured, the plain log beside it
+for anything since.
+
+## Consequences
+
+Recovering from a crash means reading two things rather than one: the
+autosaved session state, and the plain log's rows written after it. Nothing
+here builds that recovery path; this record settles what is written and
+where, not how it is replayed.
+
+The plain log grows for the life of a session and is not itself
+deduplicated or compacted by this record, the same open shape 0000030 left for
+the permissions ledger before 0000031 settled it. Whether this log gets a
+comparable compaction pass is not decided here.
+
+## Alternatives considered
+
+Writing every row to the SQLite store directly, matching autosave's own
+mechanism. Rejected, on the same reasoning 0000012 already gave for the queue:
+it is the more expensive path for the case that runs most often.
+
+Relying on autosave's existing idle-period checkpoint to narrow the gap
+instead of writing a separate log. Rejected: an idle period still leaves a
+gap during a long, continuously-active turn, which is exactly the case a
+crash is likeliest to hit.
+
+## What this leaves open
+
+How a crash recovery actually replays the plain log against the last
+autosaved state. Whether the plain log is ever compacted, the way 0000031
+compacts the permissions ledger. Neither is asked by question 22 and
+neither is answered here.
+
+## Notes
+
+Nothing in the tree has changed. Autosave in the tree writes to the SQLite
+store already; the plain per-session log this record describes does not
+exist there.

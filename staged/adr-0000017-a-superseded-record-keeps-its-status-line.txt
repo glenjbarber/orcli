@@ -1,0 +1,100 @@
+# 0000017 A superseded record keeps its status line
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles how a record says it has been replaced
+
+## Context
+
+The records under `staged/` are numbered so a later one can supersede an
+earlier one by name, and `adr-index.txt` carried the relation in a column and
+in a section. The records themselves carried only `- Status: accepted` and
+`- Supersedes: 0000001, in the part where...`, so a reader who had one superseded
+file and not the index had to know to go and look for the replacement.
+
+0000008 and 0000009 are both superseded by 0000010 and neither said so on its own
+header. 0000001 and 0000002 are both superseded in the frame part, and 0000007 is
+superseded in the arrangement while its session-per-pane part survives.
+
+The word for the state existed in the index's prose and in nothing else.
+
+## Decision
+
+**Four words, in this order of strength: `accepted`, `proposed`,
+`SUPERCEDED`, `rejected`.**
+
+**`SUPERCEDED` goes on the status line of the record that was replaced**, in
+the header, capitalised because it is a state and not a sentence, beside the
+name of what replaced it:
+
+```
+- Status: accepted, and SUPERCEDED by 0000010
+```
+
+**`SUPERCEDES` is what the header of the replacing record already carries**,
+under its own `Supersedes` line, naming the record and the part of it. The two
+lines are read together, so a reader holding either file learns the other
+without going to the index.
+
+**A superseded record is read to find what was replaced, not to find what to
+build.** The file is kept and is not edited. What it says is what was decided
+at the time, and the thing worth keeping is the replaced alternative rather
+than a version that agrees with the current code.
+
+**A record that narrows, extends or corrects an earlier one without replacing
+it is not a supersession.** 0000011 fills a gap 0000010 left, and 0000012 to 0000016 answer
+questions 0000007 and 0000010 left open. All are `accepted`, and each names what it
+extends.
+
+**A record is superseded when its decision is replaced, not when the code it
+described is later rebuilt.** 0000003 and 0000004 describe the connection probe and
+the model choice, both of which are in the tree and unaffected by the
+redesign, so both are `accepted` and neither is `SUPERCEDED`.
+
+## Consequences
+
+A reader who opens a superseded record and does not read past the header knows
+before the prose that the prose is not what to build. The alternative is a
+record that reads as current until its context is a third of the way down, and
+a reader who stops early acts on a decision that was replaced.
+
+The vocabulary has four words and one of them is unused. `rejected` has no
+records, because a decision not taken belongs in `QUESTIONS.md` and then in
+`ANSWERS.md`, and a record is written for what was decided rather than for what
+was passed over. The word is in the vocabulary so that a future record has a
+place to say it, and the fact that it has no members today is not a gap.
+
+The index keeps its column and its section, and now duplicates what the
+headers say. That is a duplication rather than a second source of truth: the
+index is the view across all of them and the header is the one fact a reader
+gets from a file alone.
+
+## What this leaves open
+
+Nothing.
+
+## Alternatives considered
+
+A `SUPERSEDED` marker in the filename rather than the header. Rejected. A
+renamed file breaks every link to it, and the index, the design documents and
+`SAVED.md` all refer to records by path.
+
+Rewriting a superseded record to agree with its replacement. Rejected, and it
+is the rule the index already states. A record that is edited to agree with
+the code is no longer a record of what was decided.
+
+Deleting a superseded record. Rejected for the same reason. The rejected
+alternative is the thing worth keeping, and 0000005, 0000006, 0000008 and 0000009 all exist
+because their replacements were taken.
+
+The status as a fifth `Merged`-style enumerated field. Rejected. The `Merged`
+field in the ledger is six values because the state is genuinely ambiguous and a
+pair of booleans cannot hold it. A record is either current or replaced, and one
+word says which.
+
+## Notes
+
+Nothing in the tree has changed. This is a convention over files that are not
+committed, and the four records it changes are in `staged/`, which is ignored.
+The status lines of 0000001, 0000002, 0000007, 0000008 and 0000009 are the ones that carry the
+word, and they are edited to say so.

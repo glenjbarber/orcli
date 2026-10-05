@@ -9,10 +9,10 @@ by name in the commit that fixes it.
 key, no viewport, no queue and no restore. What follows is a design, and the
 sections marked open are decisions that have not been taken.
 
-The decisions behind it are the records under `staged/`. 0001 through 0005
+The decisions behind it are the records under `staged/`. 0000001 through 0000005
 describe the frame that is being replaced and two behaviours in the tree that
-stand. 0006 through 0011 are the interface being designed, and 0010 is the
-API document with 0011 beside it.
+stand. 0000006 through 0000011 are the interface being designed, and 0000010 is the
+API document with 0000011 beside it.
 
 **`AGENTS.md` is read by default,** and no file in the source directs a reader
 to `.orcli.md` any more.
@@ -346,11 +346,11 @@ one-off with no pane.
 ## 17. External library
 
 The interface is to be built with an external library. `tview` is the one
-proposed, and [0005](staged/adr-0005-consider-tview.txt) records what it would
+proposed, and [0000005](staged/adr-0000005-consider-tview.txt) records what it would
 replace and what it would cost.
 
-The line counts in 0005 measure the frame this redesign replaces rather than a
-plan. Two questions in 0005 are still open and both are checkable before
+The line counts in 0000005 measure the frame this redesign replaces rather than a
+plan. Two questions in 0000005 are still open and both are checkable before
 anything is written: what the byte-level tests become, and whether `bmake
 crossbuild` still passes for every target with no cgo.
 

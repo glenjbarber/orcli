@@ -1,0 +1,82 @@
+# 0000033 A pane defaults to ask, unless begun from another pane
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 19 in `QUESTIONS.md`, using the
+  inheritance 0000032 already describes for a pane created by /begin
+
+## Context
+
+Question 19 asked what a pane defaults to and what escalating from a pane
+changes, and named the reason both are requirements: the reader asked to be
+reminded of the default and the escalation path at startup. The tree's
+existing session-wide mode, `ask`, `allow`, or `deny` in
+`internal/config/approval.go`, is set once per session and is not what a
+per-pane, escalatable permission is.
+
+0000032, settled since this question was first asked, gives a new pane created
+by `/begin` a seeded permissions ledger copied from the pane that forked it,
+rather than nothing. An ordinary new pane, not created by `/begin`, has no
+such source to copy from.
+
+## Decision
+
+**An ordinary new pane defaults to `ask`.** Of the three values the tree's
+session-wide mode already uses, `ask` is the only one that presumes no
+trust, and a fresh pane has earned none yet.
+
+**A pane created by `/begin` does not default to `ask`.** It starts from
+the copied permissions ledger 0000032 already describes, seeded at the moment
+of the fork from whatever the calling pane held then.
+
+**Escalating from a pane changes only that pane's own ledger rows, from
+then on, regardless of how the pane was created.** It writes a new row under
+0000030's append-only rule for that pane's id; it does not reach the session-
+wide mode, and it does not reach any other pane, including the one it was
+begun from or any pane begun from it afterward.
+
+## Reasoning
+
+`ask` as the ordinary default is least-privilege: a pane with no history has
+nothing to be trusted on yet. `/begin` is the one case this design already
+gives a reason not to start there, since 0000032 settled that a task handed off
+under an escalated directory should not have to re-earn that escalation
+immediately. Making every other pane default to `ask` and only this one
+case differ needs no new reasoning beyond what 0000032 already gave.
+
+Escalating reaching only the pane's own rows is the same per-pane ownership
+already run through the queue, the prompt, and copy. It is also what keeps
+`/begin`'s copy from becoming a link: 0000032 was explicit that the two panes'
+ledgers are independent after the fork, and an escalation that reached
+backward or sideways would quietly undo that.
+
+## Consequences
+
+A reader who escalates pane 2 gets no benefit in pane 3, even for the same
+path, unless pane 3 was begun from pane 2 at or after the moment of that
+escalation.
+
+A pane begun from another before an escalation was made in the source pane
+does not receive it retroactively; the copy is taken once, at the moment of
+the fork, and nothing afterward flows across.
+
+## Alternatives considered
+
+Every pane defaulting to `ask`, including one created by `/begin`, treating
+the fork as carrying no permission context. Rejected: it contradicts 0000032,
+which already settled that `/begin` copies permissions specifically so a
+handed-off task does not re-earn an escalation it already had.
+
+Escalating in one pane reaching another it was begun from or that was begun
+from it, on the reasoning that they share a task. Rejected: 0000032 already
+ruled this out for the fork itself, and nothing argues for it being true
+afterward when it was not true at the moment of the fork.
+
+## What this leaves open
+
+Nothing from question 19 that 0000032 had not already settled.
+
+## Notes
+
+Nothing in the tree has changed. There is no pane set and no permissions
+ledger in the tree.

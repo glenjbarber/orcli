@@ -1,0 +1,81 @@
+# 0000035 A shell-looking line is one PATH resolves, and the exception is a one-shot flag
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 21 in `QUESTIONS.md`
+
+## Context
+
+Question 21 asked two things: what makes a line a shell-looking no-op, and
+what "directly in response to a question from the model" means as the one
+exception to it. It named the first as a rule about text and the second as
+a judgement about the conversation, and said the exception belongs to the
+introductory setup rather than to the input layer.
+
+`AGENTS.md` already reads `PATH` for one purpose: the shell tool resolves a
+permitted program by bare name against it. That lookup already exists and
+already answers the question this record was going to need a new heuristic
+for.
+
+## Decision
+
+**A line is shell-looking if its first whitespace-delimited token resolves
+to an executable via the same PATH lookup the shell tool already uses.**
+`ls`, `pwd`, and `cat` resolve. An ordinary typed sentence does not, because
+its first word is not an executable name.
+
+**A shell-looking line is a no-op**, unless the exception below applies.
+
+**The exception is a one-shot flag, not a second text rule.** If the
+model's immediately preceding message ends with a question mark, the next
+line is let through as real input even if it is shell-looking. The flag is
+consumed by that next line, whatever it is, and then clears. It is not
+re-armed by anything except another question-ending model message, and it
+does not persist past the one line it was set for.
+
+## Reasoning
+
+Reusing the PATH lookup needs no new heuristic and no maintained list of
+shell command names; it asks the same question the shell tool already
+answers for an unrelated reason, which this record borrows rather than
+reimplements.
+
+The exception is a judgement about the conversation, as the question put
+it, not about the text of the line itself, so it is modeled as a flag set
+by the previous turn rather than as a second pattern the line has to match.
+Making it one-shot, consumed by exactly the next line, keeps "directly in
+response" literal: a reader who waits past that one line and types
+something else loses the exception rather than carrying it indefinitely.
+
+## Consequences
+
+A reader who types `ls` immediately after the model asks a question ending
+in `?` gets it sent, whether or not it answers that question. The flag does
+not check whether the line is actually an answer, only whether it is the
+very next one.
+
+A false negative is possible if the reader's first word happens to name an
+executable that exists on their machine's PATH for an unrelated reason;
+that line is swallowed as shell-looking even though it was not meant as a
+command. This is the same shape of cost the question already accepted by
+calling the rule one about text.
+
+## Alternatives considered
+
+A maintained list of shell command names. Rejected: PATH resolution already
+answers the same question more precisely, for any program actually
+reachable on the machine rather than a list that would drift from it.
+
+A flag that persists until the reader sends something, rather than being
+consumed by exactly the next line regardless of content. Rejected: it
+weakens "directly" into "eventually," which is a different rule from the one
+the question asked for.
+
+## What this leaves open
+
+Nothing from question 21.
+
+## Notes
+
+Nothing in the tree has changed. There is no shell-looking check and no
+one-shot flag in the tree.

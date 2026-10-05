@@ -1,0 +1,78 @@
+# 0000037 The pane bar sheds third, after the indicators and before the bar fields
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 25 in `QUESTIONS.md`, filling the
+  gap 0000016 left and 0000019 reopened. It does not rewrite 0000016
+
+## Context
+
+0000016 settled a shed ladder for six regions, after the pane bar had been
+withdrawn, and named the pane bar's place in that ladder as recorded by its
+absence rather than settled. 0000019 restored the pane bar and reopened exactly
+that gap as question 25.
+
+0000016's ladder, unchanged: the scrollback and mouse indicators go first, then
+the fields of each bar from the right, then a bar drops whole at one field
+left, then the live window, which keeps a floor of one row. The prompt is
+never dropped.
+
+## Decision
+
+**The pane bar sheds third: after the two indicators, before either status
+bar sheds a field.** The ladder, with the pane bar's place filled in:
+
+1. The scrollback indicator and the mouse indicator.
+2. The pane bar, whole.
+3. The fields of each bar, from the right, as 0000016 already gives them.
+4. A bar, whole, at one field left.
+5. The live window, floor of one row.
+
+The prompt is still never dropped, drawn last, as 0000016 already settled.
+
+## Reasoning
+
+The pane bar reports navigation state, which pane exists and which is
+focused, rather than the reader's present activity, the same test 0000016 used
+to shed the indicators first. That argues for shedding it early, alongside
+them.
+
+It does not go alongside them, though, because losing it costs more than
+losing either indicator. `[scrollback]` and the mouse indicator explain a
+mode; the pane bar is the only place a reader sees what panes exist at all,
+and 0000020 already settled that it does not scroll or fold, so once it is
+gone a reader also loses whatever its truncation was still showing. That is
+worth one more step of the ladder than the indicators get, but it still goes
+ahead of the status bars, which carry live information, Provider, Model,
+Status, that a reader mid-task is more likely to need than a list of pane
+numbers.
+
+## Consequences
+
+A reader at a narrow terminal loses the pane bar before either status bar
+sheds a single field. Switching panes by number, or finding the focused one,
+has to go by memory or by `/pane next` and `/pane previous` stepping blind
+once the bar is gone, the same gap 0000020 and question 26 already named for
+truncation.
+
+## Alternatives considered
+
+Shedding the pane bar alongside the indicators, as a third item in the same
+step rather than its own step. Rejected: it is cheaper to lose than the
+status bars but not as cheap as an indicator, since an indicator reports a
+mode and the pane bar is the only place pane identity is shown at all.
+
+Shedding the pane bar after the status bars begin losing fields. Rejected:
+the status bars carry the reader's present activity, which 0000016 already
+held back for the live window and the prompt on the same reasoning.
+
+## What this leaves open
+
+Question 26, how a reader reaches a pane the bar has already truncated off
+the edge, which is unaffected by where the bar sits in this ladder and is
+not reopened here.
+
+## Notes
+
+Nothing in the tree has changed. There is no shed ladder and no pane bar in
+the tree.

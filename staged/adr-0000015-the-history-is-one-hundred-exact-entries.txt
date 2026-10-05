@@ -1,0 +1,89 @@
+# 0000015 The history is one hundred exact entries
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It answers a question 0000011 left open
+
+## Context
+
+0000011 settled the editing keys and the history, and left four things open
+about the history: how many entries are kept, whether an entry longer than
+some length is shortened or skipped, whether the history is saved with the
+session, and whether a bare command word is remembered at all.
+
+The reader answered the first and said the persistence half can be carried by
+two commands that exist or are named for it: `/autosave` and `/autocompact`.
+`/autosave` is in the command table in the tree and writes a session after a
+clean turn and after an idle period. `/autocompact` is not in the tree.
+
+## Decision
+
+**One hundred entries.** The hundred most recent, and the oldest falls off.
+
+**Entries are kept exact and nothing is shortened.** A pasted paragraph is a
+history entry at its full length, because a reader reaching for what they
+pasted wants what they pasted.
+
+**Dedup is as 0000011 settled it.** A repeated entry is kept once at the position
+of its most recent occurrence, the history is ordered most recent first, and
+the comparison is on the exact text with no trimming.
+
+**A bare command word is remembered like any other line.** A reader who types
+`/pane 1` has it offered back, and a reader who does not want that uses
+`Ctrl+U` or walks past it.
+
+**The history is saved with the session and restored with it,** so a restored
+session has the history the original had. What that costs, and when it is
+written, is the work of `/autosave`.
+
+**`/autocompact` bounds it.** It is the command that trims a long history, and
+a reader who wants fewer entries asks for them rather than having the number
+changed under them.
+
+## Consequences
+
+A hundred entries at full length is a real amount of text, and 0000011 said a
+pasted paragraph makes Up slower to walk past. The bound is on count rather
+than on length, so the cost is bounded by the reader pasting rather than by
+the count.
+
+Walking to the end of a hundred entries is a reader who has pressed Up a
+hundred times, and that is not something to guard against.
+
+The history is per session. A pane restored from disk gets the history that
+was saved with it.
+
+Keeping a bare command in the history means the history is a record of what
+was typed rather than of what was asked, which is the decision 0000011 took and
+this confirms rather than changes.
+
+## What this leaves open
+
+`/autocompact` is named here and does not exist. What it trims, what it
+reports, and whether it can refuse are not decided, and nothing above depends
+on the answer.
+
+Whether the history is written on every autosave or on a slower cadence than
+the conversation is the work of `/autosave` and is not decided here.
+
+## Alternatives considered
+
+Fifty entries, with an entry over four hundred columns kept whole anyway.
+Rejected. The cap on length was the part worth having and it turned out to
+mean nothing, since the rule it replaced already keeps entries whole. Fifty
+entries is a bound with no reason behind it.
+
+No bound at all. Rejected. A session left open for a week accumulates whatever
+the reader typed, and the memory is unbounded for a list nobody reads past the
+top of.
+
+Keeping the history out of the save. Rejected. A reader who restores a
+conversation and cannot reach what they asked last week has been given a
+transcript rather than a conversation, which is the outcome 0000010 named as the
+reason context has to survive.
+
+## Notes
+
+Nothing in the tree has changed. The line editor in `internal/tui` has its own
+history behaviour for a frame that is being replaced, and neither
+`/autosave` nor `/autocompact` is built.

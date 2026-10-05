@@ -1,17 +1,19 @@
-# 0008 The screen is a live view, a status window and a pane view
+# 0000008 The screen is a live view, a status window and a pane view
 
-- Status: accepted. Three questions it raises are open and are listed at the
-  end
+- Status: accepted, and SUPERCEDED by 0000010. It stands as a record of a decision
+  that was taken and then replaced, and is read to find what was replaced rather
+  than what to build. Three questions it raises were open: the shed order is
+  answered by 0000016, the pane bar is gone, and what rings it has no pane to ring
 - Date: 2026-10-05
-- Supersedes: 0001, in the part where it settled one frame for one
-  conversation, and 0007, in the part where it settled a multiplexer of
-  side-by-side panes with a global status line. The parts of 0007 that survive
+- Supersedes: 0000001, in the part where it settled one frame for one
+  conversation, and 0000007, in the part where it settled a multiplexer of
+  side-by-side panes with a global status line. The parts of 0000007 that survive
   are named below
 
 ## Context
 
-0001 settled a program that owns the whole screen and draws every row of it
-for one conversation. 0007 replaced that with a multiplexer: a session per
+0000001 settled a program that owns the whole screen and draws every row of it
+for one conversation. 0000007 replaced that with a multiplexer: a session per
 pane, pane 0 as `tty0`, `Ctrl+B` as the prefix, and a global status line,
 leaving the arrangement of the panes to be designed later.
 
@@ -27,7 +29,7 @@ view, finds a numbered block, copies it, and pastes it back, so the parts of
 the screen that are read at different moments are stacked rather than tiled.
 
 Two other records are affected. `staged/status-interrupt.txt` is superseded by
-0006 and is named there. The frame that 0001 settled is gone, and 0001 is
+0000006 and is named there. The frame that 0000001 settled is gone, and 0000001 is
 superseded rather than corrected, since a record edited to agree with a
 replacement is not a record.
 
@@ -59,7 +61,7 @@ switching the reader asked to be reminded of, and it is written into the
 records here so it is not rediscovered.
 
 **A pane is still a session and pane 0 is still the main session.** That part
-of 0007 stands. What changes is that panes are listed rather than tiled, so a
+of 0000007 stands. What changes is that panes are listed rather than tiled, so a
 pane is reached by naming it rather than by moving a boundary.
 
 **`/paste` sends the reader's most recent copy back to the model.** The reader
@@ -119,4 +121,10 @@ prompt that exists to be dismissed.
 ## Notes
 
 Nothing in the tree has changed in writing this. The frame in the tree is the
-one 0001 settled, and it is superseded by this record rather than repaired.
+one 0000001 settled, and it is superseded by this record rather than repaired.
+
+The pane view is the part that did not survive. The reader withdrew the pane bar
+and section 16 of `distributed-llm-system-scope-2026-10-05.txt` supersedes the
+requirement for separate visible panes, so the third part has no region on the
+current screen. The bell question it raised goes with it. What 0000016 settles about
+the shed order applies to the six regions that are left.

@@ -1,0 +1,59 @@
+# 0000019 The pane bar returns, and the gap it leaves in the shed ladder is reopened
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: the withdrawal recorded in `WORKER.txt` and in the note on 0000016
+  in `ANSWERS.md`. It does not supersede 0000016 itself, which stands as a record
+  of the shed order decided while the pane bar was out
+
+## Context
+
+The pane bar was withdrawn from the screen while the documentation was being
+updated. `ANSWERS.md`'s note on 0000016 and `WORKER.txt` both recorded it as
+gone, leaving six regions: live window, scrollback indicator, mouse indicator,
+status bar 1, status bar 2, prompt. 0000016 settled the shed order for those six
+and said so explicitly: "a question about a region the layout no longer has
+cannot be closed by deciding its shed order," and named the pane bar's place
+in the ladder as recorded by its absence rather than settled.
+
+`SAVED.md`'s seven-region screen, written earlier, was never changed to
+remove the pane bar. Only `WORKER.txt` and the note on 0000016 described it as
+gone, so the withdrawal was narrower than it read: one description of the
+screen had it all along.
+
+The reader has reconsidered and the pane bar is back.
+
+## Decision
+
+**The pane bar returns as a seventh region.** The screen is live window,
+scrollback indicator, mouse indicator, status bar 1, status bar 2, prompt,
+pane bar, in that order, matching `SAVED.md`.
+
+## Consequences
+
+**0000016's shed ladder has no place for the pane bar.** It settled the order
+for six regions and named the pane bar's place as unsettled rather than
+guessing at it. That gap is now live again rather than moot, and it is
+reopened as a question rather than answered here.
+
+`DESIGN.md` and `staged/adr-0000010-interface-api.txt`, which `ANSWERS.md`
+already recorded as drawing seven regions and behind the six-region
+documentation pass, are now ahead of nothing. The disagreement 0000016 named
+between itself and those two documents is closed by this record, from the
+other side: the seven they already drew is current again.
+
+## Alternatives considered
+
+None weighed here. This is a reversal of the earlier withdrawal rather than a
+new choice among arrangements for the bar; the arrangement itself is
+`SAVED.md`'s, unchanged throughout.
+
+## What this leaves open
+
+Where the pane bar sits in the shed ladder. Raised as a question rather than
+decided here, since 0000016 deliberately left it that way and this record is
+about the bar's return, not its place in a ladder built without it.
+
+## Notes
+
+Nothing in the tree has changed. There is no pane bar in the tree to add back.

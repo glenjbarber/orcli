@@ -1,0 +1,70 @@
+# 0000029 The thinking phrase set
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 17 in `QUESTIONS.md`
+
+## Context
+
+Question 17 named two phrases already settled, `thinking` and
+`No Segmentation Fault (no core dumped)`, and left the rest of the set open.
+`SAVED.md` ties the timer to an API update or seven seconds, whichever is
+shorter, which this record does not reopen.
+
+This is a flavour choice rather than a design tradeoff, and the reader asked
+for candidates rather than a reasoned derivation.
+
+## Decision
+
+**The thinking phrase set is twenty phrases.** The two already settled, plus
+eighteen more, ratified as a batch:
+
+```text
+thinking
+No Segmentation Fault (no core dumped)
+Rebasing reality
+Garbage collecting (mark and sweep)
+Resolving merge conflicts (with itself)
+No stack overflow (yet)
+Mutex acquired
+Reticulating splines
+Buffering wisdom
+DNS is not the problem (probably)
+Works on my machine (so far)
+Checking the man page
+Spinning up a goroutine
+404: Thought not found (retrying)
+Parsing the universe
+Hard at work (p < 0.05)
+sudo make me a sandwich (thinking first)
+cat /dev/brain
+Percolating
+Compiling thoughts (zero warnings)
+```
+
+## Reasoning
+
+None recorded beyond the reader's own taste. The phrases were generated to
+match the register of the two already settled, geeky and parenthetical, and
+accepted as a batch rather than weighed individually.
+
+## Consequences
+
+Which phrase shows at a given moment, and how the choice among twenty is
+made (random, cyclic, weighted), is not decided here and is listed below as
+open.
+
+## Alternatives considered
+
+None. This record does not reject any candidate; all eighteen offered were
+taken.
+
+## What this leaves open
+
+How a phrase is chosen each time the timer fires: in order, shuffled, or
+some other rule. Not asked by question 17 and not answered here.
+
+## Notes
+
+Nothing in the tree has changed. There is no thinking-phrase display in the
+tree.

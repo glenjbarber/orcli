@@ -1,18 +1,20 @@
-# 0007 The interface is a multiplexer of sessions
+# 0000007 The interface is a multiplexer of sessions
 
-- Status: accepted for the shape. The command set, the status line contents and
-  the clipboard path are open and are listed under what is still open
+- Status: accepted for the shape, and SUPERCEDED in the pane arrangement by
+  0000008 and then 0000010. A session per pane survives. Visible panes do not, and
+  the pane bar went with them. This stands as a record of a decision that was
+  taken and then replaced in part
 - Date: 2026-10-05
-- Supersedes: 0001, in the part where it settled that one program owns one
+- Supersedes: 0000001, in the part where it settled that one program owns one
   screen for one conversation
 
 ## Context
 
 The frame in the tree is a program that draws one screen for one conversation.
 Every row carries a status field and a log row beside it, the log scrolls upward
-through those rows, and the prompt is the last row drawn. 0001 settled that
+through those rows, and the prompt is the last row drawn. 0000001 settled that
 shape by removing the alternative of a footer with the log in a region above it,
-and 0002 settled what a row carries once the seam is gone.
+and 0000002 settled what a row carries once the seam is gone.
 
 The reader has now asked for the interface to be redesigned from the ground up,
 and named the arrangement: a terminal multiplexer. The main pane is `tty0`,
@@ -26,7 +28,7 @@ There is one property of the existing shape that survives, and it is recorded
 here because dropping it by accident would be the mistake. The reader's own
 scrollback is not the transcript. A multiplexer that used the terminal's own
 scrollback would put every pane's history in one buffer that no pane owns,
-which is the seam 0001 removed and would be put back.
+which is the seam 0000001 removed and would be put back.
 
 ## Decision
 
@@ -78,7 +80,7 @@ in a model prompt. Whether the prefix is escapable is open.
 
 The program no longer has the terminal's scrollback to fall back on, so a
 terminal with no wheel has to be scrolled by keys the program reads. That cost
-was named in 0005 against the tview proposal and it is paid again here, and it
+was named in 0000005 against the tview proposal and it is paid again here, and it
 is paid deliberately: a multiplexer without a wheel is not a multiplexer.
 
 A global status line has to name the focused pane, which is a field whose only
@@ -116,11 +118,20 @@ the reader asked a question of.
 ## Notes
 
 Nothing in the tree has changed in writing this. There is no branch carrying a
-pane, a prefix or a viewport, and the frame in the tree is still the one 0001
+pane, a prefix or a viewport, and the frame in the tree is still the one 0000001
 settled.
 
-0005 proposed a library for this and proposed a custom primitive rather than
+0000005 proposed a library for this and proposed a custom primitive rather than
 panes. This record accepts the multiplexer shape, which is a different
-arrangement from the one 0005 weighed, and the assessment in 0005 about what
+arrangement from the one 0000005 weighed, and the assessment in 0000005 about what
 would be rewritten is measured against a frame this one replaces wholesale.
-The line counts in 0005 describe the old frame and are not a plan.
+The line counts in 0000005 describe the old frame and are not a plan.
+
+**What later replaced the pane arrangement.** 0000008 put the panes in a list
+rather than a tiling, 0000010 made the whole screen the API, and the reader then
+withdrew the pane bar and the visible panes with it. Section 16 of
+`distributed-llm-system-scope-2026-10-05.txt` supersedes the requirement for
+separate visible panes entirely: pane 0 stays as a logical broker role,
+independent requests keep their identities, and everything runs on one screen.
+A session per pane is the part of this record that survives, and the pane bar
+is gone.

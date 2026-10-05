@@ -1,4 +1,4 @@
-# 0003 The first request is the connection test
+# 0000003 The first request is the connection test
 
 - Status: accepted
 - Date: 2026-10-05
@@ -70,4 +70,4 @@ meet.
 The preference that gets written is the model, and it is written without
 recording the model it replaced. A first request is a probe rather than a move,
 and treating it as one would send a reader back to a model they never chose. See
-0004.
+0000004.

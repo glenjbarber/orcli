@@ -1,9 +1,9 @@
-# 0005 Consider tview for the interface
+# 0000005 Consider tview for the interface
 
 - Status: proposed. Two questions answered, two still open, and nothing in the
   tree has changed
 - Date: 2026-10-05
-- Supersedes: nothing. If it is accepted it replaces part of what 0001 settled,
+- Supersedes: nothing. If it is accepted it replaces part of what 0000001 settled,
   and that relationship is stated below rather than left implicit
 
 ## Context
@@ -94,7 +94,7 @@ The reader chose the third of the three. The frame is a custom primitive
 implementing `Draw`, which is the frame as it is today with the library's screen
 underneath it.
 
-This keeps the arrangement 0001 settled and replaces the plumbing, which is what
+This keeps the arrangement 0000001 settled and replaces the plumbing, which is what
 the gate was about. It is also the least saving of the three, and that was said
 in the earlier draft before the choice was made, so the cost stands as stated:
 1,647 lines are rewritten and the custom primitive is not shorter than what it
@@ -107,7 +107,7 @@ Rejected, and why, so a reader does not have to reconstruct it:
 twenty layout rows, each a field and a log cell   most saving, most
                                                        rearrangement
 a text pane and a field pane side by side          undoes the per-row pairing
-                                                       0001 settled
+                                                       0000001 settled
 ```
 
 ## The receive queue, which is what makes the grid viable
@@ -164,7 +164,7 @@ real and worth holding.
 **Terminals that behave well today stop doing so.** The primary screen with
 native scrollback is a good default on a terminal with no wheel, since the
 reader can scroll with the keyboard and the history is theirs. A viewport the
-program owns is not that. 0001 already gave the transcript up; this makes the
+program owns is not that. 0000001 already gave the transcript up; this makes the
 giving-up felt on a terminal with no mouse.
 
 **Cross-compilation.** The build compiles for eight platforms with no cgo. A
@@ -221,5 +221,5 @@ least saving" before the receive queue was raised, and that assessment is
 qualified above for the same reason.
 
 Nothing about the tree has been changed in writing it. There is no branch, no
-commit, and no worktree for it, and the frame in the tree is the one 0001
+commit, and no worktree for it, and the frame in the tree is the one 0000001
 settled.

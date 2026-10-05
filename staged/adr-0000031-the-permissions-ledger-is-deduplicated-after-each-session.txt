@@ -1,0 +1,75 @@
+# 0000031 The permissions ledger is deduplicated after each session, keeping the latest verdict per pane and path
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles the growth question 0000030 left open; it
+  does not reopen 0000030's own decisions
+
+## Context
+
+0000030 settled the permissions table as an append-only ledger: every grant or
+revocation is a new row, and the active verdict for a `(pane, path)` pair is
+whichever row for it carries the latest moment. It left open whether the
+table's growth is ever bounded.
+
+The reader has now settled that question: the table is deduplicated, but not
+continuously. It happens after a session ends.
+
+## Decision
+
+**The ledger is deduplicated after each session.** For every `(pane, path)`
+pair that has more than one row, every row but the one with the latest
+moment is dropped. The one kept is the one that was already authoritative
+under 0000030's rule for reading the current verdict, so the data the ledger
+answers with does not change; only the rows that could never again be the
+answer are removed.
+
+**Deduplication happens once, at the end of the session, not on every
+write.** A row written mid-session sits beside whatever it supersedes until
+the session closes.
+
+## Reasoning
+
+0000030 chose append-only specifically so the table's own history was never
+thrown away mid-use, the same way a decision record or a work ledger entry
+in this project never is. Deduplicating after the session rather than on
+every write keeps that property for the one thing it was for: a reader
+inspecting the ledger mid-session sees every toggle that happened in it. The
+history that is discarded is discarded once the session that produced it is
+over and nothing is reading it as a live record of what happened during
+that session any longer.
+
+Deduplicating to the latest row per pair rather than to some other rule
+needs no new decision: it is exactly the row 0000030 already defined as
+authoritative, so compaction removes only rows that were never going to be
+read again under the rule already in force.
+
+## Consequences
+
+A ledger inspected while a session is running still shows every toggle made
+in it; the growth 0000030 left unbounded is only ever trimmed after the fact,
+not prevented during.
+
+A crash before a session's end-of-session deduplication runs leaves that
+session's full, undeduplicated history in the table. That is not a loss,
+since nothing the deduplication removes was ever anything but superseded
+rows; a crash simply means the trim for that session did not happen, and the
+table has whatever it would have had minus the one cleanup pass.
+
+## Alternatives considered
+
+Deduplicating on every write, so the table never holds more than one row per
+`(pane, path)` at a time. Rejected: it would undo part of what 0000030 chose
+append-only for, since a mid-session reader would then see only the current
+state and not the history of toggles made so far.
+
+## What this leaves open
+
+What counts as the end of a session for this purpose, and whether a crash
+that skips the deduplication pass is ever caught up later. Not asked here
+and not answered here.
+
+## Notes
+
+Nothing in the tree has changed. There is no permissions database and no
+session boundary to deduplicate at in the tree.

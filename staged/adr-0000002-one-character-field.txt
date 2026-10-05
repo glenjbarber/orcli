@@ -1,6 +1,7 @@
-# 0002 A status field is one character
+# 0000002 A status field is one character
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by 0000010. It stands as a record of a decision
+  that was taken and then replaced
 - Date: 2026-10-05
 - Supersedes: bars of named fields, with whole fields dropped when the bar was too
   narrow, in an order by how much a reader loses by losing each
@@ -58,3 +59,10 @@ needing an abbreviation that is its own vocabulary.
 The floor of one is what makes the overflow total rather than partial. A larger
 floor would reintroduce a width at which something is dropped, which is the thing
 this decision removes.
+
+The rule this record rejected is the one that came back. 0000016 puts the shed order
+back into the bars, with Verbosity falling off first, and a bar dropping whole at
+one field rather than emptying gradually. That is a different decision with a
+different reason, and 0000016 is the record of it. Read this for why a field that
+cannot say what it means in one character cannot be drawn at all, and not for the
+screen.

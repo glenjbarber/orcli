@@ -1,0 +1,66 @@
+# 0000020 The pane bar truncates rather than scrolling or folding
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 7 in `QUESTIONS.md`
+
+## Context
+
+Question 7 asked whether the pane bar scrolls or folds when there are more
+panes than it has columns for, and named the risk plainly: a reader with more
+panes than the bar can show is a reader who cannot see the pane they want.
+
+The reader answered that the bar does neither. That settles what it does not
+do without yet saying what happens in the case the question was about, so a
+second question followed: what does happen when the bar is too narrow for the
+panes open. The reader's answer there is that it truncates silently.
+
+## Decision
+
+**The pane bar neither scrolls nor folds.** It has no independent scroll
+state and no windowing around the focused pane.
+
+**It truncates.** When there are more panes than the bar has columns for, it
+shows as many pane numbers as fit, left to right, and nothing marks that more
+exist past the edge.
+
+## Reasoning
+
+No reasoning is recorded for why truncation was chosen over scrolling,
+folding, or wrapping to a second row. The reader ratified the overflow
+behaviour directly rather than this record arguing for it, and that is named
+here rather than a justification being supplied after the fact.
+
+## Consequences
+
+**A pane past the edge is invisible in the bar**, including the focused one
+if focus moves there by `/pane next`, `/pane previous`, or `/pane N`. The bar
+gives no indicator, so a reader cannot tell from the bar alone that panes
+exist beyond what it shows.
+
+**Switching to a pane does not bring it into view in the bar.** Since the bar
+does not fold around focus, moving focus to a truncated pane changes which
+pane is live without changing what the bar displays.
+
+**The reader finds an off-bar pane some other way**, such as `/pane next`
+stepping to it blind or a count kept elsewhere. Nothing in this record
+provides that way; it is a consequence left for whatever reads pane state
+next.
+
+## Alternatives considered
+
+Folding the bar around the focused pane, so the current pane is always
+visible within a bounded window. Rejected by the reader without a reason
+recorded.
+
+Wrapping the bar to a second terminal row when panes exceed one row's width.
+Not raised as a choice; truncation was given directly.
+
+## What this leaves open
+
+How a reader finds a pane that the bar has truncated off the edge. Not asked
+by question 7 and not answered here.
+
+## Notes
+
+Nothing in the tree has changed. There is no pane bar in the tree.

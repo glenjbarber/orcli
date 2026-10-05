@@ -1,0 +1,85 @@
+# 0000013 The latest session is keyed on the directory
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It answers a question 0000010 left open
+
+## Context
+
+0000010 settled `/restore`: it loads the last-known session, and the latest
+session for an identifier is a symlink named `%SOME_IDENTIFIER%.latest`
+pointing at the session file it names. That is what makes a restore a read of
+one path rather than a search for the newest file, and it is why the record
+says the restore does not depend on the clock.
+
+It left the identifier open. The identifier stands for whatever names the
+subject of a session: the directory, the model, the reader, or something else.
+The reader needs to answer it before anything can be written, since the name is
+the name of a file on disk.
+
+`internal/saved` already names a save for the user, the directory and the
+moment, and keeps a symlink beside them pointing at the newest for that
+directory. So the tree has an answer to a neighbouring question already.
+
+## Decision
+
+**The identifier is the session's working directory, slugified.** A reader in
+one project gets one latest session for that project, and a reader working in
+two projects gets two.
+
+**The symlink is named `<slug>.latest`** and points at the session file it
+names, beside that file rather than in a directory of its own.
+
+**A filename cannot carry a separator, so the slug replaces rather than
+strips.** `internal/saved` already does this for autosave names and the reason
+is recorded there: stripping would give two directories differing only in a
+non-ASCII character one name. A literal escape is doubled first, so no slug
+can be read as another.
+
+**A path over the name limit is shortened from the front and marked,** since
+the tail is the part a reader recognises.
+
+**A reader in a directory with no saved session has nothing to restore,** and
+`/restore` says so by name rather than opening an empty conversation.
+
+## Consequences
+
+A reader who works in one project gets the obvious thing: `/restore` is where
+they left off. A reader who works in three has to know which project they are
+in before they restore, which is a reasonable thing to know and is the reason
+the identifier is the directory rather than the reader.
+
+Two directories differing only in case do not collide, since a filesystem that
+is case-insensitive would not have held both anyway. Two differing only in a
+path separator do not collide, since a separator is escaped rather than
+stripped.
+
+The slug is derived rather than stored, so a reader who renames a directory
+loses the link to their last session there. That is a consequence of keying on
+the directory and is recorded rather than designed around, since a stored
+identifier would be a second thing to keep in step.
+
+A model change inside one directory does not move the latest session, so a
+reader who changes models and restores gets the conversation they had under
+the model they had it under. That is what a conversation is, and `/model last`
+moves them back.
+
+## Alternatives considered
+
+The model name as the identifier, so a reader gets one latest session per
+model. Rejected. A reader who changes models an hour into a project would lose
+the session they were in, and the change is a preference rather than a change
+of subject.
+
+The reader's own name, so there is exactly one latest session. Rejected. It
+gives a reader who works in two projects a single "latest", which is the case
+that made the identifier a question in the first place.
+
+The absolute path, used as a filename. Rejected for the reason any path used
+as a filename is rejected: it cannot be written, and this is one of the cases
+`internal/saved` already refuses to write.
+
+## Notes
+
+Nothing in the tree has changed. `internal/saved` has autosave naming, which
+this follows rather than replaces, and no `/restore` exists.

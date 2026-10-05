@@ -1,0 +1,59 @@
+# 0000038 /pane with no argument lists every open pane
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 26 in `QUESTIONS.md`
+
+## Context
+
+0000020 settled that the pane bar neither scrolls nor folds, and truncates
+silently when there are more panes than it has columns for, with nothing
+marking that more exist. That left open how a reader reaches a pane the bar
+is not showing.
+
+`/pane N` switches to pane N and `/pane next` / `/pane previous` step
+through panes, wrapping at both ends, already per `SAVED.md`. Neither of
+those needs the bar to show every pane: stepping is blind by nature, and
+switching by number only needs the reader to already know the number.
+
+## Decision
+
+**`/pane`, with no argument, lists every open pane number**, printed as a
+line in the live window. It does not touch the bar, and the bar's
+truncation from 0000020 is unaffected.
+
+## Reasoning
+
+The bar's job is a glanceable, bounded-width status line; the question
+"what panes exist" is an on-demand, unbounded answer. 0000020's truncation
+problem came from one region trying to do both at once. Giving `/pane` this
+job instead keeps the two separate rather than growing the bar to cover a
+case it was never sized for.
+
+`/pane next` and `/pane previous` already do not depend on seeing the bar,
+so the only real gap was a reader who has lost track entirely and wants the
+full set back. `/pane` with no argument is exactly that answer and nothing
+more.
+
+## Consequences
+
+A reader who cannot see a pane in the truncated bar now has one more
+keystroke to fall back on rather than none. This does not make the bar's
+truncation less lossy; it gives the reader an escape from it elsewhere.
+
+## Alternatives considered
+
+Making the bar itself scroll or fold to show every pane. Rejected already
+by 0000020 directly, and not reopened here.
+
+A dedicated command distinct from `/pane`, such as `/panes`. Not raised;
+`/pane` with no argument reads naturally as "tell me about the panes" and
+needs no second command name.
+
+## What this leaves open
+
+Nothing from question 26.
+
+## Notes
+
+Nothing in the tree has changed. There is no `/pane` command in the tree.

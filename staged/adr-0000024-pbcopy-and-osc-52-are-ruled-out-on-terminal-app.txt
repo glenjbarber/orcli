@@ -1,0 +1,86 @@
+# 0000024 pbcopy and OSC 52 are ruled out on Terminal.app; the clipboard path itself is not decided
+
+- Status: UNCONFIRMED
+- Date: 2026-10-05
+- Supersedes: nothing. It narrows question 12 in `QUESTIONS.md` without
+  closing it
+
+## Context
+
+Question 12 asked what the clipboard path is on macOS Terminal.app with
+Secure Keyboard Entry on. `QUESTIONS.md` already ruled out `pbcopy` without
+giving a reason, and named OSC 52 and `pbpaste` as the remaining candidates.
+
+Two things were checked rather than assumed.
+
+**Secure Keyboard Entry is unrelated to the clipboard.** It isolates
+keystrokes from accessibility and event-monitoring APIs while a Terminal
+window has focus. Nothing in how it works touches `NSPasteboard`, `pbcopy`,
+`pbpaste`, or an OSC 52 write. The question's own framing, naming Secure
+Keyboard Entry as part of what the clipboard path has to work around, does
+not hold up.
+
+**Terminal.app does not support OSC 52 at all.** This is not conditional on
+Secure Keyboard Entry or on anything else; the `can-i-use-terminal`
+compatibility matrix lists it as unsupported, unlike iTerm2, Kitty,
+Alacritty, WezTerm, and Windows Terminal, which all support it. `adr-0000005`,
+written for the frame being replaced, describes the tree's existing OSC 52
+write in `internal/clipboard` as meeting a gate that included Terminal.app
+with Secure Keyboard Entry on, but hedges the read half as "documented as
+something a terminal may ignore." Taken together with the compatibility
+matrix, that hedge was understating the case: the read half does not merely
+risk being ignored on Terminal.app, it is not implemented there.
+
+The reader separately ruled out `pbcopy` for a reason Secure Keyboard Entry
+does not supply: arbitrary writes to the OS pasteboard are not allowed. That
+rule is not specific to `pbcopy` as a mechanism; an OSC 52 write reaches the
+same place by a different route, and the reader wants a clipboard path
+without having yet decided what it is.
+
+## Decision
+
+**Ruled out:** `pbcopy`, and OSC 52 on Terminal.app specifically, as ways to
+write to the OS pasteboard.
+
+**Not decided:** what the clipboard path is. The reader wants one; nothing
+here is confirmed as it.
+
+## Reasoning
+
+`pbcopy` is ruled out by a standing rule against arbitrary pasteboard writes,
+not by anything Secure Keyboard Entry does. OSC 52 is ruled out on
+Terminal.app specifically because the terminal does not implement the read
+half, independent of any setting; it is not ruled out as a mechanism
+everywhere, only on this one terminal, where it cannot work regardless of
+policy.
+
+## Consequences
+
+The existing `internal/clipboard` package, 64 lines doing an OSC 52 write, is
+not corrected by this record. Whether it still has a place once a path is
+chosen is a question for whatever record settles that path, not this one.
+
+`/copy` and `/paste` as `SAVED.md` describes them, an in-process buffer sent
+back to the model, are unaffected either way: they do not touch the OS
+pasteboard and are a separate mechanism from whatever this question settles.
+
+## Alternatives considered
+
+None weighed for what the path should be; that is exactly what remains open.
+Two were weighed and rejected for ruling pbcopy and OSC 52 out: that Secure
+Keyboard Entry was the reason (it is not, checked above) and that OSC 52
+merely risked being ignored on Terminal.app rather than being absent there
+(checked against the compatibility matrix and found to be absent, not merely
+at risk).
+
+## What this leaves open
+
+What the clipboard path on macOS Terminal.app actually is. `pbpaste`, for
+reading rather than writing, is not ruled out by the standing rule as stated,
+since reading what is already on the pasteboard is not an addition to it,
+but whether that is the reader's intent is not confirmed either.
+
+## Notes
+
+Nothing in the tree has changed. The existing clipboard code in
+`internal/clipboard` is read here, not edited.

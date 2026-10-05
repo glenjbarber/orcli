@@ -1,12 +1,12 @@
-# 0011 The editing keys, and a history with no duplicates
+# 0000011 The editing keys, and a history with no duplicates
 
 - Status: accepted
 - Date: 2026-10-05
-- Supersedes: nothing. It fills a gap 0010 left, and 0010 refers here
+- Supersedes: nothing. It fills a gap 0000010 left, and 0000010 refers here
 
 ## Context
 
-0010 is the API document for the interface being built. It gives the screen,
+0000010 is the API document for the interface being built. It gives the screen,
 the commands, the prompt and the pane rules. It says nothing about the keys
 that edit a line, and that is a gap rather than an omission: a reader who
 cannot move the caret, erase a word or reach what they typed an hour ago is
@@ -14,7 +14,7 @@ not able to use the interface at all, so those keys belong to the same document
 as the commands they sit beside.
 
 The tree has a line editor at `internal/tui/line.go` and a key reader at
-`internal/tui/keys.go`. Both are built for the frame 0001 settled and neither
+`internal/tui/keys.go`. Both are built for the frame 0000001 settled and neither
 is what the interface being designed uses, so what is recorded here is the
 decision and not an observation about the code.
 

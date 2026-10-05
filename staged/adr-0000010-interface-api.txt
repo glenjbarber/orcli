@@ -1,16 +1,16 @@
-# 0010 The interface and its commands
+# 0000010 The interface and its commands
 
 - Status: accepted. This is the API document for the interface being built.
   Nothing in it is in the tree
 - Date: 2026-10-05
-- Supersedes: 0008 and 0009, and the parts of 0007 they replaced. The parts of
-  0007 that stand are named under what survives
+- Supersedes: 0000008 and 0000009, and the parts of 0000007 they replaced. The parts of
+  0000007 that stand are named under what survives
 
 ## Context
 
-0001 through 0005 record a frame that is being replaced and two behaviours in
-the tree that stand. 0006 settled the message queue. 0007 settled a
-multiplexer of sessions with tiled panes. 0008 and 0009 settled an
+0000001 through 0000005 record a frame that is being replaced and two behaviours in
+the tree that stand. 0000006 settled the message queue. 0000007 settled a
+multiplexer of sessions with tiled panes. 0000008 and 0000009 settled an
 arrangement of the screen that this record replaces, because the reader has
 now given the arrangement in full and named two fields that were open in it.
 
@@ -53,7 +53,7 @@ how much of it.
 
 `root@lolhost @ ` and a space before the caret.
 
-This replaces `root@localhost $ ` from 0009. The reader wrote it twice and
+This replaces `root@localhost $ ` from 0000009. The reader wrote it twice and
 then wrote "updated, not a typo", so `lolhost` and `@` are deliberate and are
 not corrected.
 
@@ -251,13 +251,13 @@ pending work survive a crash.
 
 ## What survives from earlier records
 
-From 0007: a session per pane, pane 0 as the main session, `Ctrl+B` as a
+From 0000007: a session per pane, pane 0 as the main session, `Ctrl+B` as a
 non-latching prefix, program-owned scrollback, and a session log that survives
 a crash.
 
-From 0006: the whole of it.
+From 0000006: the whole of it.
 
-From 0003 and 0004: the first request as the connection probe, and a choice
+From 0000003 and 0000004: the first request as the connection probe, and a choice
 recording the model it replaced.
 
 ## What is open

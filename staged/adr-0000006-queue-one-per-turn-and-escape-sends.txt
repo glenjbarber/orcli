@@ -1,4 +1,4 @@
-# 0006 A queued message is sent one per turn, and escape sends the next one now
+# 0000006 A queued message is sent one per turn, and escape sends the next one now
 
 - Status: accepted. The storage for the queue is open and is written below as
   the question it is rather than as a decision
@@ -124,7 +124,7 @@ the resolution is narrower than it looks. Two different things are being
 discarded, and only one of them is a row.
 
 Transcript rows arriving from a running turn are held in the receive queue in
-the session and folded when the reader returns, which is what 0005 settled.
+the session and folded when the reader returns, which is what 0000005 settled.
 They are not discarded.
 
 The live activity readout, which is the progress reporting the endpoint sends
@@ -165,7 +165,7 @@ the reader described it as part of what the model is told at startup.
 ## Notes
 
 Nothing in the tree has been changed in writing this. There is no code, no
-commit for the interface, and the frame in the tree is still the one 0001
+commit for the interface, and the frame in the tree is still the one 0000001
 settled.
 
 `tview` is the only third-party interface library named in any record. A
