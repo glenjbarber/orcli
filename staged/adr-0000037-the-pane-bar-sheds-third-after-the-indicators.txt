@@ -1,6 +1,6 @@
 # 0000037 The pane bar sheds third, after the indicators and before the bar fields
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 25 in `QUESTIONS.md`, filling the
   gap 0000016 left and 0000019 reopened. It does not rewrite 0000016

@@ -1,7 +1,7 @@
 # 0000002 A status field is one character
 
 - Status: accepted, and SUPERCEDED by 0000010. It stands as a record of a decision
-  that was taken and then replaced
+  that was taken and then replaced, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
 - Date: 2026-10-05
 - Supersedes: bars of named fields, with whole fields dropped when the bar was too
   narrow, in an order by how much a reader loses by losing each

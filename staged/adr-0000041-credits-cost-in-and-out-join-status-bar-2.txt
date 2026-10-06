@@ -1,6 +1,6 @@
 # 0000041 Credits, Cost, In and Out join status bar 2
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
 - Date: 2026-10-06
 - Supersedes: nothing. It extends 0000021, which named status bar 2's
   fields, and 0000016 and 0000037, which placed the shed ladder

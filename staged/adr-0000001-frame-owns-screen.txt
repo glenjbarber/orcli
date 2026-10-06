@@ -2,7 +2,7 @@
 
 - Status: accepted, and SUPERCEDED. 0000008 replaced the single frame with three
   vertical parts, and 0000010 replaced that with the API. This stands as a record
-  of a decision that was taken and then replaced
+  of a decision that was taken and then replaced, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
 - Date: 2026-10-05
 - Supersedes: a six-row footer drawn downward at the bottom of the screen, with the
   log in a scroll region above it
