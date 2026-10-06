@@ -47,7 +47,7 @@ func (l *interfaceLoop) fieldRow() string {
 		width = minSize
 	}
 
-	text, _ := CutColumn(l.editor.Text(), width)
+	text, _ := CutColumn(l.session.Editor().Text(), width)
 	return text
 }
 
@@ -70,8 +70,9 @@ func (l *interfaceLoop) placeCaret() {
 		width = minSize
 	}
 
-	runes := []rune(l.editor.Text())
-	before := string(runes[:l.editor.Caret()])
+	editor := l.session.Editor()
+	runes := []rune(editor.Text())
+	before := string(runes[:editor.Caret()])
 
 	// A caret past the right edge cannot be shown on a row that does not hold it, so it is
 	// placed at the last column rather than past the end of the row, which a terminal clamps

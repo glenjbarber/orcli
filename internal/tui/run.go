@@ -257,14 +257,6 @@ type interfaceLoop struct {
 	// group counts the goroutines writing to the frame, and is what leaving waits for.
 	group *group
 
-	// editor is the field on the prompt row.
-	editor Editor
-
-	// mu guards cancel, which the turn's own goroutine clears while the loop reads it on
-	// every paint.
-	mu     sync.Mutex
-	cancel context.CancelFunc
-
 	// drawn is how many log rows the last paint chose from, so a paint can tell whether
 	// the log has moved since rather than comparing it against nothing.
 	drawn int
@@ -496,28 +488,28 @@ func twiddleWord(state State) string {
 func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	switch key {
 	case KeyRune:
-		l.editor.Insert(r)
+		l.session.Editor().Insert(r)
 
 	case KeyBackspace:
-		l.editor.Backspace()
+		l.session.Editor().Backspace()
 
 	case KeyDelete:
-		l.editor.Delete()
+		l.session.Editor().Delete()
 
 	case KeyLeft:
-		l.editor.Left()
+		l.session.Editor().Left()
 
 	case KeyRight:
-		l.editor.Right()
+		l.session.Editor().Right()
 
 	case KeyHome:
-		l.editor.Home()
+		l.session.Editor().Home()
 
 	case KeyEnd:
-		l.editor.End()
+		l.session.Editor().End()
 
 	case KeyTab:
-		l.editor.Complete()
+		l.session.Editor().Complete()
 
 	case KeyEnter:
 		return l.submit(ctx)
@@ -553,11 +545,11 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 
 // submit acts on a line the reader finished typing.
 func (l *interfaceLoop) submit(ctx context.Context) bool {
-	line := strings.TrimSpace(l.editor.Text())
+	line := strings.TrimSpace(l.session.Editor().Text())
 	if line == "" {
 		return false
 	}
-	l.editor.Reset()
+	l.session.Editor().Reset()
 
 	result, err := l.runner(ctx, line)
 	if err != nil {
@@ -670,9 +662,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 
 	turnCtx, cancel := context.WithCancel(ctx)
 
-	l.mu.Lock()
-	l.cancel = cancel
-	l.mu.Unlock()
+	l.session.SetCancel(cancel)
 
 	go func() {
 		// The count is lowered on every path out, including a panic, since a turn that took
@@ -682,9 +672,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 
 		err := l.ask(turnCtx, question, 0)
 
-		l.mu.Lock()
-		l.cancel = nil
-		l.mu.Unlock()
+		l.session.ClearCancel()
 		cancel()
 
 		if err != nil {
@@ -698,10 +686,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 // It is the escape handler and the only place a cancel is called, so a reader who presses it
 // twice does not reach a cancel that has already fired.
 func (l *interfaceLoop) stop() {
-	l.mu.Lock()
-	cancel := l.cancel
-	l.cancel = nil
-	l.mu.Unlock()
+	cancel := l.session.StopTurn()
 
 	if cancel == nil {
 		return

@@ -131,9 +131,26 @@ type Session struct {
 	// lock is held briefly for the table rather than for the duration of a turn.
 	workers []*Worker
 
+	// editor is the field on the prompt row.
+	//
+	// It lives here rather than on the loop that draws it, because 0000022 settled
+	// that the prompt belongs to the focused session and a second pane needs a
+	// field of its own rather than one shared with the pane it is not showing.
+	// Nothing else touches it concurrently, so it carries no lock of its own, the
+	// way it carried none when the loop held it.
+	editor Editor
+
 	mu     sync.RWMutex
 	state  State
 	detail string
+
+	// cancel stops the turn now in flight, or is nil when there is none.
+	//
+	// It is guarded by the same lock as state rather than a lock of its own, since a
+	// turn belongs to the conversation it was asked of in the same way state does,
+	// and a second pane will want a cancel of its own rather than one shared with
+	// the pane it is not showing.
+	cancel context.CancelFunc
 }
 
 // State is what the client is doing, and it is one of four.
@@ -233,6 +250,49 @@ func (s *Session) SetState(state State, detail string) {
 	s.mu.Lock()
 	s.state, s.detail = state, detail
 	s.mu.Unlock()
+}
+
+// Editor returns the field on the prompt row.
+//
+// It returns a pointer so a caller can reach Editor's own mutating methods
+// directly, the way the interface loop did when the field was its own. There is
+// one editor per session, matching the one prompt a focused session shows.
+func (s *Session) Editor() *Editor {
+	return &s.editor
+}
+
+// SetCancel records the cancel for the turn now starting.
+//
+// It is called once, from the goroutine that just started the turn, before that
+// goroutine does anything else that might race with a reader pressing escape.
+func (s *Session) SetCancel(cancel context.CancelFunc) {
+	s.mu.Lock()
+	s.cancel = cancel
+	s.mu.Unlock()
+}
+
+// ClearCancel drops the cancel without calling it.
+//
+// It is used once a turn has already returned on its own, so a reader who
+// presses escape afterwards finds nothing left to stop.
+func (s *Session) ClearCancel() {
+	s.mu.Lock()
+	s.cancel = nil
+	s.mu.Unlock()
+}
+
+// StopTurn takes the cancel for the turn in flight, if there is one, and clears
+// it, so a second call finds nothing left to take.
+//
+// The caller invokes what is returned. Taking and clearing under one lock, rather
+// than reading the field and clearing it in two steps, is what keeps two readers
+// pressing escape together from both receiving the same cancel.
+func (s *Session) StopTurn() context.CancelFunc {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.cancel = nil
+	s.mu.Unlock()
+	return cancel
 }
 
 // ErrNoModel reports a turn that has nothing to send.

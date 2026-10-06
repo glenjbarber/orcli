@@ -182,8 +182,8 @@ func TestTheCaretIsNotMovedBackwards(t *testing.T) {
 		session: New(Options{Model: "stealth/space-bunny-alpha"}),
 		screen:  screen,
 	}
-	l.editor.Reset()
-	l.editor.Insert('a')
+	l.session.Editor().Reset()
+	l.session.Editor().Insert('a')
 	l.placeCaret()
 
 	got := out.String()
@@ -208,8 +208,8 @@ func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
 		session: New(Options{Model: "stealth/space-bunny-alpha"}),
 		screen:  screen,
 	}
-	l.editor.Reset()
-	l.editor.Insert('a')
+	l.session.Editor().Reset()
+	l.session.Editor().Insert('a')
 	l.placeCaret()
 
 	want := escapePosition(promptScreenRow(screen), 1) +
