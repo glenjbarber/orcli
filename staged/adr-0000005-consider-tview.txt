@@ -1,7 +1,9 @@
 # 0000005 Consider tview for the interface
 
-- Status: proposed. Two questions answered, two still open, and nothing in the
-  tree has changed
+- Status: accepted on 2026-10-05. The reader was asked whether to drop the
+  library for the reference tree's own terminal handling and said to keep it.
+  Two questions answered, the two open checks measured with the limits stated
+  below, and no code in the tree has changed
 - Date: 2026-10-05
 - Supersedes: nothing. If it is accepted it replaces part of what 0000001 settled,
   and that relationship is stated below rather than left implicit
@@ -190,6 +192,78 @@ about the tree is from reading it, and the line counts are from `wc`.
 
 Both are checkable before anything is written, and neither needs the decision
 to have been made.
+
+## The open checks, measured on 2026-10-05
+
+The two questions above are left as they were asked. What was measured against
+each is here, with what the measurement does not cover.
+
+**Question 2, the cross build: passes, in a scratch module.** A one-line
+program importing `github.com/rivo/tview` at its latest version was built with
+`CGO_ENABLED=0` for each of the eight targets in `PLATFORMS`: darwin/amd64,
+darwin/arm64, linux/amd64, linux/arm64, freebsd/amd64, freebsd/arm64,
+openbsd/amd64 and netbsd/amd64. All eight built. The reader ran it on the Mac,
+since the session's shell has no Go toolchain and cannot reach the module
+proxy.
+
+That is not `bmake crossbuild` in this tree. The scratch module shows that the
+library and what it depends on need no cgo on any target. It does not show
+that this program builds with it, and `go vet`, which the target also runs, was
+not run. The target gets its own run once the library is in `go.mod`.
+
+**The mouse, which this record did not ask but the roadmap did: not captured.**
+A bare `tview.Application` with the library's defaults, showing one text view,
+was run in Terminal.app. The reader dragged across the line, pressed Cmd+C, and
+pasted the line back. The library does not take the mouse unless
+`EnableMouse(true)` is called, so the terminal's own selection is intact. This
+was one terminal with its default settings, and nothing was measured with the
+mouse enabled.
+
+**Question 1, the tests: the rewrite is about half what this record said.**
+`internal/tui` holds 4,822 lines of test in twenty files, 239 tests. Sorted by
+what each file asserts on:
+
+```text
+untouched, no terminal in them                    3,079 lines  158 tests
+  alias, command, complete, diff, levels, line,
+  log, registry, result, session, width, worker,
+  probe_width
+
+rewritten against a cell grid                       967 lines   39 tests
+  layout_test.go          316
+  run_test.go             488
+  frame_diagnostic_test    91
+  order_diagnostic_test    72
+
+mostly kept, a few assertions change                420 lines   21 tests
+  palette_test.go, where the role tables and the
+  ground rules stay and the tests that compare an
+  escape string, such as TestSequenceWritesDirectRGB
+  and TestBackgroundSequenceIsABackground, compare
+  a style instead
+
+leave with the code the library replaces            356 lines   21 tests
+  keys_test.go            257
+  terminal_test.go         99
+```
+
+`internal/clipboard/clipboard_test.go`, 144 lines, leaves with the OSC 52
+write.
+
+So "roughly two thousand lines of test" was high. About 970 lines are written
+again, and the library supplies what they would be written against:
+`tcell.SimulationScreen` is a screen with no terminal behind it, whose cells
+can be read back, so a test that asserted on bytes asserts on what is in a cell
+and what style it carries.
+
+The sorting was done from the file list, the test names, and a search for
+escape sequences and buffers in each file. The test bodies were not read one by
+one, so a file counted as untouched may hold a test that is not, and
+`terminal_test.go` may keep the tests that decide whether a run is redirected.
+
+Whether the rewrite is smaller than the writing it replaces is still not known.
+It cannot be known before the frame is written against the library, since the
+tests follow the frame.
 
 ## Recommendation, offered as a recommendation
 

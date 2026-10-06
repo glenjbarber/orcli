@@ -23,7 +23,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000002](adr-0000002-one-character-field.txt) | a status field is one character | SUPERCEDED by 0000010 | bars that dropped whole fields when too narrow |
 | [0000003](adr-0000003-first-request-is-the-probe.txt) | the first request is the connection test | accepted | a command that tested the connection, with no handler |
 | [0000004](adr-0000004-model-choice-records-replaced.txt) | a choice records the model it replaced | accepted | a writer that set the model and recorded nothing about the previous one |
-| [0000005](adr-0000005-consider-tview.txt) | consider tview for the interface | proposed | nothing. It supersedes nothing |
+| [0000005](adr-0000005-consider-tview.txt) | consider tview for the interface | accepted | nothing. It supersedes nothing |
 | [0000006](adr-0000006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | accepted | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
 | [0000007](adr-0000007-the-interface-is-a-multiplexer.txt) | the interface is a multiplexer of sessions | accepted, in part SUPERCEDED by 0000008 and 0000010 | 0000001, where one program drew one screen for one conversation |
 | [0000008](adr-0000008-live-view-status-pane-view.txt) | the screen is a live view, a status window and a pane view | SUPERCEDED by 0000010 | 0000001 and the pane arrangement of 0000007 |
@@ -59,6 +59,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000038](adr-0000038-pane-with-no-argument-lists-every-open-pane.txt) | /pane with no argument lists every open pane | accepted | nothing. It settles question 26 |
 | [0000039](adr-0000039-model-completion-is-inline-suggestion-plus-a-live-tab-list.txt) | /model completion is an inline suggestion per keystroke, plus a live Tab list from the API | accepted | nothing. It settles backlog item 24 |
 | [0000040](adr-0000040-tool-icon-glyphs-running-words-and-plain-text-results.txt) | tool icon glyphs, running words, and plain-text results | accepted | nothing. It settles backlog items 27, 28, and 29 |
+| [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted | nothing. It extends 0000021, 0000016 and 0000037 |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
@@ -74,8 +75,8 @@ that was taken and then replaced.
 because a probe and a move are different acts. Both describe behaviour in the
 tree and neither is affected by the redesign.
 
-0000005 is a proposal about the external library and is the only record of the
-first five that describes something not in the tree. Its line counts measure the
+0000005 is the decision to build on the external library, accepted on 2026-10-05,
+and is the only record of the first five that describes something not in the tree. Its line counts measure the
 frame this redesign replaces rather than a plan.
 
 0000006 stands. 0000007 stands for a session per pane, pane 0 as main, `Ctrl+B` as a

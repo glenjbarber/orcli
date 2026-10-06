@@ -346,13 +346,15 @@ one-off with no pane.
 ## 17. External library
 
 The interface is to be built with an external library. `tview` is the one
-proposed, and [0000005](staged/adr-0000005-consider-tview.txt) records what it would
-replace and what it would cost.
+chosen, and [0000005](staged/adr-0000005-consider-tview.txt) records what it
+replaces and what it costs.
 
 The line counts in 0000005 measure the frame this redesign replaces rather than a
-plan. Two questions in 0000005 are still open and both are checkable before
-anything is written: what the byte-level tests become, and whether `bmake
-crossbuild` still passes for every target with no cgo.
+plan. The two questions 0000005 left open were measured on 2026-10-05 and the
+record carries the results and their limits: the library builds for every
+target with no cgo in a scratch module, and about 970 lines of byte-level test
+are written again against a cell grid. `bmake crossbuild` in this tree gets its
+own run once the library is in `go.mod`.
 
 ## 18. What is open
 
