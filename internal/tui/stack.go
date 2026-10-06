@@ -9,17 +9,20 @@ import (
 	"github.com/rivo/tview"
 )
 
-// The frame, as it is now: the program owns the screen, and the screen is four fixed rows
+// The frame, as it is now: the program owns the screen, and the screen is five fixed rows
 // below a scrollback that takes whatever height is left.
 //
-// Bottom to top: bar two (the longer-term fields - provider, model, verbosity, mouse, and
-// whether the viewport is at the live edge), bar one (the live, fast-changing fields -
-// state, the sweeping figure, queue depth; see barOneFields/barTwoFields), one blank
-// separator line, and the prompt - this order confirmed by Glen (2026-10-06). Everything above
-// those four rows is scrollback: the tail of the log, newest row just above the prompt,
-// oldest pushed off the top as it grows. This is loreloom/UI-redesign.md's shape
-// (2026-10-06), not the field-column-beside-every-log-row shape the ten ADRs this
-// supersedes (see staged/adr-index.txt) describe.
+// Bottom to top: the pane bar, bar two (the longer-term fields - provider, model,
+// verbosity, mouse, and whether the viewport is at the live edge), bar one (the live,
+// fast-changing fields - state, the sweeping figure, queue depth; see
+// barOneFields/barTwoFields), one blank separator line, and the prompt - this order
+// confirmed by Glen (2026-10-06). Everything above those five rows is scrollback: the
+// tail of the log, newest row just above the prompt, oldest pushed off the top as it
+// grows. This is loreloom/UI-redesign.md's shape (2026-10-06) with one addition: that
+// document names only the prompt, blank line, and two bars, and Glen added the pane bar
+// as a fifth fixed row rather than cutting it (adr-0000019/0000020 are carried forward,
+// not superseded). It is not the field-column-beside-every-log-row shape the ten ADRs
+// this does supersede (see staged/adr-index.txt) describe.
 //
 // # Why the log is not below the stack any more
 //
@@ -50,8 +53,11 @@ import (
 const Prompt = "root@lolhost $ "
 
 // barRows is how many fixed rows sit below the scrollback: the prompt, one blank
-// separator line, and the two status bars loreloom/UI-redesign.md describes.
-const barRows = 4
+// separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
+// bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
+// (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
+// cutting it, dropping it into bar two, or leaving it homeless.
+const barRows = 5
 
 // barOneFields and barTwoFields choose which Status fields render on each status bar.
 //
@@ -258,10 +264,10 @@ type barRow struct {
 //
 // It is height minus barRows, floored at zero. A terminal shorter than barRows has no
 // scrollback at all; what a terminal that short should shed first among the prompt,
-// blank line, and two bars is not settled by loreloom/UI-redesign.md (it is silent on
-// shedding, the way adr-0000016 settled it for the design this one supersedes), so the
-// fallback below draws only the prompt rather than guessing a shedding order nobody
-// has decided.
+// blank line, two bars, and pane bar is not settled by loreloom/UI-redesign.md or by
+// Glen's own extension of it to five rows (it is silent on shedding, the way
+// adr-0000016 settled it for the design this one supersedes), so the fallback below
+// draws only the prompt rather than guessing a shedding order nobody has decided.
 func scrollbackRows(height int) int {
 	if height < barRows {
 		return 0
@@ -377,6 +383,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	promptRow := backlog
 	barOneRow := backlog + 2
 	barTwoRow := backlog + 3
+	paneBarRow := backlog + 4
 
 	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
 	f.showCaret(screen, x, y+promptRow, width)
@@ -391,6 +398,21 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
+}
+
+// renderPaneBar builds the pane bar's text, truncated to width with an ellipsis rather
+// than scrolled or folded. adr-0000020 itself describes a silent truncation with no
+// mark that more exist past the edge; Glen asked to keep the ellipsis instead
+// (2026-10-06), so this bar truncates the way every other row in this file already does
+// (see cutTail's callers) rather than matching 0000020's text literally - a deliberate,
+// confirmed departure from that record, not an oversight.
+//
+// There is only ever one pane today (fieldPane is hardcoded "main" in run.go's status
+// builder; 0000007's multiplexer was never built), so this draws that one name honestly
+// rather than fabricating a pane list to truncate.
+func renderPaneBar(status Status, width int) string {
+	return CutColumnFromEnd(status[fieldPane], width)
 }
 
 // showCaret places the terminal cursor on the prompt row at the reader's caret offset.

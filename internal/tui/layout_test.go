@@ -151,8 +151,8 @@ func TestTheLogFillsUpward(t *testing.T) {
 	if got := rowAt(screen, promptRow-1); got != "row 39" {
 		t.Errorf("the newest row is %q, want row 39", got)
 	}
-	if got := rowAt(screen, 0); got != "row 24" {
-		t.Errorf("the topmost row is %q, want row 24 and fifteen rows beneath it", got)
+	if got := rowAt(screen, 0); got != "row 25" {
+		t.Errorf("the topmost row is %q, want row 25 and fourteen rows beneath it", got)
 	}
 }
 
@@ -304,5 +304,33 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(rowAt(back, promptRow+3), "scroll:back") {
 		t.Errorf("bar two scrolled back is %q, want it to say scroll:back", rowAt(back, promptRow+3))
+	}
+}
+
+// TestThePaneBarIsItsOwnRowBelowBarTwo covers the fifth fixed row Glen added
+// (2026-10-06) so the pane bar (adr-0000019/0000020) is not cut from the redesign.
+func TestThePaneBarIsItsOwnRowBelowBarTwo(t *testing.T) {
+	var s Status
+	s[fieldPane] = "main"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, plainPalette())
+	promptRow := scrollbackRows(20)
+
+	if got := rowAt(screen, promptRow+4); got != "main" {
+		t.Errorf("the pane bar is %q, want %q", got, "main")
+	}
+}
+
+// TestThePaneBarTruncatesWithAnEllipsis covers Glen's confirmed departure from
+// adr-0000020's literal "no ellipsis": this bar truncates the same way every other row
+// in this file does, with cutTail's ellipsis, rather than clipping silently.
+func TestThePaneBarTruncatesWithAnEllipsis(t *testing.T) {
+	var s Status
+	s[fieldPane] = "a pane name far too long for a narrow bar"
+	got := renderPaneBar(s, 10)
+	if !strings.Contains(got, ellipsis) {
+		t.Errorf("a truncated pane bar is %q, want it to carry an ellipsis", got)
+	}
+	if DisplayWidth(got) > 10 {
+		t.Errorf("a truncated pane bar is %d columns wide, want at most 10", DisplayWidth(got))
 	}
 }
