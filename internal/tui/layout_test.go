@@ -40,15 +40,50 @@ func TestAShortTerminalHasNoScrollback(t *testing.T) {
 	}
 }
 
-// TestAShortTerminalStillDrawsThePrompt covers Frame.Draw's fallback directly: a terminal
-// shorter than the fixed stack still draws the prompt, pinned to its last row.
+// TestAShortTerminalStillDrawsThePrompt covers Frame.Draw's shedding ladder: a terminal
+// too short for the fixed stack still draws the prompt, which survives every height
+// since it is never shed (see the Draw doc comment on the shedding order).
 func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
 	for _, height := range []int{1, 2, barRows - 1} {
 		screen := drawSimulationFrame(t, height, 40, Bar{Field: "hi"}, nil, Palette{})
-		r, _, _, _ := screen.GetContent(0, height-1)
+		r, _, _, _ := screen.GetContent(0, 0)
 		if r != 'r' {
-			t.Errorf("on a %d row terminal the prompt is not on the last row (got %q at row %d)", height, r, height-1)
+			t.Errorf("on a %d row terminal the prompt is not on row 0 (got %q)", height, r)
 		}
+	}
+}
+
+// TestTheSheddingLadderDropsInGlensOrder covers the actual order a short terminal sheds
+// rows in: blank line first (never seen below barRows anyway), then the pane bar, then
+// bar two, then bar one, with the prompt surviving every height.
+func TestTheSheddingLadderDropsInGlensOrder(t *testing.T) {
+	var s Status
+	s[fieldPane] = "main"
+
+	// Height 4: blank is already gone (nothing shows it directly); bar one, bar two,
+	// and the pane bar all still show.
+	screen := drawSimulationFrame(t, 4, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 3); got != "main" {
+		t.Errorf("at height 4 the pane bar is %q, want %q", got, "main")
+	}
+
+	// Height 3: the pane bar is shed; bar two is now the last row.
+	screen = drawSimulationFrame(t, 3, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 2); !strings.Contains(got, "openrouter") && got == "main" {
+		t.Errorf("at height 3 the pane bar should be shed, but row 2 is %q", got)
+	}
+
+	// Height 2: bar two is also shed; only the prompt and bar one remain.
+	screen = drawSimulationFrame(t, 2, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 1); got == "main" {
+		t.Error("at height 2 the pane bar should be shed, but it is still drawn")
+	}
+
+	// Height 1: bar one is shed too; only the prompt remains.
+	screen = drawSimulationFrame(t, 1, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	r, _, _, _ := screen.GetContent(0, 0)
+	if r != 'r' {
+		t.Errorf("at height 1 the only row is %q, want the prompt", string(r))
 	}
 }
 

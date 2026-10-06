@@ -346,13 +346,28 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		return
 	}
 
-	// A terminal too short for the full stack draws only the prompt, pinned to the last
-	// row. No shedding order among the blank line and the two bars is settled (see
-	// scrollbackRows), so this is the one row every height still gets.
+	// A terminal too short for the full stack sheds the blank line, then the pane bar,
+	// then bar two, then bar one, in that order - Glen's shedding order (2026-10-06).
+	// The prompt always survives, since the reader is typing into it. Each surviving row
+	// draws top to bottom starting at the terminal's own first row, in their usual
+	// relative order; there is no scrollback at these heights (see scrollbackRows).
 	if height < barRows {
-		promptRow := height - 1
-		drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
-		f.showCaret(screen, x, y+promptRow, width)
+		row := 0
+		drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y+row, width)
+		row++
+
+		if height >= 2 {
+			f.drawBarOne(screen, x, y+row, width, chrome)
+			row++
+		}
+		if height >= 3 {
+			drawCellText(screen, x, y+row, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+			row++
+		}
+		if height >= 4 {
+			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width), chrome)
+		}
 		return
 	}
 
@@ -388,14 +403,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
 	f.showCaret(screen, x, y+promptRow, width)
 
-	prefix, figure, suffix := renderBarOne(f.bar.Status)
-	drawCellText(screen, x, y+barOneRow, width, prefix, chrome)
-	figureX := DisplayWidth(prefix)
-	drawSweepText(screen, x+figureX, y+barOneRow, width-figureX, figure, f.step, f.palette)
-	suffixX := figureX + DisplayWidth(figure)
-	if suffixX < width {
-		drawCellText(screen, x+suffixX, y+barOneRow, width-suffixX, suffix, chrome)
-	}
+	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
 	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
@@ -424,6 +432,20 @@ func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
 		column = min(column, width-1)
 	}
 	screen.ShowCursor(x+column, y)
+}
+
+// drawBarOne draws bar one at row y, with the figure segment swept. Factored out of
+// Draw's main path so the shedding ladder below can draw the same row at whatever
+// height it survives to, rather than repeating the sweep arithmetic twice.
+func (f *Frame) drawBarOne(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
+	prefix, figure, suffix := renderBarOne(f.bar.Status)
+	drawCellText(screen, x, y, width, prefix, chrome)
+	figureX := DisplayWidth(prefix)
+	drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	suffixX := figureX + DisplayWidth(figure)
+	if suffixX < width {
+		drawCellText(screen, x+suffixX, y, width-suffixX, suffix, chrome)
+	}
 }
 
 // renderBarOne builds the live, fast-changing status bar.
