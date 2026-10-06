@@ -148,3 +148,8 @@ The two that could not both exist at the same path were overwritten by the merge
 and are kept in `doc-backup/`. None of them is reconciled, since this tree
 supersedes what they describe and a reader wanting the older build's account has
 them.
+## Dated feature implementation evidence
+
+[Session ownership implementation evidence](session-ownership-implementation.md)
+records the local phase 2 ownership changes on `feature/tui-redesign` and their
+pending delivery. It is separate from the main-branch interface reference above.
