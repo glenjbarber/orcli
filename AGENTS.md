@@ -167,6 +167,31 @@ mid-session sees a worker running and a reader arriving after sees one that has
 stopped. An entry written only at the start is a record of intention, and a ledger
 whose entries describe what a worker meant to do is not a ledger.
 
+**A superseded entry is kept and is marked, never removed.** A ledger whose
+entries are deleted when they go stale is a ledger nobody can check, and the entry
+that recorded a stale belief is the evidence that the belief was corrected rather
+than never held. An entry that has been overtaken carries `SUPERCEDED` in its
+`Status` line, and the entry that overtook it names the one it overtook in its
+own, so a reader holding either learns about the other without opening both.
+
+```
+Worker ID: 8
+Merged: done
+Status: SUPERCEDED by Worker ID: 14. The seven-row frame this entry describes
+was replaced by the twenty-row one.
+```
+
+**The words are the ones the decision records use.** `SUPERCEDED` and
+`SUPERCEDES` mean the same thing in an entry and in a record: a thing that was
+taken and has been replaced by a later one that names it.
+`staged/adr-status-vocabulary.txt` is where they are defined, and a worker that
+has read the record workflow knows them already.
+
+**A `Merged` field is never changed to record a supersession.** `done` means the
+work is on the main line and that stays true whatever came after it, so an entry
+whose work has since been replaced still reads `done`. Supersession is about the
+decision, and the branch is still merged.
+
 ## Committing
 
 One unit per merge, on a branch, merged with `--no-ff`, so the unit is visible in
@@ -270,6 +295,19 @@ rationale belongs in neither and in a commit message.
 A rationale that is worth keeping beyond the commit that took it is a decision
 record under `staged/`, one file per decision, with an index beside them. Those
 records are numbered so a later one can supersede an earlier one by name.
+
+**A record says on its own header that it has been superseded**, and names what
+superseded it. The status line carries `SUPERCEDED` beside the number, and the
+replacing record names the record and the part of it under `Supersedes`, so a
+reader holding either file learns about the other without going to the index. The
+five status values are `accepted`, `proposed`, `UNCONFIRMED`, `SUPERCEDED` and
+`rejected`, and `staged/adr-status-vocabulary.txt` defines them and says which
+records carry each.
+
+**A superseded record is kept as it was written and is read to find what was
+replaced.** It is not edited to agree with its replacement, since a record edited
+to agree with the code is no longer a record of what was decided, and it is not
+deleted, since the rejected alternative is the thing worth keeping.
 
 Where the two disagree, one of them is wrong and the disagreement is a bug to be
 fixed rather than a nuance to be noted. Name the file that is wrong in the commit
