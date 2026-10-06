@@ -1,0 +1,99 @@
+# 0000042 orcli introduces itself to the model, and names its real capabilities
+
+- Status: accepted
+- Date: 2026-10-06
+- Supersedes: nothing. It settles a gap no earlier record closed
+
+## Context
+
+`ask.go`'s own doc comment says it plainly: "A turn carries the question and
+nothing else. There is no history in the request and no tools are offered."
+Every request today is one `Message{Role: "user", Content: question}` and
+nothing else. The model is never told it is talking to `orcli`, never told
+what `orcli` can do on the reader's behalf, and never told what it cannot do
+this session.
+
+That silence is not neutral. A model that is not told whether a capability
+exists does not refuse to guess - it guesses, in either direction. Asked to
+check a DNS record, it may offer to if `internal/cloudflare` has no key
+configured for this session, or refuse to if it does. Asked to read a file or
+run a command, it has no way to know whether `internal/tools` is wired into
+this turn at all, because today it never is - the package exists, is tested,
+and is never reached from `ask()`. A reader watching the reply has no way to
+tell a correct refusal from a wrong guess, since both read the same: the
+model declining or offering something in prose.
+
+`/cloudflare` is a real connector today, but it is reader-only: the dispatcher
+holds the client and the credential check (`cloudflareClient`,
+`ErrNoCredential`), and the model is never in that path at all. A reader who
+asks the model to do what `/cloudflare` already does is asking something the
+model has no way to know it cannot reach.
+
+## Decision
+
+**Every request carries one system message ahead of the question, naming
+`orcli` and listing what this session actually has.** Not what the binary can
+do in general - what this run, this reader, this moment has configured. A
+session with no Cloudflare credential says so; one with a credential names
+the connector as available. A session with `internal/tools` wired in names
+the specific tools and their real constraints (no shell, no pipes, filesystem
+contained to the working tree) rather than a generic "I can run commands."
+
+**The list is assembled from the same state the reader's own commands read,
+not maintained separately.** `Session.Options()`, `Session.Ready()`, and
+whatever check `cloudflareClient` already makes are the source. A second,
+hand-maintained list of what exists would drift from what `/model` or
+`/cloudflare` already report the moment either changes, and a capability
+list that lies is worse than silence, because silence at least does not
+claim an answer.
+
+**Absence is a statement, not a gap.** A connector this session does not have
+is named as absent in the same message, not left out. A model told only what
+exists cannot distinguish "not configured" from "not asked about yet," and
+the one thing this record is for is making sure the model is never in that
+position.
+
+**This is a system message, not a tool-call result.** It is sent once, as
+part of the request shape every turn already carries, rather than as
+something the model has to call a tool to learn. A model that must ask
+before it knows what it can ask for has the same problem this record closes,
+one layer down.
+
+## Consequences
+
+`ask.go` changes from one message to two: the system message this record
+adds, then the existing user message. The doc comment's claim that a turn
+carries history and tools has to be revisited with it, since the request is
+no longer only the question; what it does not yet carry (prior turns, actual
+tool-call wiring into the request) stays exactly as open as it was before
+this record and is not decided here.
+
+Every connector added after this one inherits an obligation: it is not real,
+for this purpose, until the capability message can see it. A connector wired
+into the dispatcher but not into this message is exactly the gap this record
+exists to close, so "did you add it to the capability list" is a real
+question for review from here on, not a style preference.
+
+The message grows with the session. A reader who sets a model, then a
+provider, then a Cloudflare key, changes what the next turn's capability
+message says without changing any code - it reads the same state the status
+bar already shows.
+
+## What this does not settle
+
+The exact wording and ordering of the capability list is open; this record
+settles that one is sent and what it is assembled from, not its prose.
+
+Whether `internal/tools` is wired into the request as actual tool-call
+schemas, and what that costs in the response shape, is a separate decision
+this record does not make. Naming a capability honestly and offering it as a
+callable tool are different acts, and a session could, in principle, name a
+capability as present without yet being able to invoke it as a tool - that
+gap, if this record is adopted before tool-calling itself lands, is one a
+reader should expect to see named in the session's own capability message
+rather than discover by asking.
+
+## Notes
+
+Nothing in the tree has been changed in writing this. `ask.go`'s doc comment
+is quoted above as it exists, not as amended.

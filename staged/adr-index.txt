@@ -10,6 +10,10 @@ the tree.
 (This count predates 0000018, which answers question 6. It is not reconciled
 here; see the table below for the current total.)
 
+(0000042 is later still, and settles something none of the above anticipated:
+that the model is never told what `orcli` is or what it can reach this
+session.)
+
 A record carries its own status in its header. `SUPERCEDED` goes on the record
 that was replaced, beside the number that replaced it, and the replacing record
 names what it replaced under `Supersedes`. The four values are `accepted`,
@@ -60,6 +64,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000039](adr-0000039-model-completion-is-inline-suggestion-plus-a-live-tab-list.txt) | /model completion is an inline suggestion per keystroke, plus a live Tab list from the API | accepted | nothing. It settles backlog item 24 |
 | [0000040](adr-0000040-tool-icon-glyphs-running-words-and-plain-text-results.txt) | tool icon glyphs, running words, and plain-text results | accepted | nothing. It settles backlog items 27, 28, and 29 |
 | [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It extends 0000021, 0000016 and 0000037 |
+| [0000042](adr-0000042-orcli-introduces-itself-and-its-capabilities.txt) | orcli introduces itself to the model, and names its real capabilities | accepted | nothing. It closes a gap no earlier record settled |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
