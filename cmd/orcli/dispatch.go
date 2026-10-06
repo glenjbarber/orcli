@@ -193,6 +193,16 @@ func (d *dispatcher) cloudflareKey() (string, error) {
 	return d.cfg.CloudflareAPIKey()
 }
 
+// cloudflareReady reports whether a Cloudflare call could be made right now, without
+// building the client. It is the check adr-0000042's capability message names the
+// connector by - the credential is fixed for the session today, set once at
+// configuration load with no command that changes it, but this checks fresh anyway
+// rather than caching a bool, so a later writer never has to remember to invalidate one.
+func (d *dispatcher) cloudflareReady() bool {
+	key, err := d.cloudflareKey()
+	return err == nil && key != ""
+}
+
 // cloudflareClient returns the API client, building it on first use.
 //
 // The client is built rather than handed in, since a handler that took one would have

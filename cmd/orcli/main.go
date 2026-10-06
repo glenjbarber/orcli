@@ -273,7 +273,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// is what writes the model, and that is the connection there is no command for.
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
+		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
 	)
 }
 
