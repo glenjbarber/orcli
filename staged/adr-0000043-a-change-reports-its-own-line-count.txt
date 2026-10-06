@@ -1,0 +1,85 @@
+# 0000043 A change reports the lines it added and removed from the tree
+
+- Status: accepted
+- Date: 2026-10-06
+- Supersedes: nothing. It settles something no earlier record named
+
+## Context
+
+`writeFileTool.Run` returns `"wrote %d bytes to %s"` - a byte count, and
+nothing about what those bytes replaced. The git tool already permits `diff`
+(`gitPermitted` lists it as a reading subcommand), but nothing calls it after
+a change, and nothing requires that it be called. A model can rewrite a file
+with the filesystem tool, or `git commit` one it rewrote, without the reply
+ever naming what changed in the one unit a reader can judge at a glance:
+how much moved.
+
+A byte count does not answer that. A one-line edit that happens to replace a
+long line with a short one and a forty-line rewrite can report similar byte
+deltas, and a reader comparing the two numbers learns nothing true from
+either. Lines added and removed is the unit this project's own commit
+messages, and the reader's own `git diff --stat` habit, already use to answer
+"how big was this" - this record asks that the reply use the same unit the
+reader would reach for themselves.
+
+## Decision
+
+**After a change to the tree, the reply states the total lines added and
+removed, across every file the change touched.** Not per file, and not per
+call - one total for the change as a whole, the way `git diff --stat`'s own
+last line already summarizes a whole diff.
+
+**The count is read from the tree, not kept by the tool that made the
+change.** `git diff --numstat` (or the equivalent against what the change
+started from, for a path outside a repository) is the source, run after the
+change rather than accumulated call by call. A model keeping its own running
+total drifts from the tree the moment something outside its own calls
+touches the same files, and the tree is the thing the count is supposed to
+describe.
+
+**A change with nothing to report says so, by the same rule as any other
+honestly-empty result.** A call that ran and changed nothing is not an
+omitted count; it is a count of zero, stated.
+
+**This is additional to whatever else the reply already says about a
+change, not a replacement for it.** A reader still gets told what changed
+and why. The count is the one number that lets a reader size a change
+without reading the diff themselves, not a substitute for the diff.
+
+## Consequences
+
+Every tool that changes the tree now has a second obligation beside doing
+the change correctly: the reply around it has to compute and state the
+count, which means a git-backed numstat call (or equivalent) becomes a
+normal part of finishing a change, not an occasional extra step.
+
+A change spanning several tool calls - several file writes, say, before one
+reply - reports one total for all of them, which means the count is
+computed once, after the last change in the unit the reader will read about
+as one thing, not once per call.
+
+A path with no git repository behind it (the standalone-file case
+`internal/tools` is built to allow) has no `git diff` to run, and this
+record does not say what the count is computed against there. That is open,
+not decided by omission.
+
+## What this does not settle
+
+Whether the count is computed from `internal/tools`'s own git subcommand or
+from a separate mechanism outside the model's own tool calls - a wrapper
+around the turn, say, that diffs the tree before and after regardless of
+which tools ran - is not decided here. Either reads the same tree and
+produces the same number; which one does the reading is an implementation
+choice this record leaves open.
+
+What happens outside a git repository, named above, is open.
+
+Whether the count belongs in the reply's prose or in a structured field
+beside it (the way `writeFileTool`'s own result carries a byte count today)
+is open; this record settles that the number exists and what it measures,
+not where it is written.
+
+## Notes
+
+Nothing in the tree has been changed in writing this. `writeFileTool.Run`'s
+byte-count message is quoted above as it exists today, not as amended.

@@ -12,7 +12,9 @@ here; see the table below for the current total.)
 
 (0000042 is later still, and settles something none of the above anticipated:
 that the model is never told what `orcli` is or what it can reach this
-session.)
+session. 0000043 follows it and settles a second gap: a change to the tree
+was never required to say how big it was, in the unit `git diff --stat`
+already uses.)
 
 A record carries its own status in its header. `SUPERCEDED` goes on the record
 that was replaced, beside the number that replaced it, and the replacing record
@@ -65,6 +67,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000040](adr-0000040-tool-icon-glyphs-running-words-and-plain-text-results.txt) | tool icon glyphs, running words, and plain-text results | accepted | nothing. It settles backlog items 27, 28, and 29 |
 | [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It extends 0000021, 0000016 and 0000037 |
 | [0000042](adr-0000042-orcli-introduces-itself-and-its-capabilities.txt) | orcli introduces itself to the model, and names its real capabilities | accepted | nothing. It closes a gap no earlier record settled |
+| [0000043](adr-0000043-a-change-reports-its-own-line-count.txt) | a change reports the lines it added and removed from the tree | accepted | nothing. It names a unit no earlier record used |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
