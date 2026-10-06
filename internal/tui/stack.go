@@ -233,7 +233,6 @@ func fieldName(k int) string {
 	}
 }
 
-
 // Status is what each field says, field by field.
 //
 // It is a fixed-size array rather than a slice because the count is fixed, and a caller
