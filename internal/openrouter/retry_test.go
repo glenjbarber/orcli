@@ -128,7 +128,7 @@ func TestChatStopsAtTheRetryBound(t *testing.T) {
 	srv, calls := retryScript(t, sse(stallPayload("Upstream idle timeout exceeded")))
 	events := retryEvents(t, retryClient(t, srv.URL))
 
-	if got, want := calls.Load(), int64(retryBound); got != want {
+	if got, want := calls.Load(), int64(6); got != want {
 		t.Errorf("the endpoint was called %d times, want %d: the retry is bounded", got, want)
 	}
 	if !mentions(events, "idle timeout") {
