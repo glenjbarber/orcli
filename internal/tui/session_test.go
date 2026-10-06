@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -310,5 +311,59 @@ func TestTheCredentialIsNotInTheLog(t *testing.T) {
 
 	if !strings.Contains(s.Options().APIKey, key) {
 		t.Error("the session lost the credential, which it needs for a request")
+	}
+}
+
+// TestScrollStartsAtTheLiveEdge covers the zero value: a session nothing has scrolled
+// yet is at the live edge, which is what bar two's scrollback field reads.
+func TestScrollStartsAtTheLiveEdge(t *testing.T) {
+	s := New(Options{})
+	if !s.AtLiveEdge() {
+		t.Error("a fresh session is not at the live edge")
+	}
+	if got := s.ScrollOffset(); got != 0 {
+		t.Errorf("a fresh session's scroll offset is %d, want 0", got)
+	}
+}
+
+// TestScrollUpLeavesTheLiveEdgeAndScrollDownReturns covers Shift+Up/Shift+Down's effect
+// directly on Session, without a key event.
+func TestScrollUpLeavesTheLiveEdgeAndScrollDownReturns(t *testing.T) {
+	s := New(Options{})
+	for i := range 5 {
+		s.Notice(fmt.Sprintf("row %d", i), 0, RoleNotice)
+	}
+
+	s.ScrollUp(2)
+	if s.AtLiveEdge() {
+		t.Error("scrolling up left the session at the live edge")
+	}
+	if got := s.ScrollOffset(); got != 2 {
+		t.Errorf("scroll offset after ScrollUp(2) is %d, want 2", got)
+	}
+
+	s.ScrollDown(2)
+	if !s.AtLiveEdge() {
+		t.Error("scrolling back down by the same amount did not return to the live edge")
+	}
+}
+
+// TestScrollClampsAtBothEnds covers the two floors: scrolling down past the live edge
+// stays at it, and scrolling up past the log's own length stops there rather than
+// reading rows that do not exist.
+func TestScrollClampsAtBothEnds(t *testing.T) {
+	s := New(Options{})
+	for i := range 3 {
+		s.Notice(fmt.Sprintf("row %d", i), 0, RoleNotice)
+	}
+
+	s.ScrollDown(1)
+	if got := s.ScrollOffset(); got != 0 {
+		t.Errorf("scrolling down from the live edge gives %d, want 0", got)
+	}
+
+	s.ScrollUp(100)
+	if got, want := s.ScrollOffset(), s.Log().Len(); got != want {
+		t.Errorf("scrolling up past the log's length gives %d, want the log's own length %d", got, want)
 	}
 }

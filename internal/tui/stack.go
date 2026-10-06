@@ -293,6 +293,7 @@ type Frame struct {
 	palette Palette
 	caret   int
 	step    int
+	scroll  int
 	paste   func(string)
 }
 
@@ -311,6 +312,9 @@ func (f *Frame) SetCaret(caret int) { f.caret = caret }
 
 // SetSweepStep sets the animation position for the changing figure field.
 func (f *Frame) SetSweepStep(step int) { f.step = step }
+
+// SetScroll records how many rows back from the live edge the viewport sits.
+func (f *Frame) SetScroll(scroll int) { f.scroll = scroll }
 
 // SetPasteHandler installs the handler for text pasted into the prompt.
 func (f *Frame) SetPasteHandler(handler func(string)) { f.paste = handler }
@@ -349,8 +353,15 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	backlog := scrollbackRows(height)
+	end := len(f.log) - f.scroll
+	if end < 0 {
+		end = 0
+	}
+	if end > len(f.log) {
+		end = len(f.log)
+	}
 	shown := make([]Row, 0, backlog)
-	for i := len(f.log) - 1; i >= 0 && len(shown) < backlog; i-- {
+	for i := end - 1; i >= 0 && len(shown) < backlog; i-- {
 		shown = append(shown, PlainRow(f.log[i]))
 	}
 	// shown is newest first; it fills the scrollback upward from just above the prompt.
@@ -381,7 +392,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		drawCellText(screen, x+suffixX, y+barOneRow, width-suffixX, suffix, chrome)
 	}
 
-	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status), chrome)
+	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
 }
 
 // showCaret places the terminal cursor on the prompt row at the reader's caret offset.
@@ -426,13 +437,14 @@ func renderBarOne(status Status) (prefix, figure, suffix string) {
 }
 
 // renderBarTwo builds the longer-term status bar: the four Status fields in barTwoFields,
-// plus a literal scroll:unknown stand-in for the scrollback-on field loreloom/UI-redesign.md
-// names and Session does not yet track.
+// plus whether the viewport is at the live edge, which is DESIGN.md §5's fact (read fresh
+// each draw, not a stored setting - see Session.AtLiveEdge) standing in for the
+// scrollback-on field loreloom/UI-redesign.md names.
 //
 // Provider and model are written bare, as a reader would say them; the rest are named,
 // matching the mockup confirmed this session (`openrouter · claude-sonnet-5 ·
 // verbosity:0 · mouse:on · scroll:on`).
-func renderBarTwo(status Status) string {
+func renderBarTwo(status Status, atLiveEdge bool) string {
 	parts := []string{status[fieldProvider], status[fieldModel]}
 	for _, k := range barTwoFields {
 		if k == fieldProvider || k == fieldModel {
@@ -440,7 +452,7 @@ func renderBarTwo(status Status) string {
 		}
 		parts = append(parts, fieldName(k)+":"+status[k])
 	}
-	parts = append(parts, "scroll:unknown")
+	parts = append(parts, "scroll:"+onOff(atLiveEdge, "live", "back"))
 	return strings.Join(parts, " · ")
 }
 

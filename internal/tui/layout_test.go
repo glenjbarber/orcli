@@ -264,3 +264,45 @@ func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
 		t.Errorf("a bar that is not the top bar was swept: %q", got)
 	}
 }
+
+// TestScrollMovesTheWindowAndBarTwoSaysSo covers Frame drawing the scroll offset: a
+// nonzero offset shows an older window of the log and bar two reads "scroll:back"
+// instead of "scroll:live".
+func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
+	log := make([]Row, 10)
+	for i := range log {
+		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
+	}
+
+	frame := NewFrame()
+	frame.SetRect(0, 0, 40, 20)
+	frame.SetContent(Bar{}, log, plainPalette())
+	promptRow := scrollbackRows(20)
+
+	live := tcell.NewSimulationScreen("UTF-8")
+	if err := live.Init(); err != nil {
+		t.Fatal(err)
+	}
+	live.SetSize(40, 20)
+	frame.Draw(live)
+	if got := rowAt(live, promptRow-1); got != "row 9" {
+		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
+	}
+	if !strings.Contains(rowAt(live, promptRow+3), "scroll:live") {
+		t.Errorf("bar two at the live edge is %q, want it to say scroll:live", rowAt(live, promptRow+3))
+	}
+
+	frame.SetScroll(3)
+	back := tcell.NewSimulationScreen("UTF-8")
+	if err := back.Init(); err != nil {
+		t.Fatal(err)
+	}
+	back.SetSize(40, 20)
+	frame.Draw(back)
+	if got := rowAt(back, promptRow-1); got != "row 6" {
+		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)
+	}
+	if !strings.Contains(rowAt(back, promptRow+3), "scroll:back") {
+		t.Errorf("bar two scrolled back is %q, want it to say scroll:back", rowAt(back, promptRow+3))
+	}
+}

@@ -71,6 +71,8 @@ const (
 	KeyCtrlC
 	KeyEOF
 	KeyMouse
+	KeyScrollUp
+	KeyScrollDown
 )
 
 // Start runs the interface until the reader leaves.
@@ -226,6 +228,7 @@ func (l *interfaceLoop) paint() {
 	l.frame.SetContent(footer, rows, palette)
 	l.frame.SetCaret(l.session.Editor().Caret())
 	l.frame.SetSweepStep(l.step)
+	l.frame.SetScroll(l.session.ScrollOffset())
 }
 
 func (l *interfaceLoop) fieldRow() string { return l.session.Editor().Text() }
@@ -245,8 +248,14 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 	case tcell.KeyRight:
 		return KeyRight, 0
 	case tcell.KeyUp:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollUp, 0
+		}
 		return KeyUp, 0
 	case tcell.KeyDown:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollDown, 0
+		}
 		return KeyDown, 0
 	case tcell.KeyHome:
 		return KeyHome, 0
@@ -432,6 +441,12 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	case KeyUp, KeyDown:
 		// Read so a reader pressing one is not left pressing. This unit has no history, and
 		// one would need a conversation this interface does not carry.
+
+	case KeyScrollUp:
+		l.session.ScrollUp(1)
+
+	case KeyScrollDown:
+		l.session.ScrollDown(1)
 	}
 
 	return false

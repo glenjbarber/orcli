@@ -151,6 +151,12 @@ type Session struct {
 	// and a second pane will want a cancel of its own rather than one shared with
 	// the pane it is not showing.
 	cancel context.CancelFunc
+
+	// scroll is how many rows back from the live edge the viewport sits. Zero is the
+	// live edge. It is guarded by the same lock as state for the same reason cancel
+	// is: Shift+Up/Shift+Down move it from the input goroutine while paint reads it
+	// from the same or a timer goroutine.
+	scroll int
 }
 
 // State is what the client is doing, and it is one of four.
@@ -293,6 +299,47 @@ func (s *Session) StopTurn() context.CancelFunc {
 	s.cancel = nil
 	s.mu.Unlock()
 	return cancel
+}
+
+// ScrollUp moves the viewport back by n rows, away from the live edge.
+//
+// It is clamped to the log's own length rather than to a screen height, since the
+// session does not know how tall the frame drawing it is; a frame asked to draw an
+// offset past what it can show clamps that itself at draw time. Shift+Up/Shift+Down
+// are the keys chosen for this (2026-10-06), distinct from the plain arrow keys, which
+// are reserved for history (adr-0000011/0000015, not yet built).
+func (s *Session) ScrollUp(n int) {
+	s.mu.Lock()
+	s.scroll += n
+	if max := s.log.Len(); s.scroll > max {
+		s.scroll = max
+	}
+	s.mu.Unlock()
+}
+
+// ScrollDown moves the viewport toward the live edge by n rows, floored there.
+func (s *Session) ScrollDown(n int) {
+	s.mu.Lock()
+	s.scroll -= n
+	if s.scroll < 0 {
+		s.scroll = 0
+	}
+	s.mu.Unlock()
+}
+
+// ScrollOffset reports how many rows back from the live edge the viewport sits. Zero
+// is the live edge itself.
+func (s *Session) ScrollOffset() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.scroll
+}
+
+// AtLiveEdge reports whether the viewport is at the live edge, which is what bar two's
+// scrollback field reads (DESIGN.md §5: this is a fact read each redraw, not a stored
+// mode).
+func (s *Session) AtLiveEdge() bool {
+	return s.ScrollOffset() == 0
 }
 
 // ErrNoModel reports a turn that has nothing to send.
