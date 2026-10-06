@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // RGB is a colour in three components.
@@ -55,6 +57,16 @@ func (c RGB) Sequence() string {
 // BackgroundSequence renders the colour as a background rather than a foreground.
 func (c RGB) BackgroundSequence() string {
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.R, c.G, c.B)
+}
+
+// TCellColor renders the colour for tcell, which draws by cell and style rather than
+// by escape sequence.
+//
+// It carries the same direct-RGB value Sequence and BackgroundSequence write, so a
+// role reads the same whichever renderer is asking: the three are three callers of
+// one set of values, not three decisions about what a role looks like.
+func (c RGB) TCellColor() tcell.Color {
+	return tcell.NewRGBColor(int32(c.R), int32(c.G), int32(c.B))
 }
 
 // Theme is what a reader named, as opposed to what the palette decided.

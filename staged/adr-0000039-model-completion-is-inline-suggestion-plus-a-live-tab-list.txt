@@ -1,0 +1,71 @@
+# 0000039 /model completion is an inline suggestion per keystroke, plus a live Tab list from the API
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles backlog item 24 in `QUESTIONS.md`
+
+## Context
+
+Backlog item 24 asked for tab-completion on `/model` switching. An earlier
+draft of this record proposed substring matching against the cached model
+catalogue, cycled by Tab. The reader replaced that with two distinct
+mechanisms instead of one.
+
+## Decision
+
+**Every keystroke after `/model ` shows an inline suggestion of the most
+specific match, automatically, with no key pressed beyond ordinary
+typing.** "Most specific" means: among the cached catalogue's entries whose
+slug contains the typed text as a substring, case-insensitive, the one with
+the fewest characters beyond what is typed; ties break alphabetically. This
+suggestion is drawn from the cached catalogue, the same one `/models` and
+`/freemodels` already use, not a network call on every keystroke.
+
+**Tab, pressed explicitly, cycles through a live list fetched from the
+API**, not the cached catalogue. Each press advances to the next matching
+slug and replaces the input with it, wrapping back to the first after the
+last.
+
+## Reasoning
+
+None recorded for why the two mechanisms draw from different sources beyond
+the reader's own answer: the per-keystroke suggestion is meant to be cheap
+and immediate, which argues for the cache, and Tab is meant to reflect what
+is actually available right now, which argues for the API. This record
+states the split rather than resolving it into one source, since the reader
+asked for both explicitly rather than for one mechanism with two triggers.
+
+## Consequences
+
+**The two mechanisms can disagree.** If the cached catalogue is stale
+relative to the API, the inline suggestion can offer a model Tab's live
+list no longer has, or omit one Tab's live list just added. Nothing here
+reconciles that; the two sources are independent by design, not by
+oversight, but the disagreement is a real one and is named here rather than
+assumed away.
+
+**Tab costs a network round trip on every press.** Unlike the inline
+suggestion, which never calls out, cycling through Tab's live list means
+every press is a request, with whatever latency that carries.
+
+## Alternatives considered
+
+One mechanism, one source, cycling through the cached catalogue on Tab with
+no per-keystroke suggestion. This was the earlier draft and the reader
+replaced it with the two-mechanism, two-source design above.
+
+Having the inline suggestion also call the live API per keystroke, to match
+Tab's freshness. Not raised; the reader's answer keeps the inline
+suggestion on the cache specifically.
+
+## What this leaves open
+
+How a reader distinguishes the inline suggestion from their own typed text
+visually (ghosted text, a different colour, or something else). What
+happens to Tab's cycle position if the live list changes between presses.
+Neither is asked by backlog item 24 and neither is answered here.
+
+## Notes
+
+Nothing in the tree has changed. There is no `/model` completion of either
+kind in the tree.

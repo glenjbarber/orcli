@@ -1,0 +1,122 @@
+Status: accepted by Glen, 2026-10-06. No code has been written yet; this
+record is the scope, not the implementation.
+
+# Design: replace the screen with tview
+
+Phase 3 of the interface roadmap. Branch `feature/tui-redesign`. Depends on
+phase 2 (`d085ba2`), which gave `interfaceLoop` one session and no other
+conversation state, so a pane can be given its own `Session` without
+untangling anything else first.
+
+## What it is for
+
+adr-0000005 accepted tview and measured its two open checks. This phase is
+where the dependency actually enters `go.mod` and the terminal-handling code
+it replaces is removed, rather than measured in a scratch module.
+
+## Where adr-0000005's own count stands corrected
+
+adr-0000005's file table puts `palette.go` in the group the library replaces
+outright, at 304 lines. The test survey written into the same record this
+session found otherwise: `palette_test.go` is mostly kept, and only the
+escape-string assertions change to style assertions. Reading `palette.go` and
+`color.go` against that confirms the finer grain:
+
+- `color.go`'s `RGB.Sequence()` and `RGB.BackgroundSequence()`, and
+  `palette.go`'s `Palette.Sequence(role)`, are the only functions in either
+  file that write an escape string. They return a `tcell.Color` or build a
+  `tcell.Style` instead.
+- Every role table, every ground rule, and `ground.go` in full, carry no
+  escape sequence anywhere and are unaffected. 0000005's recommendation that
+  "the terminal is not where the trouble has been" is this file, concretely.
+
+The 304-line figure overstated what moves. Perhaps 20 lines do.
+
+## In scope
+
+Replaced outright, each already named in adr-0000005 or found reading the
+tree for this record:
+
+```text
+keys.go                  267   key decoding and the mouse report
+rawmode.go + siblings     252   raw mode, per-OS query, the bounded read's mode
+readable.go, readable_flags.go  105   the bounded read itself
+window.go + sibling       105   the resize watch
+terminal.go + siblings    178   the termios check, per OS
+caret.go                   93   caret placement
+internal/clipboard          64   the OSC 52 write
+```
+
+Rewritten against the library, not removed:
+
+```text
+stack.go       687   the frame; becomes the custom primitive adr-0000005 chose
+run.go         769   the paint loop and the raw escape writes in it
+line.go        176   the field editor, against tcell key events
+```
+
+The two sequence-writing methods named above, inside otherwise-unaffected
+files:
+
+```text
+color.go    RGB.Sequence, RGB.BackgroundSequence
+palette.go  Palette.Sequence
+```
+
+`go.mod` gains `github.com/rivo/tview` (and its own dependency on
+`github.com/gdamore/tcell/v2`) for real, replacing the scratch module adr-
+0000005 measured against.
+
+## Out of scope, and which phase has it
+
+```text
+bars.go, topbar.go, width.go, color.go's RGB type, ground.go's rules,
+  attribute.go, command.go, levels.go, log.go, worker.go, session.go  unaffected,
+                                                                       pure logic
+the pane set, the pane bar, pane IDs                                 phase 4
+program-owned scrollback, the receive queue                          phase 5
+the message queue, input history                                    phase 6
+copy/paste/restore, the crash log                                    phase 7
+the per-pane permissions ledger                                      phase 8
+the twiddle, thinking phrases, tool icons, the bell                  phase 9
+```
+
+`width.go`'s `DisplayWidth` and `CutColumn` are listed as unaffected rather
+than folded into the library, and that is the one item on this list not yet
+checked against tcell's own wide-rune accounting. tcell measures a cell
+grid's own columns for its own purposes; whether this package can lean on
+that or still needs its own measurement for text it is not yet drawing
+through tview, such as `fieldRow`'s cut before a `Primitive` exists to own
+it, is open.
+
+## How it is known to be done
+
+1. `palette_test.go`'s two sequence tests,
+   `TestSequenceWritesDirectRGB` and `TestBackgroundSequenceIsABackground`,
+   assert a `tcell.Style` or `tcell.Color` rather than an escape string. Every
+   other assertion in that file is unchanged.
+2. `layout_test.go`, `run_test.go`, `frame_diagnostic_test.go`, and
+   `order_diagnostic_test.go`, the roughly 970 lines the test survey counted,
+   are rewritten against `tcell.SimulationScreen` rather than a byte buffer,
+   and assert the same things they did before: row order, the cut at the
+   terminal's width, the caret's position, the bar's field set.
+3. `keys_test.go` and `terminal_test.go`, 356 lines, are deleted along with
+   the code they tested, since both exercise mechanics the library now owns.
+4. `bmake test` passes with tview as a real dependency, not a scratch module.
+5. `bmake crossbuild` passes for all eight `PLATFORMS` targets with tview in
+   `go.mod`, which is the one check adr-0000005 could not close, since a
+   scratch module shows the library needs no cgo and says nothing about
+   whether this program still builds once it depends on it.
+6. The reader runs it in Terminal.app. Nothing in this phase is confirmed
+   working until that happens once; every test above can pass against a
+   `SimulationScreen` while the real terminal does something else.
+
+## Open
+
+- `width.go` against tcell's own measurement, named above.
+- Whether the custom frame primitive is one `Primitive` for the whole screen
+  or one per status bar plus one for the log, which adr-0000005 did not
+  settle beyond choosing "a custom primitive" over the two rejected layouts.
+- Whether `keys_test.go`'s fifteen tests have any assertion worth keeping as
+  a test of this package's own key-to-command mapping, separate from the
+  sequence decoding the library now does, before the file is deleted outright.

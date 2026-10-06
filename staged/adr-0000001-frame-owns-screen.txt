@@ -1,0 +1,73 @@
+# 0000001 The frame owns the screen
+
+- Status: accepted, and SUPERCEDED. 0000008 replaced the single frame with three
+  vertical parts, and 0000010 replaced that with the API. This stands as a record
+  of a decision that was taken and then replaced, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
+- Date: 2026-10-05
+- Supersedes: a six-row footer drawn downward at the bottom of the screen, with the
+  log in a scroll region above it
+
+## Context
+
+The interface drew a fixed number of rows for itself at the bottom of the screen
+and told the terminal where the log began. That arrangement needed the program to
+know where its own region started and ended, and it had that arithmetic wrong:
+the region was given a row count and wrote its first row as the first row of the
+screen, so the rows a reader was typing into fell inside the region.
+
+Two symptoms followed from the one cause. A log long enough to scroll was drawn
+over the rows the reader was typing into, and the rows below the region could
+never be scrolled into, which read as the output being capped to the height of
+the interface.
+
+## Decision
+
+The program owns every row of the screen. There is one region and it is the whole
+terminal, so there is no region arithmetic to get wrong.
+
+Every row carries a status field in the first column and a log row beside it. The
+log scrolls upward through those rows as it is written: a row arriving appears
+just above the prompt and everything above it moves up. The prompt is the last row
+drawn, and the caret is placed there by absolute position.
+
+The row count is a ceiling rather than the height of the screen, so a shorter
+screen draws every row it has and a taller one leaves the remainder alone.
+
+## Consequences
+
+The two symptoms go, since neither had a place to occur once there was no second
+part of the screen for the log to have.
+
+The reader's own scrollback is no longer the transcript. It is whatever the
+terminal kept from before the program started. A reader scrolling past the
+program's first row finds their shell rather than the conversation, and reaching
+anything older means the program's own paging, which does not exist yet.
+
+The transcript is not live scrollback while the program runs. It is drawn by the
+program from rows it holds.
+
+A frame this shape cannot use the alternate screen and keep a live transcript,
+so the alternate screen remains the alternative for a future decision rather than
+an option behind this one.
+
+## Alternatives considered
+
+Fix the region so it began below the interface. Two signatures and a call site,
+and it keeps the previous property that the reader's scrollback is the
+transcript. This was the recommendation in the design record before the decision
+was taken and it remains a reasonable change.
+
+Redraw the bars on every paint, which the one-owner frame permits. It costs the
+live transcript for no gain here, since no bar needs a per-step repaint that the
+field column does not already provide.
+
+## Notes
+
+The bar renderers were left in place when the footer was removed. They are still
+exported and still join their whole field list, so a caller outside the module
+can reach them. See 0000002 for the width rule they now follow.
+
+The arrangement this record settled no longer exists. 0000008 replaced it and 0000010
+replaced that, and the reader's own later work replaced the pane bar that 0000008's
+third part held. Read this for the two symptoms and the two failures the footer
+had, and not for a screen.

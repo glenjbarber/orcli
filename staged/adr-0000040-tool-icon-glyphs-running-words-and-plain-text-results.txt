@@ -1,0 +1,63 @@
+# 0000040 Tool icon glyphs, running words, and plain-text results
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles backlog items 27, 28, and 29 in
+  `QUESTIONS.md`, filling in specifics 0000028 left open
+
+## Context
+
+0000028 settled the structure: one icon per category (`fs`, `git`, `shell`),
+each carrying a running state and a result state, with a text fallback
+carrying the same three states when the terminal cannot draw an icon. It
+left the actual glyphs, the running-state words, and the plain-text result
+words unnamed, as backlog items 27, 28, and 29.
+
+## Decision
+
+**The glyphs are `shell` = 🖥️, `fs` = 📄, `git` = 🌿.**
+
+**The running state alternates between two words, `Running...` and
+`Working...`.** The timer driving the alternation is the one 0000029 already
+settled for the thinking phrase set: it resets on every update from the
+API, or every seven seconds, whichever is shorter. No second timer is
+introduced.
+
+**The plain-text result words are `Done` and `Failed`.** These were
+already used as illustrative examples in 0000028's own text; this record
+takes them as the actual choice rather than leaving them as illustration.
+
+## Reasoning
+
+The three glyphs were picked for a rough semantic fit, a screen for a
+shell, a document for the filesystem, a branch for git, and because all
+three render at the same terminal cell width, two cells, matching the
+precedent the two-cell twiddle already set in `frame-130x40.txt`. No
+category's icon shifts a row's width differently from another's.
+
+Reusing 0000029's timer rather than inventing a second one keeps every
+timed-alternation element in this design on the same cadence, rather than
+having the main thinking indicator and a tool call's running state drift
+out of step with each other for no reason.
+
+`Done` and `Failed` needed no separate derivation once 0000028 had already
+used them as its own examples; formalizing them is simpler than replacing
+working examples with different words for no stated reason.
+
+## Consequences
+
+None beyond what 0000028 already named. This record only fills in values the
+structure already made room for.
+
+## Alternatives considered
+
+None weighed for the glyphs or the words beyond what is stated above; the
+reader ratified the proposal as given.
+
+## What this leaves open
+
+Nothing from backlog items 27, 28, or 29.
+
+## Notes
+
+Nothing in the tree has changed. There is no tool line drawn in the tree.

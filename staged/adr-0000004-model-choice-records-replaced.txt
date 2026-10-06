@@ -1,0 +1,74 @@
+# 0000004 A choice records the model it replaced
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: a writer that set the current model and recorded nothing about the
+  one before it
+
+## Context
+
+A reader could set the model the session answered with, and the choice reached a
+file. Nothing recorded the model that had been in force before, so a reader who
+changed their mind had no way back to what they had unless they remembered it.
+
+A file that holds a credential is edited as bytes rather than decoded and
+re-encoded, so key order, whitespace, escapes and a missing final newline all
+survive a write. Two members written by two separate edits would each be a full
+read and a full write of that file.
+
+## Decision
+
+Setting a model records the one it replaced, under a second member. Going back
+swaps the two members, and swapping twice puts both back where they were.
+
+The two members are written in one pass. They are one decision, and a reader
+whose terminal died between two writes would be left with a file that disagrees
+with itself about which model is in force.
+
+A choice moves the running session as well as the file, since a reader must not be
+answered by one model while the interface shows another. The setter takes the same
+lock the session state takes, because a choice runs on the input goroutine and a
+request reads the model on the request goroutine.
+
+Going back with nothing to go back to is refused by name rather than writing an
+empty model, since an empty model is a session that cannot ask anything and is not
+one a reader chose.
+
+A confirmation does not record the model it replaced. See 0000003: a first request
+is a probe rather than a move, and treating it as one would send a reader back to
+a model they never chose.
+
+## Consequences
+
+Going back is safe to press twice, which is what makes it worth having at all. A
+command whose second press undid its first would be one a reader hesitates over.
+
+Two members now describe the same thing in two places, the file and the running
+session, so the change moves both. Anything else that writes the model would
+have to do the same or the two would disagree.
+
+Going back is refused when there is nothing to go back to, which is the state a
+reader is in before choosing anything. That is a message rather than a no-op,
+since an empty model would be a session that cannot ask.
+
+A choice with nothing in force records nothing, since there is no model to record
+as replaced.
+
+## Alternatives considered
+
+Hold the previous model in memory only. A reader restarting would lose it, and a
+preference that survives a restart is the point of writing it to a file at all.
+
+Record the replaced model on every write, including the confirmation. This was
+rejected for the reason above, that a probe is not a move.
+
+Keep a list of every model used. A reader wanting the one before last would have
+it, and the file would grow without bound in a long session, and the one case
+that comes up is the one where two presses went too far.
+
+## Notes
+
+Both members are read back out of the file rather than out of the running session
+before a decision is made, so a reader who edited their own configuration by hand
+is answered from what their file says rather than from what was loaded at
+startup.

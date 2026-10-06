@@ -413,26 +413,6 @@ func TestEnabledRendersAsAWord(t *testing.T) {
 	}
 }
 
-// TestAFileIsNotATerminal covers the property the check rests on, and the case that
-// shows the fix was worth making: an ordinary file is a character device on some
-// systems and a regular file on others, and a stat cannot tell a terminal from
-// either.
-func TestAFileIsNotATerminal(t *testing.T) {
-	if !tui.TermiosSupported {
-		t.Skip("this build cannot ask a descriptor about its terminal state")
-	}
-
-	f, err := os.CreateTemp(t.TempDir(), "notaterminal")
-	if err != nil {
-		t.Fatalf("create a file: %v", err)
-	}
-	defer f.Close()
-
-	if tui.IsTerminal(f.Fd()) {
-		t.Error("an ordinary file was reported as a terminal")
-	}
-}
-
 // TestErrNoTerminalNamesTheReason covers the message a reader who pipes this sees. A
 // reader who redirected on purpose needs to be told that was the problem and not that
 // the program is broken.

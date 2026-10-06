@@ -1,0 +1,94 @@
+# 0000032 /begin forks a pane, with a handoff note rather than full history, and copied permissions
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It introduces `/begin`, not asked by any numbered
+  question in `QUESTIONS.md`
+
+## Context
+
+The reader wants a `/begin` command: take the current context and hand off
+to a new pane to begin a task. Three things about it were settled directly
+rather than derived: what happens to the pane that called it, what the new
+pane inherits of the conversation, and what the new pane inherits of
+permissions.
+
+## Decision
+
+**`/begin` forks; it does not hand off and leave.** The pane that calls
+`/begin` stays open and keeps working on whatever it was doing. A second,
+independent pane is created alongside it, not instead of it.
+
+**The new pane's session starts with a handoff note, not the full
+transcript.** It does not receive a copy of the calling pane's messages,
+scroll position, queue, or copy buffer; it receives one note describing the
+task, the way a colleague is handed a task rather than handed a transcript
+of everything said before it was assigned. What exactly is in the note, and
+who writes it, is not decided here.
+
+**The new pane's permissions ledger is seeded with a copy of the calling
+pane's current verdicts**, taken at the moment `/begin` runs. This is a copy,
+not a link: a row is written for the new pane's id for each `(path,
+verdict)` the calling pane currently holds, under 0000030's append-only rule,
+and nothing further connects the two panes' ledgers after that moment.
+
+## Reasoning
+
+A fork rather than a handoff-and-close keeps `/begin` from being a special
+case of `/close`: the calling pane's own task is not assumed finished just
+because a new one started elsewhere, and nothing requires the reader to have
+intended that.
+
+A note rather than the full transcript matches how a human hands off a task:
+the new pane is told what it needs to know, not shown everything that led to
+knowing it. It also keeps the new pane's own session genuinely its own from
+the start, consistent with every other per-session decision already taken:
+the queue (0000012), the prompt (0000022), copy (0000025), and now this.
+
+Copying permissions rather than starting at whatever a fresh pane would
+default to is the one piece of context carried over deliberately: a task
+handed off under an escalated directory should not have to re-earn that
+escalation immediately, which a from-scratch default would force. Copying
+rather than linking keeps each pane's ledger independently its own after the
+fork, matching 0000030 and 0000031's per-pane rows rather than introducing shared
+state between two panes for the first time in this design.
+
+## Consequences
+
+Escalating or revoking a permission in one of the two panes after the fork
+has no effect on the other. They share a starting point, not an ongoing
+connection.
+
+A reader who forks a pane expecting the new one to know the whole
+conversation so far will be surprised; only a note crosses, not the
+transcript. What goes in that note is unresolved and is named below rather
+than guessed at.
+
+## Alternatives considered
+
+Handing off and closing the calling pane, so `/begin` reads as a rename of
+the task rather than a fork. Rejected by the reader directly: the calling
+pane stays open and keeps working.
+
+Copying the full transcript into the new pane. Rejected: it would make the
+new pane's session start already carrying everything 0000012's reasoning holds
+a session should own for itself, undermining the fresh-session shape every
+other pane gets.
+
+Linking the two panes' permissions rather than copying them, so an
+escalation in one reaches the other. Not raised as an option; the reader's
+answer was inheritance at the moment of the fork, which a copy satisfies and
+a live link would overshoot.
+
+## What this leaves open
+
+What the handoff note contains and who writes it: the reader's own typed
+task description, a model-generated summary of the conversation so far, or
+both. Whether `/begin` takes an argument naming the task, or infers it from
+context. Where the new pane's number comes from, under whichever pane-ID
+rule question 25's open contradiction eventually settles.
+
+## Notes
+
+Nothing in the tree has changed. There is no `/begin` command and no pane
+set in the tree.

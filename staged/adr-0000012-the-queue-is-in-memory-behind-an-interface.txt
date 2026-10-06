@@ -1,0 +1,81 @@
+# 0000012 The message queue is in memory, behind an interface
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It answers a question 0000006 left open
+
+## Context
+
+0000006 settled the message queue: a message typed while a model is working is
+queued, escape sends the head of the queue now, and a message sent by escape
+leaves the queue when the model has processed it rather than when it was sent.
+It left one question open, which is where the queue lives.
+
+The reader raised SQLite for it. The reason is real: a process that may be
+replaced at any moment cannot hold pending work in a field of its own, and
+pending work that a crash loses is work the reader typed.
+
+The reason against it is also real. Every queued message becomes a write, and a
+reader who queues four messages in a second pays four writes. A queue is the
+thing a reader fills while a model is thinking, which is exactly when they are
+least inclined to wait on a disk.
+
+`internal/saved` already uses `modernc.org/sqlite`, a pure Go driver chosen so
+`bmake crossbuild` keeps working with no cgo, so the dependency is available
+if it is wanted later.
+
+## Decision
+
+**The queue lives in the session, in memory, behind a small interface.** The
+interface is what the turn asks about it: what is queued, how much, and taking
+the head.
+
+**SQLite is not taken now and may be put behind the same interface later.**
+Nothing above the interface changes when it is.
+
+**A queued message is not durable before it is sent.** It becomes durable
+when it is sent, through the same save path as everything else the session
+records. The window where a crash loses a queued message is the window where
+the reader has not yet asked the model anything.
+
+## Consequences
+
+A crash loses what the reader typed but had not sent. That is the accepted
+cost, and it is bounded: the loss is the queue and nothing else, since the
+conversation so far has already been recorded by the autosave that runs after
+each clean turn.
+
+A reader who wants their pending questions to survive a restart does not get
+that until a store is put behind the interface. Nothing has to be rebuilt when
+it is, which is what the interface is for.
+
+The queue is per session, so a pane that is not focused has its own and does
+not share the focused pane's. A reader who typed into pane 1 and switched to
+pane 0 has a question waiting in pane 1, and going back finds it.
+
+A reader working on one machine with a fast disk would notice no difference
+between this and SQLite, since a write is a write and both are quick. The
+difference appears under load, where four queued messages in a second is four
+writes competing with the turn that is still running.
+
+## Alternatives considered
+
+SQLite from the first commit, writing every queued message before it is sent.
+Rejected. It makes a keystroke a write on the path a reader uses most while
+waiting, and it makes the schema a decision that has to be settled before the
+pane set exists.
+
+An append-only journal file, one line per queued message, replayed on startup.
+Rejected. It is SQLite with a weaker guarantee and a file to parse, and the
+guarantee it buys is the one just declined.
+
+## What this leaves open
+
+Whether a queued message is durable before it is sent was asked alongside the
+storage question and is answered above as no. Whether a reader can ask for
+their pending questions to be durable is not decided, and would need a store.
+
+## Notes
+
+Nothing in the tree has changed in writing this. There is no queue in the tree
+and no interface for one.

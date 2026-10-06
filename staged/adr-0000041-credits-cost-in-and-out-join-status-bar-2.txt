@@ -1,0 +1,74 @@
+# 0000041 Credits, Cost, In and Out join status bar 2
+
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
+- Date: 2026-10-06
+- Supersedes: nothing. It extends 0000021, which named status bar 2's
+  fields, and 0000016 and 0000037, which placed the shed ladder
+
+## Context
+
+The reference `openrouter-cli` top bar carries Credits, Cost, tokens In and
+tokens Out, the figures that move slowly across a session. `DESIGN.md` and
+0000021 carried the redesign's two bars forward from the reference without
+a place for any of the four. Status bar 2, `Hostname | Context | Autosave |
+Stealth | Approval`, is where the rest of that slow-moving group already
+sits.
+
+## Decision
+
+**Status bar 2 gains four fields: Credits, Cost, In and Out.** The order,
+slowest-changing toward the edge:
+
+```
+Hostname | Credits | Cost | Context | In | Out | Autosave | Stealth | Approval
+```
+
+**The shed ladder for bar 2 (0000016, 0000037) gains one step.** The existing
+order sheds Approval, then Stealth, then Autosave, then Context, then the
+bar drops whole. Credits, Cost, In and Out shed together, as one step,
+between Approval and Stealth:
+
+```
+Approval → Credits/Cost/In/Out (together) → Stealth → Autosave → Context → bar drops whole
+```
+
+## Reasoning
+
+All four are the reference's own slow-moving group, the same group Hostname
+and Context already belong to, so they join the bar that already carries
+those two rather than status bar 1, which carries Provider, Model, Status
+and Verbosity, the fields that change on the fly next to what the reader
+is typing.
+
+The four shed together rather than one at a time because they are one
+reading, the session's running cost and usage, and a bar that dropped Cost
+alone while keeping Credits, In and Out would show a partial figure that
+reads as a different thing than what it is.
+
+They shed before Stealth and Autosave because those two are settings the
+reader chose, not figures that change on their own, and a setting is worth
+more screen space than a running total once space is short. They shed
+after Approval because 0000016 already placed Approval first and nothing
+here argues to move it.
+
+## Consequences
+
+A reader at a narrow terminal loses the running cost and usage figures
+before losing Stealth, Autosave or Context. The cost ledger itself is
+unaffected; this is a display question only.
+
+## Alternatives considered
+
+Splitting the four across both bars, by fast- versus slow-moving, was not
+chosen: all four come from the same source and change at the same rate, so
+splitting them would separate one reading into two places for no reason
+tied to how often either half changes.
+
+## What this leaves open
+
+Nothing from this question. The shed ladder for bar 1 is unaffected.
+
+## Notes
+
+Nothing in the tree has changed. There is no status bar drawn in the tree
+yet; `DESIGN.md` section 2 is updated to match.

@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // TestBothTablesCarryEveryRole is the check that catches a role added to one table
@@ -399,6 +401,28 @@ func TestBackgroundSequenceIsABackground(t *testing.T) {
 
 	if want := "\x1b[48;2;16;16;16m"; got != want {
 		t.Errorf("BackgroundSequence wrote %q, want %q", got, want)
+	}
+}
+
+func TestTCellStyleCarriesThemeAndRoleColors(t *testing.T) {
+	theme := themeWith(t, "#3b82f6", "#101010")
+	p := NewPalette(true, GroundDark, &theme)
+
+	fg, bg, _ := p.BaseStyle().Decompose()
+	if r, g, b := fg.RGB(); r != 59 || g != 130 || b != 246 {
+		t.Errorf("base foreground = (%d, %d, %d), want (59, 130, 246)", r, g, b)
+	}
+	if r, g, b := bg.RGB(); r != 16 || g != 16 || b != 16 {
+		t.Errorf("base background = (%d, %d, %d), want (16, 16, 16)", r, g, b)
+	}
+
+	styleFG, _, _ := p.Style(RoleFailure).Decompose()
+	want := RoleTableFor(GroundDark)[RoleFailure].TCellColor()
+	if styleFG != want {
+		t.Errorf("failure foreground = %v, want %v", styleFG, want)
+	}
+	if got := NewPalette(false, GroundDark, nil).BaseStyle(); got != tcell.StyleDefault {
+		t.Errorf("palette-off base style = %v, want default", got)
 	}
 }
 

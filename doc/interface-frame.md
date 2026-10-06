@@ -7,8 +7,8 @@ terminal and sets no scroll region.
 Code: `internal/tui/stack.go` in full, `internal/tui/caret.go`, and the painter in
 `internal/tui/run.go`.
 
-The decision that replaced the previous frame is 0001 in
-`staged/adr-0001-frame-owns-screen.txt`, and what it cost is at the end of this
+The decision that replaced the previous frame is 0000001 in
+`staged/adr-0000001-frame-owns-screen.txt`, and what it cost is at the end of this
 file.
 
 ## The shape
@@ -75,8 +75,8 @@ reader may act on, and what the session is holding.
 | 18 | `fieldFolded` | rows the log dropped | a count |
 | 19 | `fieldPrompt` | the reader's own line | `>` and the prompt |
 
-**A field is one character.** That is the reader's decision and it is 0002 in
-`staged/adr-0002-one-character-field.txt`. A field that cannot say what it means
+**A field is one character.** That is the reader's decision and it is 0000002 in
+`staged/adr-0000002-one-character-field.txt`. A field that cannot say what it means
 in one character says nothing, so every glyph is a letter a reader can read rather
 than a figure a reader has to learn, and `TestEveryFieldIsOneCharacter` holds
 every field to one character except the two named below.
@@ -92,8 +92,8 @@ thousand rows reports `1`, and the field names say which count it is.
 
 **`fieldModel` moves with `/model`.** A choice calls `Session.SetModel` as well
 as writing the file, so the glyph beside the prompt is the model the next turn is
-sent with rather than the one the file held when the frame was drawn. See 0004 in
-`staged/adr-0004-model-choice-records-replaced.txt`.
+sent with rather than the one the file held when the frame was drawn. See 0000004 in
+`staged/adr-0000004-model-choice-records-replaced.txt`.
 
 ## The log rides beside the fields
 
@@ -209,7 +209,7 @@ The reader's own scrollback is not the transcript. It is whatever the terminal k
 from before the program started. The transcript is drawn from rows the program
 holds, in the second column.
 
-That is the trade 0001 weighs, and `staged/design-status-bar-ui.txt` sets out the
+That is the trade 0000001 weighs, and `staged/design-status-bar-ui.txt` sets out the
 three arrangements considered and why this one was chosen. The alternate screen is
 where the bars could be redrawn per paint, and it was not taken.
 

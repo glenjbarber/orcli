@@ -1,0 +1,114 @@
+# 0000011 The editing keys, and a history with no duplicates
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It fills a gap 0000010 left, and 0000010 refers here
+
+## Context
+
+0000010 is the API document for the interface being built. It gives the screen,
+the commands, the prompt and the pane rules. It says nothing about the keys
+that edit a line, and that is a gap rather than an omission: a reader who
+cannot move the caret, erase a word or reach what they typed an hour ago is
+not able to use the interface at all, so those keys belong to the same document
+as the commands they sit beside.
+
+The tree has a line editor at `internal/tui/line.go` and a key reader at
+`internal/tui/keys.go`. Both are built for the frame 0000001 settled and neither
+is what the interface being designed uses, so what is recorded here is the
+decision and not an observation about the code.
+
+The decision that needed the most care was the history order, because the
+obvious spelling of it is the one that loses a reader's last edit.
+
+## Decision
+
+**`Ctrl+A` moves the caret to the start of the line. `Ctrl+W` erases the word
+before the caret. `Ctrl+U` erases from the caret to the start of the line.**
+
+The three are the emacs spellings rather than the vi ones, and the reason is
+that the reader named them in those letters. `Ctrl+A` is not `Ctrl+B`, which
+is the prefix, and there is no `0` or `^` in the form given.
+
+**Up and Down walk the input history.** They move one entry per press and stop
+at each end rather than wrapping, since a history that wraps sends a reader
+looking for their first question to their most recent one.
+
+**A history entry that duplicates an earlier one is kept once, at the position
+of its most recent occurrence, and the history is ordered most recent first.**
+So pressing Up after typing `ls` three times over an hour shows `ls` once, at
+the top, and the older `ls` is gone rather than three rows down.
+
+**A line that was sent is remembered whatever it was.** A question, a command
+and a pasted paragraph are all history, since a reader reaching back for what
+they wrote did not have to know which of the three it was.
+
+**A line that was queued rather than sent is history too,** and is remembered
+at the moment it is sent rather than at the moment it is queued, so the history
+holds what the model was actually asked.
+
+**Walking the history does not send anything and does not clear the line.**
+Up replaces the field with the entry and leaves the caret at its end, so a
+reader who walks back three entries and then presses Down is editing the field
+rather than rewinding a transcript.
+
+**A history entry that equals what is already in the field is not re-fetched
+by a second press.** Pressing Up twice on one entry does not go somewhere
+else, since there is nowhere else that is not a different entry.
+
+## Consequences
+
+`Ctrl+A` and the prefix are different keys, and a reader who wants to type a
+control character into a model prompt has to know which is which. That cost is
+accepted rather than solved, since solving it means moving the prefix.
+
+Deduplication is what makes the history usable at all for a repeated command,
+and it costs the reader the ability to reach the same text twice from two
+different moments. A reader who ran `ls`, changed a file and ran `ls` again has
+one `ls` in the history, and it is the second.
+
+Deduplication happens on the exact text of the line. Two lines that differ only
+in trailing whitespace are two entries, and trimming them would be a guess
+about what the reader meant.
+
+A pasted paragraph in the history makes Up slower to walk past, and there is
+no bound proposed here. How many entries are kept, and whether a very long one
+is shortened, is open.
+
+The history is per session rather than global. A pane restored from disk gets
+the history that was saved with it, if it was saved at all, and whether it was
+is open.
+
+## What is open
+
+- How many history entries are kept, and whether an entry longer than some
+  length is shortened or skipped.
+- Whether the history is saved with the session, and whether `/restore` brings
+  it back.
+- Whether an input line carrying only a command word is remembered at all,
+  since a reader who types `/pane 1` may not want it offered back.
+
+## Alternatives considered
+
+History most recent last, walked with Up going back in time. Rejected. It puts
+the reader's most recent line two rows from the top of a list, and the first
+press after finishing a turn lands somewhere they did not expect.
+
+History with duplicates kept in order, so three `ls` presses give three `ls`
+rows. Rejected. A reader who ran the same command three times has one thing to
+reach for, and three identical rows is a list that has to be read rather than
+scanned.
+
+Wrapping at the ends of the history. Rejected. Reaching the oldest entry is not
+something a reader does by accident, and a press that moves is a press that
+surprises.
+
+`Ctrl+E` and `Ctrl+K` for the ends and the tail. Not added. Nothing in the
+design needs them yet, and a key added before a reader has asked for it is a
+key someone has to read about.
+
+## Notes
+
+Nothing in the tree has changed. The editor in `internal/tui` implements its
+own keys for a frame that is being replaced, and those keys were not consulted
+in taking this decision.

@@ -4,33 +4,33 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
-// The frame, as it is now: the program owns the screen.
+// The frame, as it is now: the program owns the screen, and the screen is five fixed rows
+// below a scrollback that takes whatever height is left.
 //
-// There is one region, and it is the whole terminal. Every row is a status field in the
-// first columns and a log row beside it, and the log scrolls upward through those rows as
-// it is written. The prompt is the last row, with the reader's own line rather than a log
-// row beside it.
-//
-// # The field column
-//
-// A row is a name, a value, and the log. The name is what the reader reads and the value
-// is what it says, and they are beside each other rather than on two rows, since a reader
-// looking for the model is looking for one row and not for a label and a figure.
-//
-// The column is padded to the widest name in the field list rather than to a figure, so a
-// field is at the same column on every row and a reader following one down the screen is
-// following one left edge. That is the whole of the alignment: the log starts at the same
-// column on every row, and the padding is what puts it there.
+// Bottom to top: the pane bar, bar two (the longer-term fields - provider, model,
+// verbosity, mouse, and whether the viewport is at the live edge), bar one (the live,
+// fast-changing fields - state, the sweeping figure, queue depth; see
+// barOneFields/barTwoFields), one blank separator line, and the prompt - this order
+// confirmed by Glen (2026-10-06). Everything above those five rows is scrollback: the
+// tail of the log, newest row just above the prompt, oldest pushed off the top as it
+// grows. This is loreloom/UI-redesign.md's shape (2026-10-06) with one addition: that
+// document names only the prompt, blank line, and two bars, and Glen added the pane bar
+// as a fifth fixed row rather than cutting it (adr-0000019/0000020 are carried forward,
+// not superseded). It is not the field-column-beside-every-log-row shape the ten ADRs
+// this does supersede (see staged/adr-index.txt) describe.
 //
 // # Why the log is not below the stack any more
 //
-// It was. Six rows were the footer's, drawn once and left alone, and the log was a region
-// below them that the terminal scrolled. That arrangement needed the program to know where
-// the region started and ended, and it got it wrong: the scroll region took a row count and
-// wrote the first row as one, so the six rows the reader was typing into were inside the
-// region and a long log went over them.
+// Before this, and before the one-row-per-field shape before that, six rows were a footer's,
+// drawn once and left alone, and the log was a region below them that the terminal scrolled.
+// That arrangement needed the program to know where the region started and ended, and it got
+// it wrong: the scroll region took a row count and wrote the first row as one, so the six
+// rows the reader was typing into were inside the region and a long log went over them.
 //
 // A frame with one owner has no seam to get wrong. The program holds the log, and decides
 // for itself what a row shows, so nothing depends on where the terminal thinks its region
@@ -44,25 +44,39 @@ import (
 // conversation.
 
 // Prompt is what the reader's line is drawn behind.
-const Prompt = "root@localhost $ "
+//
+// This is the string loreloom/UI-redesign.md gives (2026-10-06), confirmed against a
+// rendered mockup: a space on each side of the dollar sign. adr-0000010 settled on
+// `root@lolhost @ ` instead, deliberately; that disagreement is recorded in
+// staged/adr-index.txt rather than resolved there, and is resolved here in the string's
+// favour because the mockup built from this string is the one that was confirmed.
+const Prompt = "root@lolhost $ "
 
-// StatusFields is how many status fields the frame carries.
+// barRows is how many fixed rows sit below the scrollback: the prompt, one blank
+// separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
+// bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
+// (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
+// cutting it, dropping it into bar two, or leaving it homeless.
+const barRows = 5
+
+// barOneFields and barTwoFields choose which Status fields render on each status bar.
 //
-// Twenty is the count the reader settled: the six rows the stack had plus fourteen beside
-// them, which fills a twenty row terminal on the height. The prompt row is one of the twenty
-// rather than one beside them, since it is a row like every other and the reader is typing on
-// it.
-//
-// The count is a ceiling rather than a figure, since a terminal shorter than this draws every
-// row it has and sheds fields from the bottom. It is named once so the count the frame draws,
-// the count the tests assert, and the count the layout reads cannot drift apart.
+// loreloom/UI-redesign.md names bar two's fields explicitly - provider, model,
+// verbosity, mouse, scrollback - and says nothing about bar one beyond "rapidly
+// changing statistics." Glen confirmed bar one's list and the bars' order
+// (2026-10-06): state, the sweeping figure, and the queue depth, with bar one
+// above bar two.
+var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
+
+// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
+// The fifth, scrollback-on, is Session.AtLiveEdge - see renderBarTwo.
+var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
+
+// StatusFields is how many named status fields exist, whether or not a given redesign
+// of the frame renders all of them. It no longer bounds how many rows the frame draws
+// (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
+// field added to the fieldXxx list and the array that holds its value cannot drift apart.
 const StatusFields = 20
-
-// statusGap is what sits between the fields and the log beside them.
-//
-// One space, and one space only. A wider gap is a column the log has not got on a narrow
-// terminal, and the log is what the reader came back for.
-const statusGap = " "
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -219,26 +233,6 @@ func fieldName(k int) string {
 	}
 }
 
-// nameWidth is how wide the name column is, so the log starts at one column on every row.
-//
-// It is the widest name in the field list plus a space, computed from the names rather than
-// carried as a figure. A figure here would be one more thing to go stale when a field is
-// renamed, and a name column a character narrow puts the log one column left on some rows
-// and not on others, which is a log with no left edge.
-//
-// It is the width of the names and not the width of the names and their values, since a
-// value is prose of any length and padding to it would leave the log off the right edge of a
-// narrow terminal for the sake of a field that is four characters wide.
-func nameWidth() int {
-	widest := 0
-	for k := range statusCount {
-		if w := DisplayWidth(fieldName(k)); w > widest {
-			widest = w
-		}
-	}
-	return widest
-}
-
 // Status is what each field says, field by field.
 //
 // It is a fixed-size array rather than a slice because the count is fixed, and a caller
@@ -258,51 +252,26 @@ type Status [statusCount]string
 type barRow struct {
 	// fields is the name and the value, padded to the name column.
 	fields string
+	spans  []Span
 
 	// log is the log row shown beside the fields, which is the reader's own line on the
 	// prompt row.
 	log string
 }
 
-// screenRows is how many rows the frame draws on a terminal of this height.
+// scrollbackRows is how many rows of log the frame draws above the fixed bottom rows.
 //
-// It is the count of fields the screen can hold, since every row carries a field. A terminal
-// shorter than the count draws every row it has and takes the fields from the top, so what is
-// shed is the bottom of the list and the prompt row is still there.
-//
-// The count is a ceiling rather than the terminal's height, so a tall terminal draws twenty
-// rows and the rest of the screen is left to the terminal rather than drawn as empty rows.
-func screenRows(height int) int {
-	if height < 1 {
+// It is height minus barRows, floored at zero. A terminal shorter than barRows has no
+// scrollback at all; what a terminal that short should shed first among the prompt,
+// blank line, two bars, and pane bar is not settled by loreloom/UI-redesign.md or by
+// Glen's own extension of it to five rows (it is silent on shedding, the way
+// adr-0000016 settled it for the design this one supersedes), so the fallback below
+// draws only the prompt rather than guessing a shedding order nobody has decided.
+func scrollbackRows(height int) int {
+	if height < barRows {
 		return 0
 	}
-	if height < statusCount {
-		return height
-	}
-	return statusCount
-}
-
-// footerScreenRow is the row of the terminal that the field at k is on.
-//
-// The frame is at the top of the screen, so the first row is row one and field k is one
-// further down. There is no arithmetic against the terminal's height here, which is the point:
-// a row named by a height is a row that moves when the height is read a second time, and a row
-// that moves is a row the caret can end up off.
-func footerScreenRow(screen *Screen, k int) int {
-	return 1 + k
-}
-
-// promptScreenRow is the row of the terminal the prompt row is on.
-//
-// It is the last row the frame draws, so on a terminal tall enough for the whole field list it
-// is the last of the twenty and on a shorter one it is the last row the screen has. Either way
-// it is the last row drawn, which is what puts the caret where a reader expects to find it
-// without being told the frame's height.
-func promptScreenRow(screen *Screen) int {
-	if rows := screenRows(screen.Height()); rows > 0 {
-		return rows
-	}
-	return 1
+	return height - barRows
 }
 
 // Bar is what the frame carries that is not a field value.
@@ -318,221 +287,324 @@ type Bar struct {
 	Field string
 }
 
-// DrawLog writes rows downward to the terminal, below the frame.
-//
-// It is kept as a name because a caller asks the log to be drawn and the answer is where it
-// goes. The frame owns the screen now, so a caller drawing the whole screen goes through
-// DrawStack and passes the log rows as part of the frame rather than calling this.
-func DrawLog(w *Screen, rows []Row, palette Palette) {
-	if len(rows) == 0 {
-		return
-	}
-
-	width := w.Width()
-	for _, row := range rows {
-		w.Write(foldRow(palette, PlainRow(row), width) + "\r\n")
-	}
+// Frame is the screen-sized primitive that draws the status rows and transcript.
+// tview owns terminal setup and input; this primitive owns the cell layout.
+type Frame struct {
+	*tview.Box
+	bar     Bar
+	log     []Row
+	palette Palette
+	caret   int
+	step    int
+	scroll  int
+	paste   func(string)
 }
 
-// foldRow renders one row, cut to the width.
-//
-// The palette is asked for a role per span rather than per row, since a row may carry several:
-// a tool line is a tool colour over its own words. A row with no spans is written plainly, which
-// is the common case and the one that must cost the least.
-//
-// The walk is in one piece: every byte of the row is written exactly once, either inside a
-// span or outside one. Writing the text before each span and then jumping past the span loses
-// the span's own text, so a row whose spans cover its middle arrives with a hole in it, which
-// is worse than a row with no colour at all.
-func foldRow(p Palette, row Row, width int) string {
-	text := CutColumnFromEnd(row.Text, width)
-	if !p.On() || len(row.Spans) == 0 {
-		return text
-	}
+// NewFrame builds the custom tview primitive used for the interface screen.
+func NewFrame() *Frame { return &Frame{Box: tview.NewBox()} }
 
-	var b strings.Builder
-	b.WriteString(p.Base())
-
-	written := 0
-	for _, span := range row.Spans {
-		start, end := spanBounds(span, len(text))
-		if end <= written {
-			// Spans arrive in whatever order the writer produced them, and an out-of-order one
-			// would write its own text twice. Skipping it is better than a row that says the
-			// same words in the wrong colours.
-			continue
-		}
-
-		b.WriteString(text[written:start])
-		b.WriteString(p.Sequence(span.Role))
-		b.WriteString(text[start:end])
-		written = end
-	}
-	b.WriteString(text[written:])
-
-	// The reset carries the theme's base back, so a row ending mid-span leaves the next row
-	// on the theme's background rather than on whatever the last colour was. It is written
-	// after the whole row rather than inside the loop, since a reset before the tail would
-	// leave the tail on the wrong background.
-	b.WriteString(p.Reset())
-	return b.String()
+// SetContent replaces the values the next Draw will put on the screen.
+func (f *Frame) SetContent(bar Bar, log []Row, palette Palette) {
+	f.bar = bar
+	f.log = append(f.log[:0], log...)
+	f.palette = palette
 }
 
-// spanBounds clamps one span to the text as written and as cut.
-//
-// A span is a byte range over the whole row, and a row cut from the tail has fewer bytes than
-// it did, so a span past the cut ends at the cut rather than running past the end of what is
-// written. A span beginning past the cut is dropped, which is the same as being empty.
-func spanBounds(span Span, length int) (int, int) {
-	if span.Start < 0 || span.Start > length {
-		return 0, 0
-	}
-	end := span.End
-	if end > length {
-		end = length
-	}
-	if end <= span.Start {
-		return span.Start, span.Start
-	}
-	return span.Start, end
-}
+// SetCaret records the prompt caret's rune offset.
+func (f *Frame) SetCaret(caret int) { f.caret = caret }
 
-// DrawStack writes the whole frame, row by row, from the top of the screen.
-//
-// It is written by position rather than from wherever the cursor is, since the frame owns the
-// screen and does not inherit the cursor from the shell that ran before it. Every row is
-// addressed and cleared before it is written, since a row being written is shorter than the
-// row it replaces and writing over the top of it leaves the tail of the old row visible.
-func DrawStack(w *Screen, rows []barRow, palette Palette) {
-	if w.Height() < 1 {
-		return
-	}
+// SetSweepStep sets the animation position for the changing figure field.
+func (f *Frame) SetSweepStep(step int) { f.step = step }
 
-	for i, row := range rows {
-		w.Write(escapePosition(footerScreenRow(w, i), 1))
-		w.Write(escapeEraseLine)
-		w.Write(frameLine(row, w.Width(), palette))
-	}
-}
+// SetScroll records how many rows back from the live edge the viewport sits.
+func (f *Frame) SetScroll(scroll int) { f.scroll = scroll }
 
-// DrawFooterRow rewrites one row of the frame where it stands.
-//
-// It is the case that stops a keystroke advancing the frame. The whole frame is written as
-// terminal rows, so writing it again for one character appended the frame's height and a line
-// ending, and pushed the reader's own line down the screen by that much every time they typed.
-// One row rewritten in place moves nothing.
-//
-// The row is addressed by arithmetic rather than by counting back up from wherever the cursor
-// is, since the frame is written downward and leaves the cursor below it.
-func DrawFooterRow(w *Screen, at int, rows []barRow, palette Palette) {
-	if at < 0 || at >= len(rows) {
-		return
-	}
-	w.Write(escapePosition(at+1, 1))
-	w.Write(escapeEraseLine)
-	w.Write(frameLine(rows[at], w.Width(), palette))
-}
+// SetPasteHandler installs the handler for text pasted into the prompt.
+func (f *Frame) SetPasteHandler(handler func(string)) { f.paste = handler }
 
-// frameLine renders one row of the frame: the fields, then the log beside them.
-//
-// The prompt row is the one row that does not take this shape, since it carries the prompt and
-// the reader's own line rather than a set of fields and a log row. It is recognised by having
-// no fields rather than by its row number, so a frame that shed rows from the bottom still
-// draws its prompt row as a prompt row.
-func frameLine(row barRow, width int, palette Palette) string {
-	if row.fields == "" {
-		return chromeLine(palette, Prompt+row.log)
-	}
-
-	line := row.fields + statusGap + row.log
-	if width > 0 {
-		// The log beside the fields is cut from the tail, since the fields are the thing a
-		// reader is looking down the left of and cutting them would move every log row one
-		// column left. The fields are the widest thing on the row and are never the thing cut.
-		keep := width - DisplayWidth(row.fields) - DisplayWidth(statusGap)
-		if keep < 0 {
-			keep = 0
-		}
-		line = row.fields + statusGap + CutColumnFromEnd(row.log, keep)
-	}
-	return chromeLine(palette, line)
-}
-
-// stackLines renders the frame as rows in screen order.
-//
-// The frame is drawn downward and the terminal puts the first line it receives where the cursor
-// is, so the first row here is the top of the screen and the last is the prompt.
-//
-// The log rides beside the fields: the newest rows are at the bottom, so a row written last
-// appears above the prompt and everything above it moves up, which is what the reader asked the
-// log to do. The rows are taken from the tail of the log, since a log is ordered oldest first
-// and the screen shows the end of it.
-func stackLines(bar Bar, log []Row, height int, palette Palette) []barRow {
-	drawn := screenRows(height)
-	if drawn < 1 {
+// PasteHandler gives tview the prompt's paste handler.
+func (f *Frame) PasteHandler() func(string, func(tview.Primitive)) {
+	if f.paste == nil {
 		return nil
 	}
+	return func(text string, _ func(tview.Primitive)) { f.paste(text) }
+}
 
-	// The prompt row is the last of them, so every row above it carries a log row.
-	logRows := drawn - 1
-
-	// The tail of the log fills the rows from the bottom upward, so the newest log row is the
-	// one just above the prompt and a row arriving moves everything up rather than appearing
-	// at the top where a reader is not looking.
-	shown := make([]Row, 0, logRows)
-	for i := len(log) - 1; i >= 0 && len(shown) < logRows; i-- {
-		shown = append(shown, PlainRow(log[i]))
+// Draw paints the frame into tcell's cell grid.
+func (f *Frame) Draw(screen tcell.Screen) {
+	x, y, width, height := f.GetRect()
+	base := f.palette.BaseStyle()
+	chrome := frameStyle(f.palette, RoleChrome)
+	for row := 0; row < height; row++ {
+		for col := 0; col < width; col++ {
+			screen.SetContent(x+col, y+row, ' ', nil, base)
+		}
 	}
 
-	out := make([]barRow, drawn)
-	for i := range out {
-		out[i] = barRow{fields: fieldsLine(bar, i)}
+	if height < 1 {
+		return
 	}
-	// The log rows were gathered newest first, so they fill upward from the prompt.
+
+	// A terminal too short for the full stack sheds the blank line, then the pane bar,
+	// then bar two, then bar one, in that order - Glen's shedding order (2026-10-06).
+	// The prompt always survives, since the reader is typing into it. Each surviving row
+	// draws top to bottom starting at the terminal's own first row, in their usual
+	// relative order; there is no scrollback at these heights (see scrollbackRows).
+	if height < barRows {
+		row := 0
+		drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y+row, width)
+		row++
+
+		if height >= 2 {
+			f.drawBarOne(screen, x, y+row, width, chrome)
+			row++
+		}
+		if height >= 3 {
+			drawCellText(screen, x, y+row, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+			row++
+		}
+		if height >= 4 {
+			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width), chrome)
+		}
+		return
+	}
+
+	backlog := scrollbackRows(height)
+	end := len(f.log) - f.scroll
+	if end < 0 {
+		end = 0
+	}
+	if end > len(f.log) {
+		end = len(f.log)
+	}
+	shown := make([]Row, 0, backlog)
+	for i := end - 1; i >= 0 && len(shown) < backlog; i-- {
+		shown = append(shown, PlainRow(f.log[i]))
+	}
+	// shown is newest first; it fills the scrollback upward from just above the prompt.
 	for i, row := range shown {
-		at := drawn - 2 - i
-		if at < 0 {
+		at := backlog - 1 - i
+		text, offset, cut := cutTail(row.Text, width)
+		if cut {
+			drawCellText(screen, x, y+at, width, ellipsis, base)
+			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y+at, width-DisplayWidth(ellipsis), text, offset, row.Spans, f.palette, base)
+			continue
+		}
+		drawStyledCellText(screen, x, y+at, width, text, offset, row.Spans, f.palette, base)
+	}
+
+	promptRow := backlog
+	barOneRow := backlog + 2
+	barTwoRow := backlog + 3
+	paneBarRow := backlog + 4
+
+	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
+	f.showCaret(screen, x, y+promptRow, width)
+
+	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
+
+	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
+}
+
+// renderPaneBar builds the pane bar's text, truncated to width with an ellipsis rather
+// than scrolled or folded. adr-0000020 itself describes a silent truncation with no
+// mark that more exist past the edge; Glen asked to keep the ellipsis instead
+// (2026-10-06), so this bar truncates the way every other row in this file already does
+// (see cutTail's callers) rather than matching 0000020's text literally - a deliberate,
+// confirmed departure from that record, not an oversight.
+//
+// There is only ever one pane today (fieldPane is hardcoded "main" in run.go's status
+// builder; 0000007's multiplexer was never built), so this draws that one name honestly
+// rather than fabricating a pane list to truncate.
+func renderPaneBar(status Status, width int) string {
+	return CutColumnFromEnd(status[fieldPane], width)
+}
+
+// showCaret places the terminal cursor on the prompt row at the reader's caret offset.
+func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
+	field := []rune(f.bar.Field)
+	caret := min(f.caret, len(field))
+	column := DisplayWidth(Prompt + string(field[:caret]))
+	if width > 0 {
+		column = min(column, width-1)
+	}
+	screen.ShowCursor(x+column, y)
+}
+
+// drawBarOne draws bar one at row y, with the figure segment swept. Factored out of
+// Draw's main path so the shedding ladder below can draw the same row at whatever
+// height it survives to, rather than repeating the sweep arithmetic twice.
+func (f *Frame) drawBarOne(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
+	prefix, figure, suffix := renderBarOne(f.bar.Status)
+	drawCellText(screen, x, y, width, prefix, chrome)
+	figureX := DisplayWidth(prefix)
+	drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	suffixX := figureX + DisplayWidth(figure)
+	if suffixX < width {
+		drawCellText(screen, x+suffixX, y, width-suffixX, suffix, chrome)
+	}
+}
+
+// renderBarOne builds the live, fast-changing status bar.
+//
+// It returns the text before the figure, the figure's own text (drawn separately so Draw
+// can sweep it), and the text after. The field list is barOneFields; see its doc comment
+// for why these three and not others.
+func renderBarOne(status Status) (prefix, figure, suffix string) {
+	parts := make([]string, 0, len(barOneFields))
+	figureIndex := -1
+	for _, k := range barOneFields {
+		if k == fieldFigure {
+			figureIndex = len(parts)
+		}
+		parts = append(parts, fieldName(k)+":"+status[k])
+	}
+	if figureIndex < 0 {
+		return strings.Join(parts, " · "), "", ""
+	}
+	prefix = strings.Join(parts[:figureIndex], " · ")
+	if prefix != "" {
+		prefix += " · " + fieldName(fieldFigure) + ":"
+	} else {
+		prefix = fieldName(fieldFigure) + ":"
+	}
+	figure = status[fieldFigure]
+	if figureIndex+1 < len(parts) {
+		suffix = " · " + strings.Join(parts[figureIndex+1:], " · ")
+	}
+	return prefix, figure, suffix
+}
+
+// renderBarTwo builds the longer-term status bar: the four Status fields in barTwoFields,
+// plus whether the viewport is at the live edge, which is DESIGN.md §5's fact (read fresh
+// each draw, not a stored setting - see Session.AtLiveEdge) standing in for the
+// scrollback-on field loreloom/UI-redesign.md names.
+//
+// Provider and model are written bare, as a reader would say them; the rest are named,
+// matching the mockup confirmed this session (`openrouter · claude-sonnet-5 ·
+// verbosity:0 · mouse:on · scroll:on`).
+func renderBarTwo(status Status, atLiveEdge bool) string {
+	parts := []string{status[fieldProvider], status[fieldModel]}
+	for _, k := range barTwoFields {
+		if k == fieldProvider || k == fieldModel {
+			continue
+		}
+		parts = append(parts, fieldName(k)+":"+status[k])
+	}
+	parts = append(parts, "scroll:"+onOff(atLiveEdge, "live", "back"))
+	return strings.Join(parts, " · ")
+}
+
+func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, p Palette) {
+	col := 0
+	for _, r := range text {
+		w := runewidth(r)
+		if w == 0 {
+			if col > 0 {
+				screen.SetContent(x+col-1, y, r, nil, p.BaseStyle())
+			}
+			continue
+		}
+		if col+w > width {
 			break
 		}
-		out[at].log = row.Text
+		red, green, blue := hueRGB(float64(sweepStepDegrees*step + col))
+		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(red), int32(green), int32(blue)))
+		screen.SetContent(x+col, y, r, nil, style)
+		col += w
 	}
-
-	// The prompt row carries the reader's own line in place of a log row, and carries no
-	// fields, since the prompt is where the reader types rather than something they read.
-	if prompt := drawn - 1; prompt >= 0 {
-		out[prompt].fields = ""
-		out[prompt].log = bar.Field
-	}
-
-	return out
 }
 
-// fieldsLine renders the name and the value of the field at k, padded to the name column.
-//
-// The padding is what puts the log at one column on every row. A row whose name is shorter
-// than the column gets spaces after it and a row whose name is the width of the column gets
-// none, and the log starts in the same place either way, which is the whole of what a reader
-// following one column down the screen is asking for.
-func fieldsLine(bar Bar, k int) string {
-	name := fieldName(k)
-	if k < 0 || k >= statusCount || name == "" {
-		return ""
+func frameStyle(p Palette, role Role) tcell.Style {
+	if !p.On() {
+		return tcell.StyleDefault
 	}
-
-	pad := nameWidth() - DisplayWidth(name) + 1
-	return name + strings.Repeat(" ", pad) + bar.Status[k]
+	fg, _, attrs := p.Style(role).Decompose()
+	_, bg, _ := p.BaseStyle().Decompose()
+	return tcell.StyleDefault.Foreground(fg).Background(bg).Attributes(attrs)
 }
 
-// chromeLine wraps a frame row in the chrome role when colour is on.
-//
-// It takes a palette rather than reading one so the frame is testable with colour off, and so a
-// row with no colour in it is the same row of text a reader would get with colour on and a
-// terminal that ignores it.
-func chromeLine(p Palette, line string) string {
-	if !p.On() || line == "" {
-		return line
+func cutTail(text string, width int) (string, int, bool) {
+	cut := CutColumnFromEnd(text, width)
+	if cut == text {
+		return text, 0, false
 	}
-	return p.Sequence(RoleChrome) + line + p.Reset()
+	if cut == ellipsis {
+		return "", len(text), true
+	}
+	tail := strings.TrimPrefix(cut, ellipsis)
+	return tail, len(text) - len(tail), true
+}
+
+func drawStyledCellText(screen tcell.Screen, x, y, width int, text string, offset int, spans []Span, palette Palette, base tcell.Style) {
+	col := 0
+	byteOffset := offset
+	for _, r := range text {
+		if col >= width {
+			break
+		}
+		style := base
+		for _, span := range spans {
+			if byteOffset >= span.Start && byteOffset < span.End {
+				style = frameStyle(palette, span.Role)
+				break
+			}
+		}
+		runeWidth := runewidth(r)
+		if runeWidth == 0 {
+			if col > 0 {
+				screen.SetContent(x+col-1, y, r, nil, style)
+			}
+		} else if col+runeWidth <= width {
+			screen.SetContent(x+col, y, r, nil, style)
+			col += runeWidth
+		}
+		byteOffset += len(string(r))
+	}
+}
+
+func drawCellText(screen tcell.Screen, x, y, width int, text string, style tcell.Style) {
+	col := 0
+	for _, r := range text {
+		if col >= width {
+			break
+		}
+		w := runewidth(r)
+		if w < 1 {
+			screen.SetContent(x+col-1, y, r, nil, style)
+			continue
+		}
+		if col+w > width {
+			break
+		}
+		screen.SetContent(x+col, y, r, nil, style)
+		col += w
+	}
+}
+
+func runewidth(r rune) int {
+	return DisplayWidth(string(r))
+}
+
+func stripCSI(text string) string {
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
+			i += 2
+			for i < len(text) && (text[i] < 0x40 || text[i] > 0x7e) {
+				i++
+			}
+			if i < len(text) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(text[i])
+		i++
+	}
+	return b.String()
 }
 
 // sweepStatus colours the Status value of a rendered top bar, horizontally.

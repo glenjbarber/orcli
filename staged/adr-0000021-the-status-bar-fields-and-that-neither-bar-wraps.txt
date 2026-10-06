@@ -1,0 +1,66 @@
+# 0000021 The status bar fields, and that neither bar wraps
+
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 8 in `QUESTIONS.md`, most of which
+  0000016 had already decided without being asked to close it
+
+## Context
+
+Question 8 asked what the status bar fields are, which fall off, and whether
+either bar is allowed to wrap rather than drop.
+
+The fields and the shed order were already answered, by two records that
+were not written to close this question. `SAVED.md` names status bar 1 as
+Provider, Model, Status, Bell, Verbosity and status bar 2 as Hostname,
+Context, Autosave, Stealth, Approval. `adr-0000016`'s reasoning gives the shed
+order for both: "Status bar 1 sheds Verbosity, then Bell. Status bar 2 sheds
+Approval, Stealth, Autosave, Context, Hostname." 0000016 also states that status
+carries colour when the pane is active, which `SAVED.md` records as settled.
+
+What 0000016 did not state in so many words is whether a bar is allowed to wrap
+to a second row instead of shedding a field. Its decision describes shedding
+fields one at a time and then dropping the bar whole at one field left, which
+is wrap's opposite in effect, but 0000016's alternatives considered do not name
+wrapping as a rejected option. The question asked it directly and no record
+had answered it directly.
+
+## Decision
+
+**The fields and the shed order stand as 0000016 already gave them.** This
+record does not reopen either.
+
+**Neither status bar wraps.** A bar sheds fields from the right, one at a
+time, then drops whole at one field left, exactly as 0000016 describes, on a
+single terminal row. It never grows to a second row to keep a field that
+would otherwise be shed.
+
+## Reasoning
+
+A bar that wraps to a second row trades one cost for another: it keeps every
+field but takes a row the live window or the prompt could use instead, and
+0000016 already settled that the live window yields last and the prompt never
+yields at all. Wrapping the status bars would compete with both for the row
+it needs, which is the same trade 0000016 weighed when it chose a floor for the
+live window instead of letting it shrink to nothing.
+
+## Consequences
+
+A reader at a narrow terminal loses a status field rather than seeing it move
+to a second row. The field is gone from the screen, not relocated, which
+matches how 0000016 already described every other shed field in this layout.
+
+## Alternatives considered
+
+A bar wrapping to a second row when a field would otherwise be shed.
+Rejected, for the reason above: the row it would need is a row 0000016 already
+gave to the live window and the prompt ahead of the status bars.
+
+## What this leaves open
+
+Nothing from question 8. The fields, the shed order, and the colour on an
+active pane were already settled; this record adds only the wrap answer.
+
+## Notes
+
+Nothing in the tree has changed. There is no status bar in the tree.

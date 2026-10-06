@@ -1,153 +1,19 @@
 package tui
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
-	"sync"
+	"time"
+	"unicode"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
-// Screen owns the terminal the interface draws on.
-//
-// It is the one thing in this package that writes to a file descriptor. Everything else
-// returns strings, and a draw is the only place a string becomes bytes the terminal will act
-// on, so the owner of the bytes is the owner of the terminal.
-//
-// # One region, the whole screen
-//
-// The frame owns every row. There is no scroll region set, since there is no second part
-// of the screen for the log to have: the log is a column beside the status fields and the
-// program decides which row of it is where.
-//
-// The reader's own scrollback is therefore whatever the terminal kept from before the
-// program started. The transcript is drawn by the program from rows it holds, and the paint
-// path copies those rows before releasing the lock so a renderer never reads a slice a
-// worker is appending to.
-
-// WindowSize is a terminal's size in rows and columns.
-//
-// It is a value rather than a pair of returns because every caller here needs both halves,
-// and a caller that had to remember which order they came in would get it wrong once.
-type WindowSize struct {
-	Rows int
-	Cols int
-}
-
-// minSize is the smallest window this package will draw into.
-//
-// A terminal reporting nothing is one that cannot be read, and drawing a frame into it
-// produces rows nobody sees. A terminal reporting one row is one that can hold the prompt
-// row and nothing else.
-const minSize = 1
-
-// Screen writes to a terminal and knows how large it is.
-//
-// The zero value is not usable. A Screen is built by NewScreen, which needs a writer and a
-// size, and a Screen built by hand has a writer of nil and writes nothing while reporting
-// that it did.
-type Screen struct {
-	mu sync.Mutex
-
-	out io.Writer
-
-	rows int
-	cols int
-}
-
-// NewScreen returns a Screen writing to out at the given size.
-//
-// The size is a parameter rather than a query, so a draw can be tested against figures a
-// test chose rather than against whatever the machine's terminal happens to be. SizeOf asks
-// the terminal for the real one.
-func NewScreen(out io.Writer, size WindowSize) *Screen {
-	return &Screen{out: out, rows: size.Rows, cols: size.Cols}
-}
-
-// Size returns the terminal's size as last read or set.
-func (s *Screen) Size() WindowSize {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return WindowSize{Rows: s.rows, Cols: s.cols}
-}
-
-// Height returns the number of rows.
-func (s *Screen) Height() int { return s.Size().Rows }
-
-// Width returns the number of columns.
-func (s *Screen) Width() int { return s.Size().Cols }
-
-// SetSize adopts a new size.
-//
-// The size is adopted rather than queried, and a paint asks for it before it draws, since a
-// frame that drew against a size the terminal has since changed is a frame whose rows are not
-// where the arithmetic says they are.
-func (s *Screen) SetSize(size WindowSize) {
-	s.mu.Lock()
-	s.rows, s.cols = size.Rows, size.Cols
-	s.mu.Unlock()
-}
-
-// Writer returns what this screen writes to, for a caller that has to send a worker's
-// output to the terminal rather than into the frame.
-//
-// It is a method rather than the field so a caller holding the Screen cannot reach the
-// writer and write to it behind the lock that serialises draws. Two writers interleaving
-// produce a row with half a sequence in it.
-func (s *Screen) Writer() io.Writer { return s.out }
-
-// Write sends text to the terminal.
-//
-// It is the only method that writes, so the lock that serialises draws lives here rather
-// than in each caller. Two writers interleaving produce a row with half a sequence in it,
-// which is a colour that bleeds into the next row.
-//
-// A screen with no writer writes nothing rather than panicking, since a Screen built by hand
-// has one, and a draw that crashed would take the session with it.
-func (s *Screen) Write(text string) {
-	if text == "" || s == nil {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.out == nil {
-		return
-	}
-	io.WriteString(s.out, text)
-}
-
-// LogRows is how many log rows ride beside the status fields on a terminal of this height.
-//
-// The frame holds the screen and the log is a column beside its fields, so there is no
-// separate region and no row count of its own: every row but the prompt carries one, and
-// the log is as tall as the frame less the prompt row.
-//
-// It is reported rather than deleted because a caller asking how much room the log has is
-// asking whether the frame fits, and the answer is one less than the rows drawn.
-func LogRows(height int) int {
-	if n := screenRows(height) - 1; n > 0 {
-		return n
-	}
-	return 0
-}
-
-// SizeOf asks the terminal how large it is.
-//
-// It returns a zero size rather than a figure it made up, since a size that reads as zero is
-// not a size. A caller that drew a frame into it would be drawing rows nobody can see, and a
-// reader would see a program that appeared to do nothing.
-func SizeOf(fd uintptr) WindowSize {
-	rows, cols := windowSize(fd)
-	if rows < 1 || cols < 1 {
-		return WindowSize{}
-	}
-	return WindowSize{Rows: rows, Cols: cols}
-}
+// ErrNoTerminal reports a run where tcell could not open the terminal screen.
+var ErrNoTerminal = errors.New("stdin and stdout must both be terminals")
 
 // Result is what running a line produced.
 //
@@ -185,60 +51,122 @@ type LineRunner func(ctx context.Context, line string) (Result, error)
 // has to hold the two together; naming the seam keeps this a leaf.
 type AskFunc func(ctx context.Context, question string, level int) error
 
+// Key is the editing action selected from a tcell event.
+type Key int
+
+const (
+	KeyNone Key = iota
+	KeyRune
+	KeyEnter
+	KeyBackspace
+	KeyDelete
+	KeyLeft
+	KeyRight
+	KeyUp
+	KeyDown
+	KeyHome
+	KeyEnd
+	KeyTab
+	KeyEscape
+	KeyCtrlC
+	KeyEOF
+	KeyMouse
+	KeyScrollUp
+	KeyScrollDown
+)
+
 // Start runs the interface until the reader leaves.
 //
 // It is the entry point that puts the terminal in raw mode, paints, loops over keys, and
 // puts everything back on the way out, including on the paths where the program did not
 // choose to leave. Every path out restores the terminal, since a reader handed a shell with
 // echo cleared has to fix it by hand and did not cause it.
-func Start(ctx context.Context, s *Session, screen *Screen, run LineRunner, ask AskFunc) error {
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
-	}
-	if screen == nil || screen.out == nil {
-		return errors.New("tui: Start was given no terminal to draw on")
 	}
 	if run == nil {
 		return errors.New("tui: Start was given no way to run a command")
 	}
 
-	if size := screen.Size(); size.Rows < minSize || size.Cols < minSize {
-		return fmt.Errorf("tui: %w", ErrNoSize)
-	}
-
-	// Raw mode is entered before the first paint, so the terminal is not echoing the
-	// reader's keys while the frame is being drawn, and the paste mode is turned on
-	// afterwards so a paste arriving in between is a paste into a shell rather than one the
-	// client never sees.
-	restore, err := enterRaw(os.Stdin.Fd())
-	if err != nil {
-		return err
-	}
-	defer restore()
-	defer escapeBracketedPasteOff(screen)
-	escapeBracketedPaste(screen)
-
+	app := tview.NewApplication().EnableMouse(false).EnablePaste(true)
+	frame := NewFrame()
+	app.SetRoot(frame, true)
 	l := &interfaceLoop{
 		session: s,
-		screen:  screen,
 		runner:  run,
 		ask:     ask,
-		keys:    newKeyReader(os.Stdin.Fd()),
+		frame:   frame,
 		group:   newGroup(),
 	}
+	frame.SetPasteHandler(func(text string) {
+		runes := []rune(text)
+		for i := 0; i < len(runes); i++ {
+			r := runes[i]
+			if r == '\r' || r == '\n' {
+				if l.act(ctx, KeyEnter, 0) {
+					app.Stop()
+					return
+				}
+				if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
+					i++
+				}
+				continue
+			}
+			if !unicode.IsControl(r) {
+				l.act(ctx, KeyRune, r)
+			}
+		}
+		l.paint()
+	})
+	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		key, r := keyEvent(event)
+		if key == KeyNone {
+			return nil
+		}
+		if l.act(ctx, key, r) {
+			app.Stop()
+			return nil
+		}
+		l.paint()
+		return nil
+	})
 
-	// The window watch runs for the life of the loop and not for the life of the program,
-	// since a signal arriving after the loop has gone is a write to a frame nobody is
-	// reading.
-	defer watchWindow()()
-
-	// Leaving waits for whatever was writing to the frame before the terminal is handed
-	// back, and it has to come after the raw mode restore is deferred and before the paste
-	// mode is given up, so a turn that is still drawing gets to finish while the terminal is
-	// still its own.
-	defer l.group.Close()
-
-	return l.paintAndRead(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		app.Stop()
+		l.group.Close()
+	}()
+	l.paint()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-finished:
+				return
+			case <-ticker.C:
+				app.QueueUpdateDraw(func() { l.paint() })
+			}
+		}
+	}()
+	go func() {
+		select {
+		case <-ctx.Done():
+			app.Stop()
+		case <-finished:
+		}
+	}()
+	err := app.Run()
+	if errors.Is(err, tcell.ErrNoScreen) {
+		return ErrNoTerminal
+	}
+	return err
 }
 
 // interfaceLoop is the state one run of the interface carries.
@@ -249,62 +177,15 @@ func Start(ctx context.Context, s *Session, screen *Screen, run LineRunner, ask 
 // an exported thing this package offers, and it is not.
 type interfaceLoop struct {
 	session *Session
-	screen  *Screen
 	runner  LineRunner
 	ask     AskFunc
-	keys    *keyReader
+	frame   *Frame
 
 	// group counts the goroutines writing to the frame, and is what leaving waits for.
 	group *group
 
-	// editor is the field on the prompt row.
-	editor Editor
-
-	// mu guards cancel, which the turn's own goroutine clears while the loop reads it on
-	// every paint.
-	mu     sync.Mutex
-	cancel context.CancelFunc
-
-	// drawn is how many log rows the last paint chose from, so a paint can tell whether
-	// the log has moved since rather than comparing it against nothing.
-	drawn int
-
-	// footer is the Bar the last paint drew, and is the reason a paint that has nothing new
-	// to say writes nothing. It is compared rather than tracked by version, since what the
-	// reader sees is the text and not a counter.
-	footer Bar
-
-	// footerDrawn reports whether the frame has been painted at all, so the first paint
-	// draws it and a later paint that happens to compute the same Bar still knows it was
-	// drawn.
-	footerDrawn bool
-
 	// step is the sweep's position, advanced on each paint while a turn runs.
 	step int
-}
-
-// paintAndRead paints, reads a key, and acts, until the reader leaves.
-func (l *interfaceLoop) paintAndRead(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	for {
-		l.paint()
-
-		if ctx.Err() != nil {
-			return nil
-		}
-
-		key, r, ok := l.keys.Next(ctx)
-		if !ok {
-			continue
-		}
-
-		quit := l.act(ctx, key, r)
-		if quit {
-			return nil
-		}
-	}
 }
 
 // paint draws what has changed since the last one.
@@ -321,19 +202,8 @@ func (l *interfaceLoop) paintAndRead(ctx context.Context) error {
 // The rows are chosen from the tail of the log, so a row arriving appears at the bottom and
 // everything above it moves up.
 func (l *interfaceLoop) paint() {
-	screen := l.screen
-
-	// The size is adopted before anything is drawn, since every row's position and every
-	// row's cut depend on it.
-	if size := SizeOf(l.keys.fd); size.Rows >= minSize && size.Cols >= minSize {
-		screen.SetSize(size)
-	}
-	resized()
-
 	palette := paletteOf(l.session)
 	rows := l.session.Log().Rows()
-	grown := len(rows) != l.drawn
-	l.drawn = len(rows)
 
 	state, detail := l.session.State()
 
@@ -346,7 +216,7 @@ func (l *interfaceLoop) paint() {
 	figure := "idle"
 	if running {
 		l.step++
-		figure = SweepText(twiddleWord(state), l.step)
+		figure = twiddleWord(state)
 	} else {
 		l.step = 0
 	}
@@ -355,28 +225,53 @@ func (l *interfaceLoop) paint() {
 		Status: l.status(state, detail, figure),
 		Field:  l.fieldRow(),
 	}
-	frame := stackLines(footer, rows, screen.Height(), palette)
+	l.frame.SetContent(footer, rows, palette)
+	l.frame.SetCaret(l.session.Editor().Caret())
+	l.frame.SetSweepStep(l.step)
+	l.frame.SetScroll(l.session.ScrollOffset())
+}
 
-	switch {
-	case !l.footerDrawn:
-		DrawStack(screen, frame, palette)
-		l.footer = footer
-		l.footerDrawn = true
+func (l *interfaceLoop) fieldRow() string { return l.session.Editor().Text() }
 
-	case sameFooterExceptField(l.footer, footer) && !grown:
-		// A keystroke, or an edit to the field. Only the prompt row changed, so only that
-		// row is written, and the log rows beside the fields are where they already are.
-		DrawFooterRow(screen, len(frame)-1, frame, palette)
-		l.footer = footer
-
+func keyEvent(event *tcell.EventKey) (Key, rune) {
+	switch event.Key() {
+	case tcell.KeyRune:
+		return KeyRune, event.Rune()
+	case tcell.KeyEnter:
+		return KeyEnter, 0
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		return KeyBackspace, 0
+	case tcell.KeyDelete:
+		return KeyDelete, 0
+	case tcell.KeyLeft:
+		return KeyLeft, 0
+	case tcell.KeyRight:
+		return KeyRight, 0
+	case tcell.KeyUp:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollUp, 0
+		}
+		return KeyUp, 0
+	case tcell.KeyDown:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollDown, 0
+		}
+		return KeyDown, 0
+	case tcell.KeyHome:
+		return KeyHome, 0
+	case tcell.KeyEnd:
+		return KeyEnd, 0
+	case tcell.KeyTab:
+		return KeyTab, 0
+	case tcell.KeyEscape:
+		return KeyEscape, 0
+	case tcell.KeyCtrlC:
+		return KeyCtrlC, 0
+	case tcell.KeyCtrlD:
+		return KeyEOF, 0
 	default:
-		DrawStack(screen, frame, palette)
-		l.footer = footer
+		return KeyNone, 0
 	}
-
-	// The cursor goes back to the prompt row on every paint rather than once at entry, so a
-	// reader typing into a caret they cannot see is never the state they are in.
-	l.placeCaret()
 }
 
 // status builds the value of each field, field by field.
@@ -496,28 +391,28 @@ func twiddleWord(state State) string {
 func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	switch key {
 	case KeyRune:
-		l.editor.Insert(r)
+		l.session.Editor().Insert(r)
 
 	case KeyBackspace:
-		l.editor.Backspace()
+		l.session.Editor().Backspace()
 
 	case KeyDelete:
-		l.editor.Delete()
+		l.session.Editor().Delete()
 
 	case KeyLeft:
-		l.editor.Left()
+		l.session.Editor().Left()
 
 	case KeyRight:
-		l.editor.Right()
+		l.session.Editor().Right()
 
 	case KeyHome:
-		l.editor.Home()
+		l.session.Editor().Home()
 
 	case KeyEnd:
-		l.editor.End()
+		l.session.Editor().End()
 
 	case KeyTab:
-		l.editor.Complete()
+		l.session.Editor().Complete()
 
 	case KeyEnter:
 		return l.submit(ctx)
@@ -546,6 +441,12 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	case KeyUp, KeyDown:
 		// Read so a reader pressing one is not left pressing. This unit has no history, and
 		// one would need a conversation this interface does not carry.
+
+	case KeyScrollUp:
+		l.session.ScrollUp(1)
+
+	case KeyScrollDown:
+		l.session.ScrollDown(1)
 	}
 
 	return false
@@ -553,11 +454,11 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 
 // submit acts on a line the reader finished typing.
 func (l *interfaceLoop) submit(ctx context.Context) bool {
-	line := strings.TrimSpace(l.editor.Text())
+	line := strings.TrimSpace(l.session.Editor().Text())
 	if line == "" {
 		return false
 	}
-	l.editor.Reset()
+	l.session.Editor().Reset()
 
 	result, err := l.runner(ctx, line)
 	if err != nil {
@@ -670,9 +571,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 
 	turnCtx, cancel := context.WithCancel(ctx)
 
-	l.mu.Lock()
-	l.cancel = cancel
-	l.mu.Unlock()
+	l.session.SetCancel(cancel)
 
 	go func() {
 		// The count is lowered on every path out, including a panic, since a turn that took
@@ -682,9 +581,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 
 		err := l.ask(turnCtx, question, 0)
 
-		l.mu.Lock()
-		l.cancel = nil
-		l.mu.Unlock()
+		l.session.ClearCancel()
 		cancel()
 
 		if err != nil {
@@ -698,40 +595,13 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 // It is the escape handler and the only place a cancel is called, so a reader who presses it
 // twice does not reach a cancel that has already fired.
 func (l *interfaceLoop) stop() {
-	l.mu.Lock()
-	cancel := l.cancel
-	l.cancel = nil
-	l.mu.Unlock()
+	cancel := l.session.StopTurn()
 
 	if cancel == nil {
 		return
 	}
 	cancel()
 	l.session.Finished("stopped")
-}
-
-// Run draws the session once, with no input.
-//
-// It is kept because the drawing is worth having on its own: a caller that wants a frame
-// and not an interface, a test that wants the bytes, and a redirected run that has no
-// terminal to read keys from. Start is what a reader reaches.
-func Run(s *Session, screen *Screen) error {
-	if s == nil {
-		return errors.New("tui: Run was given no session")
-	}
-	if screen == nil || screen.out == nil {
-		return errors.New("tui: Run was given no terminal to draw on")
-	}
-
-	palette := paletteOf(s)
-	state, detail := s.State()
-
-	footer := Bar{Status: Status{
-		fieldState: string(state) + detailSuffix(detail),
-	}}
-	DrawStack(screen, stackLines(footer, s.Log().Rows(), screen.Height(), palette), palette)
-
-	return nil
 }
 
 // paletteOf returns the palette a session draws with.
@@ -743,42 +613,3 @@ func Run(s *Session, screen *Screen) error {
 func paletteOf(s *Session) Palette {
 	return NewPalette(s.Options().Color, GroundAuto, nil)
 }
-
-// RowText renders one row as the bytes that would be written for it.
-//
-// It is exported so a caller that needs to show a reader what a row will look like, rather
-// than what it says, can ask without writing to the terminal. The palette decides, so the
-// answer is the same one the draw would give.
-func RowText(p Palette, row Row, width int) string {
-	return foldRow(p, PlainRow(row), width)
-}
-
-// WriteLines writes rows as plain text, one per line, and is what a redirect wants.
-//
-// A redirected run cannot draw, and writing escape sequences into a pipe gives whoever is
-// reading it noise rather than a transcript. So the redirected case writes the same rows with
-// no palette and no rules, and the reader gets the words.
-func WriteLines(w io.Writer, rows []Row) error {
-	var b strings.Builder
-	for _, row := range rows {
-		plain := PlainRow(row)
-		b.WriteString(plain.Text)
-		b.WriteByte('\n')
-	}
-	_, err := io.WriteString(w, b.String())
-	return err
-}
-
-// ReaderFor returns a buffered reader over in, for a caller that reads keys.
-//
-// It is here rather than at the call sites because a reader over a terminal that is not
-// buffered is a reader that returns one byte at a time, and a byte at a time is what makes an
-// escape sequence arrive in pieces.
-func ReaderFor(in io.Reader) *bufio.Reader { return bufio.NewReader(in) }
-
-// StdoutIsATerminal reports whether standard output is a terminal.
-//
-// A reader who pipes this program on purpose is entitled to be told why it behaves
-// differently, and a reader at a terminal is entitled not to be told. The check is the
-// termios read in terminal.go, which is the only question that answers it.
-func StdoutIsATerminal() bool { return IsTerminal(os.Stdout.Fd()) }

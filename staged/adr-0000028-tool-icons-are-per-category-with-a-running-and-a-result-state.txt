@@ -1,0 +1,79 @@
+# 0000028 Tool icons are per category, with a running state and a result state
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 16 in `QUESTIONS.md`
+
+## Context
+
+Question 16 asked which tools get an icon and what stands in when the
+terminal cannot draw one. The tree's tool execution splits into exactly
+three categories, `internal/tools`' filesystem, git, and shell, and
+`SAVED.md` already shows a shell command getting a terminal icon and the
+bracketed text tag, `[fs] read_file [...]`, as the existing verbose-mode
+label.
+
+A tool call has more than one moment worth showing. It is running, and then
+it has either succeeded or failed, and the reader asked for both halves to
+be visible rather than only the fact that a tool was called at all.
+
+## Decision
+
+**One icon per category, not per action.** `fs`, `git`, and `shell` each
+get a single icon, used regardless of which action within that category is
+running: `read_file` and `write_file` both show the `fs` icon, any git
+subcommand shows the `git` icon, and a shell command shows the terminal icon
+already settled.
+
+**Each category icon carries three states: running, succeeded, failed.**
+While the call is in flight, the category icon is shown. On completion it is
+replaced by a result marker: a green check for success, a red x for
+failure.
+
+**The fallback, when the terminal cannot draw an icon, is the bracketed
+text tag carrying the same three states as text rather than a static tag.**
+Running shows the tag with a running word, for example `[fs] Running...`,
+alternating among a small set of such words on a timer the way the
+thinking-word indicator already does. On completion the running word is
+replaced by a plain-text result word, for example `[fs] Done` or
+`[fs] Failed`, rather than the tag sitting unchanged and silent about which
+of the three states it is in.
+
+## Reasoning
+
+Per-category icons match the three packages that already exist in
+`internal/tools`, rather than inventing a finer grain the tree's own
+structure does not have.
+
+A reader watching the live window wants to know a tool call is still running
+versus done, and whether done means it worked, which a single static icon
+cannot carry on its own. The fallback is held to the same standard: a
+terminal that cannot draw the icon should not therefore lose the
+running-versus-done-versus-failed distinction, which is why the fallback
+carries three text states rather than one unchanging tag.
+
+## Consequences
+
+The exact glyphs for the `fs` and `git` icons are not chosen here, nor are
+the running words that alternate, nor the plain-text spelling of success and
+failure for a terminal that also cannot draw a green check or a red x. Those
+are named below as open rather than guessed at.
+
+## Alternatives considered
+
+A single static icon per category with no result state, leaving success or
+failure to be read from the reply text alone. Rejected: the reader asked for
+both markers directly, and the tool line is where a reader already looks for
+what a call did.
+
+## What this leaves open
+
+The specific glyphs for the `fs` and `git` icons. The set of words the
+running state alternates among, and the timer that drives it. The plain-text
+spelling of success and failure for a terminal that cannot draw the green
+check or the red x either.
+
+## Notes
+
+Nothing in the tree has changed. There is no tool line drawn in the tree for
+the new interface.

@@ -1,0 +1,71 @@
+# 0000030 The permissions table is an append-only ledger with a single verdict column
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 18 in `QUESTIONS.md`
+
+## Context
+
+Question 18 named the permissions table's columns as already settled to at
+least a pane, a path, a verdict, and a moment, and left two things open:
+whether the verdict is one column with two values or two columns, and
+whether a removal is a row or a deletion.
+
+## Decision
+
+**The verdict is one column, with two values: `allow` and `deny`.**
+
+**A removal is a new row, never a deletion.** `/permit`, `/deny`, `/approve`,
+and `/reject` each append a row rather than modifying or removing an earlier
+one. The active verdict for a given `(pane, path)` is whichever row for it
+carries the latest moment; nothing is read by looking for a unique row,
+since none is guaranteed.
+
+**The schema is `permissions(pane, path, verdict, moment)`**, the four
+columns question 18 already named, with no uniqueness constraint on
+`(pane, path)`.
+
+## Reasoning
+
+One verdict column rules out the state two columns would allow: both set, or
+neither, which a single enumerated value cannot represent. This is the same
+shape the work ledger's `Merged` field already takes, one value from a fixed
+set rather than a pair of flags that can disagree with each other.
+
+An append-only ledger matches every other place this project keeps history.
+A decision record is never rewritten, only superseded by a later one that
+names it. The work ledger's entries are "preserved exactly as they were
+found." Autosave records rather than discards. A permissions table that
+deleted a row on revocation would be the one place in this design that threw
+its own history away, with nothing arguing for the exception.
+
+## Consequences
+
+The table grows without bound as permissions are toggled. Reading the
+current verdict for a pane and a path means finding the latest row for that
+pair, not a direct lookup by a unique key, since no uniqueness constraint
+exists to look up against.
+
+No compaction, archiving, or bound on the table's growth is proposed here.
+
+## Alternatives considered
+
+Two columns for the verdict, such as `allowed` and `denied` as separate
+booleans. Rejected: it admits a state, both true or both false, that the
+single-column design cannot express and that nothing in this design wants
+expressible.
+
+Deleting a row on revocation, with the table holding only current grants.
+Rejected, against the pattern every other piece of history in this project
+already follows: nothing here is deleted elsewhere, and a permissions table
+is not argued as the exception.
+
+## What this leaves open
+
+Any bound on the table's growth, and whether old rows are ever compacted.
+Not asked by question 18 and not answered here.
+
+## Notes
+
+Nothing in the tree has changed. There is no permissions database in the
+tree.

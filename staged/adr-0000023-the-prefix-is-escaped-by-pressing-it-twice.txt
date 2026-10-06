@@ -1,0 +1,60 @@
+# 0000023 The prefix is escaped by pressing it twice
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 11 in `QUESTIONS.md`
+
+## Context
+
+Question 11 asked whether the `Ctrl+B` prefix is escapable, and named the
+cost of it not being one plainly: a reader who needs to type a literal
+`Ctrl+B` into a model prompt would have no way to, and the prompt would be a
+line the reader cannot type rather than one they typed wrong and could fix.
+
+`Ctrl+B` is `tmux`'s own prefix, kept non-latching by 0000007, and that
+convention already handles exactly this case: pressing the prefix twice
+sends the prefix character itself rather than reading the second press as a
+command.
+
+A separate question considered whether `Ctrl+B` itself should be replaced
+with a less commonly bound key. It was raised and then withdrawn; `Ctrl+B`
+stands, unchanged from 0000007.
+
+## Decision
+
+**The prefix is escaped by pressing it twice.** `Ctrl+B` followed
+immediately by a second `Ctrl+B` inserts one literal `Ctrl+B` byte into the
+input line. `Ctrl+B` followed by anything else is read as a command on
+whatever that key maps to.
+
+## Reasoning
+
+This is `tmux`'s own resolution of the identical problem, and the reader is
+already the one who brought `tmux`'s convention into question 10 as the
+baseline a reader of this interface might expect. Borrowing it here needs no
+new mechanism: entering prefix mode already waits for one more keystroke,
+and treating that keystroke as "insert literal" when it matches the prefix
+itself is a single case added to whatever reads it, not a second mode.
+
+## Consequences
+
+A model prompt that needs a literal `Ctrl+B` costs the reader two keystrokes
+for the one byte, where every other character costs one. That is the
+accepted shape of the escape, not an incidental cost; a single-keystroke
+escape would need a second key to spend, which is the choice question 10
+leaves open and does not need settling here.
+
+## Alternatives considered
+
+A distinct escape key, separate from the prefix itself. Not raised as an
+option; the reader's own reference point was `tmux`, which uses the
+double-press and not a separate key.
+
+## What this leaves open
+
+The `Ctrl+B` command set itself, which question 10 leaves as a deferred
+TODO, separate from this record.
+
+## Notes
+
+Nothing in the tree has changed. There is no prefix key read in the tree.

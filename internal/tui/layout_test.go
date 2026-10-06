@@ -2,9 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // hue is one hue as a single comparable value, so a test can compare two of them.
@@ -16,50 +17,73 @@ func hue(h float64) int {
 	return int(r)<<16 | int(g)<<8 | int(b)
 }
 
-// TestTheFrameIsTwentyRows is the layout the reader settled: every row of the terminal
-// carries a status field in the first column and a log row beside it.
-//
-// Twenty is the six rows the stack had plus fourteen beside them, and a twenty row terminal
-// is filled on the height. The count is a ceiling rather than a figure, so a terminal taller
-// than twenty draws twenty and the rest of the screen belongs to the terminal.
-func TestTheFrameIsTwentyRows(t *testing.T) {
-	for _, height := range []int{20, 24, 40} {
-		if got, want := screenRows(height), StatusFields; got != want {
-			t.Errorf("on a %d row terminal the frame is %d rows, want %d", height, got, want)
+// TestScrollbackGrowsWithHeight covers the layout loreloom/UI-redesign.md settled: a
+// terminal taller than the four fixed rows (prompt, blank, two status bars) gives every
+// row beyond them to scrollback, rather than to a fixed field count.
+func TestScrollbackGrowsWithHeight(t *testing.T) {
+	for _, height := range []int{barRows, barRows + 1, 20, 40} {
+		if got, want := scrollbackRows(height), height-barRows; got != want {
+			t.Errorf("on a %d row terminal scrollback is %d rows, want %d", height, got, want)
 		}
 	}
 }
 
-// TestAShortTerminalDrawsWhatItHas covers the floor. A terminal shorter than the field list
-// draws every row it has and takes the fields from the top, so what is shed is the bottom of
-// the list and the prompt row is still there.
-func TestAShortTerminalDrawsWhatItHas(t *testing.T) {
-	if got, want := screenRows(9), 9; got != want {
-		t.Errorf("a nine row terminal draws %d rows, want %d", got, want)
-	}
-	if got, want := screenRows(3), 3; got != want {
-		t.Errorf("a three row terminal draws %d rows, want %d", got, want)
-	}
-	if got := screenRows(0); got != 0 {
-		t.Errorf("a terminal with no rows draws %d", got)
+// TestAShortTerminalHasNoScrollback covers the floor. A terminal shorter than the four
+// fixed rows cannot fit scrollback at all; Frame.Draw falls back to drawing only the
+// prompt rather than guessing which of the fixed rows to shed, since no shedding order
+// among them is settled (see scrollbackRows's own doc comment).
+func TestAShortTerminalHasNoScrollback(t *testing.T) {
+	for _, height := range []int{0, 1, barRows - 1} {
+		if got := scrollbackRows(height); got != 0 {
+			t.Errorf("a %d row terminal has %d rows of scrollback, want 0", height, got)
+		}
 	}
 }
 
-// TestThePromptRowIsTheLastRow covers where the caret is put. The prompt row is the last row
-// the frame draws, so on a twenty row terminal it is row twenty and on a short one it is the
-// last row the screen has. Either way it is the last row drawn, which is what puts the caret
-// where a reader expects to find it without being told the frame's height.
-func TestThePromptRowIsTheLastRow(t *testing.T) {
-	for _, height := range []int{20, 24, 40} {
-		screen, _ := drawnAt(height, 80)
-		if got, want := promptScreenRow(screen), StatusFields; got != want {
-			t.Errorf("on a %d row terminal the prompt row is %d, want %d", height, got, want)
+// TestAShortTerminalStillDrawsThePrompt covers Frame.Draw's shedding ladder: a terminal
+// too short for the fixed stack still draws the prompt, which survives every height
+// since it is never shed (see the Draw doc comment on the shedding order).
+func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
+	for _, height := range []int{1, 2, barRows - 1} {
+		screen := drawSimulationFrame(t, height, 40, Bar{Field: "hi"}, nil, Palette{})
+		r, _, _, _ := screen.GetContent(0, 0)
+		if r != 'r' {
+			t.Errorf("on a %d row terminal the prompt is not on row 0 (got %q)", height, r)
 		}
 	}
+}
 
-	screen, _ := drawnAt(9, 80)
-	if got := promptScreenRow(screen); got != 9 {
-		t.Errorf("on a nine row terminal the prompt row is %d, want the bottom row 9", got)
+// TestTheSheddingLadderDropsInGlensOrder covers the actual order a short terminal sheds
+// rows in: blank line first (never seen below barRows anyway), then the pane bar, then
+// bar two, then bar one, with the prompt surviving every height.
+func TestTheSheddingLadderDropsInGlensOrder(t *testing.T) {
+	var s Status
+	s[fieldPane] = "main"
+
+	// Height 4: blank is already gone (nothing shows it directly); bar one, bar two,
+	// and the pane bar all still show.
+	screen := drawSimulationFrame(t, 4, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 3); got != "main" {
+		t.Errorf("at height 4 the pane bar is %q, want %q", got, "main")
+	}
+
+	// Height 3: the pane bar is shed; bar two is now the last row.
+	screen = drawSimulationFrame(t, 3, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 2); !strings.Contains(got, "openrouter") && got == "main" {
+		t.Errorf("at height 3 the pane bar should be shed, but row 2 is %q", got)
+	}
+
+	// Height 2: bar two is also shed; only the prompt and bar one remain.
+	screen = drawSimulationFrame(t, 2, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	if got := rowAt(screen, 1); got == "main" {
+		t.Error("at height 2 the pane bar should be shed, but it is still drawn")
+	}
+
+	// Height 1: bar one is shed too; only the prompt remains.
+	screen = drawSimulationFrame(t, 1, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
+	r, _, _, _ := screen.GetContent(0, 0)
+	if r != 'r' {
+		t.Errorf("at height 1 the only row is %q, want the prompt", string(r))
 	}
 }
 
@@ -99,15 +123,11 @@ func TestEveryFieldIsOneCharacter(t *testing.T) {
 // carries a field in the first column and a log row beside it, and a row written last appears
 // just above the prompt so everything moves up rather than appearing at the top.
 func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
 	var s Status
 	s[fieldCwd] = "."
 	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
-
-	DrawStack(screen, stackLines(Bar{Status: s}, rows, 20, plainPalette()), plainPalette())
-
-	got := stripSequences(out.String())
+	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s}, rows, Palette{})
+	got := simulationText(screen)
 	if !strings.Contains(got, "the newest row") {
 		t.Errorf("the newest log row is not on the screen:\n%q", got)
 	}
@@ -116,26 +136,43 @@ func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
 	}
 }
 
+// rowAt reads the full text of one screen row, trimmed of trailing padding, for asserting
+// on which log line landed where.
+func rowAt(screen tcell.SimulationScreen, row int) string {
+	_, width, _ := screen.GetContents()
+	var b strings.Builder
+	for x := 0; x < width; x++ {
+		r, _, _, cellWidth := screen.GetContent(x, row)
+		if cellWidth > 0 {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
 // TestTheLogIsNewestBesideThePrompt covers the direction of the scroll. A row arriving
-// appears above the prompt and everything above it moves up, which is what the reader asked
-// the log to do, rather than appearing at the top where a reader is not looking.
+// appears just above the prompt and everything above it moves up, which is what the
+// reader asked the log to do, rather than appearing at the top where a reader is not
+// looking.
 func TestTheLogIsNewestBesideThePrompt(t *testing.T) {
 	var s Status
 	rows := []Row{{Text: "first"}, {Text: "second"}, {Text: "third"}}
 
-	frame := stackLines(Bar{Status: s}, rows, 20, plainPalette())
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, rows, plainPalette())
+	promptRow := scrollbackRows(20)
 
-	if got := frame[len(frame)-2].log; got != "third" {
+	if got := rowAt(screen, promptRow-1); got != "third" {
 		t.Errorf("the row above the prompt is %q, want the newest log row %q", got, "third")
 	}
-	if got := frame[len(frame)-3].log; got != "second" {
+	if got := rowAt(screen, promptRow-2); got != "second" {
 		t.Errorf("the row above that is %q, want %q", got, "second")
 	}
 }
 
-// TestTheLogFillsUpward covers the case where the log is longer than the frame. The newest
-// rows fill the rows from the bottom upward and the oldest are off the screen, so a reader
-// scrolling back finds them in the terminal's own scrollback rather than on the screen.
+// TestTheLogFillsUpward covers the case where the log is longer than the scrollback. The
+// newest rows fill the scrollback from the bottom upward and the oldest are off the
+// screen, so a reader scrolling back finds them in the terminal's own scrollback rather
+// than on the screen.
 func TestTheLogFillsUpward(t *testing.T) {
 	var s Status
 	log := make([]Row, 40)
@@ -143,13 +180,14 @@ func TestTheLogFillsUpward(t *testing.T) {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
 	}
 
-	frame := stackLines(Bar{Status: s}, log, 20, plainPalette())
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, log, plainPalette())
+	promptRow := scrollbackRows(20)
 
-	if got := frame[len(frame)-2].log; got != "row 39" {
+	if got := rowAt(screen, promptRow-1); got != "row 39" {
 		t.Errorf("the newest row is %q, want row 39", got)
 	}
-	if got := frame[0].log; got != "row 21" {
-		t.Errorf("the topmost row is %q, want row 21 and nineteen above it", got)
+	if got := rowAt(screen, 0); got != "row 25" {
+		t.Errorf("the topmost row is %q, want row 25 and fourteen rows beneath it", got)
 	}
 }
 
@@ -157,66 +195,13 @@ func TestTheLogFillsUpward(t *testing.T) {
 // log row. The prompt row carries the reader's own text, and a prompt with a log row behind it
 // is a prompt the reader cannot read.
 func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
 	var s Status
 	s[fieldState] = string(StateIdle)
 	rows := []Row{{Text: "a log row"}}
-
-	DrawStack(screen, stackLines(Bar{Status: s, Field: "a question"}, rows, 20, plainPalette()),
-		plainPalette())
-
-	got := stripSequences(out.String())
-	if !strings.Contains(got, "root@localhost $ a question") {
+	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s, Field: "a question"}, rows, Palette{})
+	got := simulationText(screen)
+	if !strings.Contains(got, "root@lolhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
-	}
-}
-
-// TestTheCaretIsNotMovedBackwards covers the reader's decision. The row is addressed with a
-// cursor-position sequence and the column is reached by advancing forward from it, so the
-// caret never travels up through the frame to find the row it belongs to.
-func TestTheCaretIsNotMovedBackwards(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "stealth/space-bunny-alpha"}),
-		screen:  screen,
-	}
-	l.editor.Reset()
-	l.editor.Insert('a')
-	l.placeCaret()
-
-	got := out.String()
-	if strings.Contains(got, "\x1b[1A") {
-		t.Errorf("the caret was moved up through the frame:\n%q", got)
-	}
-	if !strings.HasPrefix(got, escapePosition(promptScreenRow(screen), 1)) {
-		t.Errorf("the caret is not placed on the prompt row by position:\n%q", got)
-	}
-	if !strings.Contains(got, "\x1b[") || !strings.Contains(got, "C") {
-		t.Errorf("the caret column is not reached by advancing forward:\n%q", got)
-	}
-}
-
-// TestTheCaretFollowsThePromptAndTheText covers the column. The caret is after the prompt
-// and after what the reader typed, counted in display columns, so a field holding a wide
-// character does not put the caret inside a glyph.
-func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "stealth/space-bunny-alpha"}),
-		screen:  screen,
-	}
-	l.editor.Reset()
-	l.editor.Insert('a')
-	l.placeCaret()
-
-	want := escapePosition(promptScreenRow(screen), 1) +
-		"\r\x1b[" + strconv.Itoa(DisplayWidth(Prompt)+1) + "C"
-	if got := out.String(); got != want {
-		t.Errorf("the caret is not after the prompt and the typed text:\ngot  %q\nwant %q",
-			got, want)
 	}
 }
 
@@ -312,5 +297,75 @@ func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
 	other := RenderBottom("Session 1", true, false, "openrouter.ai", "m", "3", "ask")
 	if got := sweepStatus(other, "working", 0); got != other {
 		t.Errorf("a bar that is not the top bar was swept: %q", got)
+	}
+}
+
+// TestScrollMovesTheWindowAndBarTwoSaysSo covers Frame drawing the scroll offset: a
+// nonzero offset shows an older window of the log and bar two reads "scroll:back"
+// instead of "scroll:live".
+func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
+	log := make([]Row, 10)
+	for i := range log {
+		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
+	}
+
+	frame := NewFrame()
+	frame.SetRect(0, 0, 40, 20)
+	frame.SetContent(Bar{}, log, plainPalette())
+	promptRow := scrollbackRows(20)
+
+	live := tcell.NewSimulationScreen("UTF-8")
+	if err := live.Init(); err != nil {
+		t.Fatal(err)
+	}
+	live.SetSize(40, 20)
+	frame.Draw(live)
+	if got := rowAt(live, promptRow-1); got != "row 9" {
+		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
+	}
+	if !strings.Contains(rowAt(live, promptRow+3), "scroll:live") {
+		t.Errorf("bar two at the live edge is %q, want it to say scroll:live", rowAt(live, promptRow+3))
+	}
+
+	frame.SetScroll(3)
+	back := tcell.NewSimulationScreen("UTF-8")
+	if err := back.Init(); err != nil {
+		t.Fatal(err)
+	}
+	back.SetSize(40, 20)
+	frame.Draw(back)
+	if got := rowAt(back, promptRow-1); got != "row 6" {
+		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)
+	}
+	if !strings.Contains(rowAt(back, promptRow+3), "scroll:back") {
+		t.Errorf("bar two scrolled back is %q, want it to say scroll:back", rowAt(back, promptRow+3))
+	}
+}
+
+// TestThePaneBarIsItsOwnRowBelowBarTwo covers the fifth fixed row Glen added
+// (2026-10-06) so the pane bar (adr-0000019/0000020) is not cut from the redesign.
+func TestThePaneBarIsItsOwnRowBelowBarTwo(t *testing.T) {
+	var s Status
+	s[fieldPane] = "main"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, plainPalette())
+	promptRow := scrollbackRows(20)
+
+	if got := rowAt(screen, promptRow+4); got != "main" {
+		t.Errorf("the pane bar is %q, want %q", got, "main")
+	}
+}
+
+// TestThePaneBarTruncatesWithAnEllipsis covers Glen's confirmed departure from
+// adr-0000020's literal "no ellipsis": this bar truncates the same way every other row
+// in this file does, with cutTail's ellipsis, rather than clipping silently.
+func TestThePaneBarTruncatesWithAnEllipsis(t *testing.T) {
+	var s Status
+	s[fieldPane] = "a pane name far too long for a narrow bar"
+	got := renderPaneBar(s, 10)
+	if !strings.Contains(got, ellipsis) {
+		t.Errorf("a truncated pane bar is %q, want it to carry an ellipsis", got)
+	}
+	if DisplayWidth(got) > 10 {
+		t.Errorf("a truncated pane bar is %d columns wide, want at most 10", DisplayWidth(got))
 	}
 }

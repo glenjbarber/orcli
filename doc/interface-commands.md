@@ -8,8 +8,8 @@ Code: `internal/tui/command.go`, `internal/tui/command_line.go`,
 `internal/tui/width.go`, `cmd/orcli/dispatch.go`, `cmd/orcli/confirm.go`.
 
 What the merge that brought this tree up to date changed is recorded in
-`staged/adr-0003-first-request-is-the-probe.txt` and
-`staged/adr-0004-model-choice-records-replaced.txt`, and the short of it is here
+`staged/adr-0000003-first-request-is-the-probe.txt` and
+`staged/adr-0000004-model-choice-records-replaced.txt`, and the short of it is here
 rather than left to a reader who has to go looking.
 
 ## The table is the one place names are written
@@ -79,7 +79,7 @@ worth writing down.
 | `exit` | | | leave the interface |
 | `cloudflare` | | | the Cloudflare commands |
 
-**There is no `connect`.** It was in the table with no handler, and 0003 removed
+**There is no `connect`.** It was in the table with no handler, and 0000003 removed
 it: a reader's own first question is the probe, and a turn that came back with
 text is what proves the credential and the model together.
 

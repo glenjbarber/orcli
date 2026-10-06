@@ -1,0 +1,86 @@
+# 0000014 A restored session carries the whole conversation
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It answers a question 0000010 left open
+
+## Context
+
+0000010 settled `/restore` and said one thing about it that is not a decision:
+context has to survive a restart for a restore to be worth anything, since a
+session restored with its transcript but not its context is a transcript the
+reader has to read rather than a conversation they resume.
+
+It left open what is carried: the whole conversation, a window of it, a
+compaction summary plus the recent turns, or the settings without the
+transcript at all.
+
+`internal/saved` writes one SQLite file per save with schema version 2, which
+added one nullable column for the turns a tool call makes. The messages are
+rows and an ordinary turn carries no envelope, which is what leaves room for a
+field added later without migrating the files already written.
+
+## Decision
+
+**A restore carries the whole conversation.** Every turn, in order, as it was
+recorded.
+
+**It also carries the model, the approval mode and the pane permissions.** A
+reader who restored a conversation and was then answered by a different model
+would be reading a reply to a question they did not ask that model.
+
+**The opening instructions are not part of what is restored.** They are read
+again from the working directory, since a reader who moved the project has a
+different set and restoring yesterday's copy would answer as yesterday's
+program.
+
+**A file written before a column existed is read, and a file written by a
+later version is refused rather than half-read.** `internal/saved` already
+does this, and the reason is recorded there: a conversation missing its tool
+turns reads as though the model never called anything.
+
+**A compaction summary is a recorded turn like any other** and is restored with
+the rest, since it is what the model was actually carrying.
+
+## Consequences
+
+A restored conversation can be long, and the reader is the one who scrolls
+it. That is the same thing they do with any long reply, so nothing new is
+asked of them.
+
+A restore can fail on a file a later version wrote. That is a refusal with a
+reason rather than a partial read, and the reason is that a half-read
+conversation is indistinguishable from an empty one.
+
+The opening instructions being read again means a restore is not a pure file
+operation: it depends on the directory being the one the reader is in. A
+reader who restores while standing somewhere else gets that directory's
+instructions with this conversation, and that is a thing worth naming rather
+than a case to design around, since the alternative is answering as a program
+that no longer exists.
+
+The pane permissions are per-pane in the new design and a save is per-session,
+so a restore brings back the permissions of the pane that was saved rather than
+the set of panes. Which pane a restore lands in is not decided by this record.
+
+## Alternatives considered
+
+A window of the conversation, the recent turns. Rejected. A window is a
+compaction that happens at restore time rather than during the session, and a
+reader who restored and found the first twenty turns gone would have to decide
+whether that was intended.
+
+A compaction summary and no transcript. Rejected for the reason the reader gave
+when they asked the question: it is a transcript the reader has to read.
+
+The settings without the transcript. Rejected. A conversation with no words in
+it is a configuration, and `/restore` is not that.
+
+## What this leaves open
+
+Which pane a restore lands in, and what happens to the panes that were open.
+
+## Notes
+
+Nothing in the tree has changed. `internal/saved` writes and reads whole
+conversations already, and no `/restore` exists.

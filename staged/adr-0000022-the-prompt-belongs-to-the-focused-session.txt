@@ -1,0 +1,54 @@
+# 0000022 The prompt belongs to the focused session
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 9 in `QUESTIONS.md`
+
+## Context
+
+Question 9 asked whether the prompt belongs to the focused session, and
+noted that this follows from a pane being a viewport. `WORKER.txt` defines a
+pane as an entry that points at one session, and the session as owning its
+messages, transcript, cursor, scroll position, and input history. The queue
+was already settled as per-session by 0000012, on the same reasoning.
+
+## Decision
+
+**The prompt belongs to the focused session.** Its current line, caret
+position, and input history are the session's own. Switching panes swaps in
+whichever of those the newly focused session already has; nothing is shared
+across sessions and nothing is cleared by the switch.
+
+## Reasoning
+
+This extends a rule already taken twice rather than deciding a new one: the
+queue is per-session (0000012), and the receive queue and scroll position are
+per-session (`WORKER.txt` item 3). The prompt is where a session's next line
+is typed, and carving it out as the one piece of input state shared across
+every pane would be an exception with nothing in this design arguing for it.
+
+## Consequences
+
+A reader who starts a line in one pane, switches panes to check something,
+and returns finds the half-typed line exactly as left. This falls out of the
+decision rather than being built separately.
+
+The line editor needs one instance of state per session rather than one
+instance shared by the interface, the same shape 0000012 already required for
+the queue.
+
+## Alternatives considered
+
+One prompt shared by the interface, cleared or carried across a pane switch.
+Rejected. It would make the prompt the one piece of session state that is
+not the session's own, against the pattern 0000012 already set and with nothing
+raised in its favour.
+
+## What this leaves open
+
+Nothing from question 9.
+
+## Notes
+
+Nothing in the tree has changed. There is no pane set and no per-session
+prompt in the tree.

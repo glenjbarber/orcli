@@ -5,8 +5,8 @@ whole of it is testable without a terminal.
 
 Code: `cmd/orcli/main.go` in full.
 
-The decision that removed the connection command is 0003 in
-`staged/adr-0003-first-request-is-the-probe.txt`, and the section on the
+The decision that removed the connection command is 0000003 in
+`staged/adr-0000003-first-request-is-the-probe.txt`, and the section on the
 confirmation below is what replaced it.
 
 ## The order
@@ -188,7 +188,7 @@ every turn after that writing the same model again is a write nobody asked for.
 and the answer is the thing the reader asked for, so a model that could not be
 written is a nuisance rather than a lost reply.
 
-**A confirmation does not record the model it replaced.** See 0004: a reader's
+**A confirmation does not record the model it replaced.** See 0000004: a reader's
 first question is a probe rather than a move.
 
 Three seams carry the write, all in `cmd/orcli/confirm.go` and all substituted by

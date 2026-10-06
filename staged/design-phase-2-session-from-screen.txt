@@ -1,0 +1,76 @@
+Status: draft for the reader's review, 2026-10-05. Nothing here is ratified
+and no code has been written.
+
+# Design: split the session from the screen
+
+Phase 2 of the interface roadmap. Branch `feature/tui-redesign`.
+
+## What it is for
+
+Phase 3 replaces the screen with a custom primitive on the library. That swap
+is only safe if nothing a conversation owns lives in the code being swapped.
+This phase moves what is in the wrong place and changes nothing a reader sees.
+
+## Where the tree stands
+
+`Session` in `session.go` already owns the log, the levels, the workers and
+the state, and it does not mention `Screen` anywhere. That half is done.
+
+`interfaceLoop` in `run.go` is where the two are still mixed. It holds, side
+by side:
+
+```text
+a conversation's                    the screen's
+  editor   the field and caret       screen       where the frame is written
+  cancel   the running turn          keys         the key reader
+                                     drawn        log rows last painted
+                                     footer       the Bar last painted
+                                     footerDrawn  whether it was painted
+                                     step         the sweep position
+```
+
+`editor` and `cancel` are used in fourteen places in `run.go`.
+
+## In scope
+
+1. `editor` moves into `Session`. 0000022 settled that the prompt belongs to
+   the focused session, and `DESIGN.md` section 3 says a session owns the
+   cursor.
+2. `cancel` moves into `Session`, with the lock that guards it. A turn belongs
+   to the conversation that asked for it, and a second pane would otherwise
+   have nowhere to keep its own.
+3. `interfaceLoop` keeps one pointer to the session it is showing and no other
+   conversation state. Every use of the two moved fields goes through the
+   session.
+4. The painter's inputs are named as one small interface, so that phase 3
+   supplies a different implementation rather than editing the loop.
+
+## Out of scope, and which phase has it
+
+```text
+the library, and any import of it            phase 3
+the seven regions and the shed ladder        phase 3
+the pane set, the pane bar, pane IDs         phase 4
+program-owned scrollback, the receive queue  phase 5
+the message queue, input history             phase 6
+```
+
+No field is added to `Session` for a later phase. A field with nothing reading
+it is a guess about a design that has not been written.
+
+## How it is known to be done
+
+1. No test body changes. The 239 tests in `internal/tui` pass as they are,
+   apart from a test that reached a moved field by name, which follows the
+   field and asserts the same thing.
+2. `session.go` still does not mention `Screen`, and `interfaceLoop` holds no
+   field that would differ between two panes showing two conversations.
+3. `bmake test` and `bmake crossbuild` pass. The reader runs both, since the
+   session's shell has no Go toolchain.
+
+## Open
+
+- Whether `State` and its detail are already per session in the sense phase 4
+  needs, or whether the loop derives part of what it shows. Not yet read.
+- `DESIGN.md` section 18 still lists "whether the prompt belongs to the focused
+  session" as open, and 0000022 settled it. The list is stale on that line.

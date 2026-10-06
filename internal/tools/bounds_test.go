@@ -126,7 +126,14 @@ func TestRunProgramKillsAProgramPastItsDeadline(t *testing.T) {
 func TestRunProgramKeepsWhatAKilledProgramPrinted(t *testing.T) {
 	path := standIn(t, "talker", "echo working on it\nsleep 30\n")
 
-	out, err := runProgram(path, nil, t.TempDir(), 150*time.Millisecond)
+	// The deadline is two seconds rather than the 150ms used where only the timeout
+	// itself is checked, because this test also checks what the program had managed to
+	// write by then. Starting a process is a fork and an exec, and on a machine busy
+	// running the rest of this suite that can itself take longer than 150ms, which
+	// kills the program before its echo ever reaches the pipe and fails the assertion
+	// below for a reason that has nothing to do with runProgram. Two seconds is loose
+	// enough to absorb that contention and still far short of the sleep.
+	out, err := runProgram(path, nil, t.TempDir(), 2*time.Second)
 	if !errors.Is(err, ErrTimedOut) {
 		t.Fatalf("the failure is %v, want it to carry ErrTimedOut", err)
 	}

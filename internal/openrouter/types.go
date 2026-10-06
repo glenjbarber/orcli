@@ -5,12 +5,15 @@ package openrouter
 // Content carries text for both roles. The tool calls of an assistant turn are
 // held in ToolCalls, and the answer to a call is held in the Content of a
 // tool-role message, which is how the endpoint expects a round that called tools
-// to be replayed.
+// to be replayed. ToolCallID pairs that answer with the call it answers, and is
+// set only on a tool-role message - the endpoint needs it to match a reply to
+// one of possibly several calls the assistant made in the same turn.
 type Message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	Name      string     `json:"name,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	Name       string     `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 // ToolCall is a request from the model to run a tool.

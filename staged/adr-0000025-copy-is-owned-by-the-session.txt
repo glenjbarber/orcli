@@ -1,0 +1,64 @@
+# 0000025 Copy is owned by the session, not the terminal
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 13 in `QUESTIONS.md`
+
+## Context
+
+Question 13 asked whether copy is owned by the session or by the terminal,
+and named the reason it matters: the two give a reader different behaviour
+on a terminal that ignores a clipboard write.
+
+0000012 already settled the queue as per-session rather than shared by the
+interface, and 0000022 settled the prompt the same way, both on the reasoning
+that a pane is a viewport onto a session and what a reader does through it
+belongs to the session rather than to the window looking at it. 0000024 left
+whether there is any OS-clipboard path at all as `UNCONFIRMED`.
+
+`SAVED.md` already describes `/copy N M` as addressing a fenced block by
+reply number, which is a lookup into the session's own transcript rather
+than anything a terminal could be asked to do.
+
+## Decision
+
+**Copy is owned by the session.** The copied text is session state, the
+same kind of thing the queue and the prompt already are. `/paste` reads it
+from there.
+
+## Reasoning
+
+This is the same pattern 0000012 and 0000022 already took, extended to one more
+piece of per-pane state rather than decided fresh. It also decouples
+`/copy` and `/paste` from whatever 0000024 leaves open: since there may be no
+OS-clipboard write at all, or one that a given terminal ignores, a `/paste`
+that depended on the terminal having received and kept something would
+inherit that uncertainty. A `/paste` that reads session state the program
+wrote itself does not.
+
+## Consequences
+
+`/copy` does not put anything on the system pasteboard for pasting into a
+different application. That is a separate, still-open question (0000024), not
+a consequence of this one.
+
+`/paste` works the same on every terminal, including one with no clipboard
+support of any kind, because it never asked the terminal for anything.
+
+## Alternatives considered
+
+Terminal-owned copy, where `/copy` writes outward and `/paste` reads back
+whatever the terminal's pasteboard holds. Rejected: it would make `/paste`'s
+reliability depend on 0000024's still-open question, and on every terminal's
+own willingness to grant the read half, which `adr-0000005` already found is a
+terminal's to refuse.
+
+## What this leaves open
+
+Nothing from question 13. Whether there is also an OS-clipboard path remains
+0000024's question, not reopened here.
+
+## Notes
+
+Nothing in the tree has changed. There is no session-owned copy buffer in
+the tree.

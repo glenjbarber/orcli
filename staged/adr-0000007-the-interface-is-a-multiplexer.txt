@@ -1,0 +1,137 @@
+# 0000007 The interface is a multiplexer of sessions
+
+- Status: accepted for the shape, and SUPERCEDED in the pane arrangement by
+  0000008 and then 0000010. A session per pane survives. Visible panes do not, and
+  the pane bar went with them. This stands as a record of a decision that was
+  taken and then replaced in part, and SUPERCEDED by `UI-redesign.md`, which redefines the screen regions, status-bar fields, and prompt this record describes
+- Date: 2026-10-05
+- Supersedes: 0000001, in the part where it settled that one program owns one
+  screen for one conversation
+
+## Context
+
+The frame in the tree is a program that draws one screen for one conversation.
+Every row carries a status field and a log row beside it, the log scrolls upward
+through those rows, and the prompt is the last row drawn. 0000001 settled that
+shape by removing the alternative of a footer with the log in a region above it,
+and 0000002 settled what a row carries once the seam is gone.
+
+The reader has now asked for the interface to be redesigned from the ground up,
+and named the arrangement: a terminal multiplexer. The main pane is `tty0`,
+pane 1 is `tty1`, and so on, and the main pane is 0.
+
+The frame was not a constraint on this and was not treated as one. The reader
+said so directly, and the earlier records about a single frame describe a
+program that is being replaced rather than repaired.
+
+There is one property of the existing shape that survives, and it is recorded
+here because dropping it by accident would be the mistake. The reader's own
+scrollback is not the transcript. A multiplexer that used the terminal's own
+scrollback would put every pane's history in one buffer that no pane owns,
+which is the seam 0000001 removed and would be put back.
+
+## Decision
+
+**Each pane holds a session.** A session owns its conversation, its transcript,
+its cursor, its scrolling and its copy behavior. A pane is a viewport onto one
+session. The pane does not own the conversation and the session does not know
+which pane is showing it.
+
+**Pane 0 is the main session.** It is always there, it is the session the
+reader is in unless they leave it, and it cannot be closed. A reader always has
+a pane to return to.
+
+**The prefix is `Ctrl+B`.** It is the `tmux` prefix and it is non-latching: the
+reader presses and releases it, and the next key is a command rather than
+text. Without the prefix, every key belongs to the focused session.
+
+**The program owns the scrollback.** A pane that does not own its history has
+no history, and the terminal's buffer is shared by every pane on the screen.
+Scrolling is a fact about where the viewport is rather than a mode the program
+sets and keeps in step with, so a reader at the live edge is live and a reader
+away from it is reading, with nothing to reconcile.
+
+**The status line is global rather than per pane.** It belongs to the program,
+since the reader needs to know how many panes there are and which one has focus
+when focus is not visible in the focused pane. Where it sits and what it
+carries is open and is written below rather than decided here.
+
+**A session survives a crash.** The transcript a session was holding is written
+so a program that dies leaves the reader their conversation rather than a
+terminal that scrolled it away.
+
+## Consequences
+
+A pane is a place, and a session is a conversation, so the numbers a reader
+types are not the numbers they see. `/copy N` names a level, not a pane, and
+that is the older decision and it still holds: a row is attributed to a level
+when it is written so that moving a pane cannot re-attribute a row.
+
+A pane can be resized and the session inside it does not change, since the
+session owns content and the pane owns the rectangle the content is drawn into.
+A resize reflows rather than re-renders, and the re-render is a draw rather
+than a fold, since folding to a width and drawing at another width are the
+same operation at two widths.
+
+The prefix costs a key that no longer reaches the session. `Ctrl+B` cannot be
+typed as text, which is acceptable for a prefix chosen because it is the one
+the reader already knows, and it is not acceptable for a chord a reader needs
+in a model prompt. Whether the prefix is escapable is open.
+
+The program no longer has the terminal's scrollback to fall back on, so a
+terminal with no wheel has to be scrolled by keys the program reads. That cost
+was named in 0000005 against the tview proposal and it is paid again here, and it
+is paid deliberately: a multiplexer without a wheel is not a multiplexer.
+
+A global status line has to name the focused pane, which is a field whose only
+job is to be read when focus is somewhere other than where the reader is
+looking.
+
+## What is still open
+
+- What the `Ctrl+B` command set is. Nothing has been designed. The
+  multiplexer convention would give next pane, previous pane, new pane, close
+  pane, and a rename, and the reader has not chosen from it.
+- What the global status line carries and whether it sits at the top or the
+  bottom.
+- Whether the prompt belongs to the focused session, which follows from a pane
+  being a viewport and is not yet ratified.
+- The clipboard path on macOS Terminal.app with Secure Keyboard Entry, and
+  whether copy is owned by the session or by the terminal.
+- Whether the prefix is escapable, and what a reader gets for a key they
+  cannot send.
+
+## Alternatives considered
+
+One frame for the whole program, with panes as rows within it. Rejected. A pane
+that is a region of one frame is a layout decision made once, and resizing one
+would re-lay out the others rather than the reader getting a bigger pane.
+
+The program's own scrollback per pane, which is what is decided. Rejected
+alternative is the terminal's scrollback, above.
+
+A multiplexer as a host for several copies of the program rather than panes
+inside one. That is what `tmux` itself is, and it would put the session state
+in another process, where a crash of this program is not a crash of anything
+the reader asked a question of.
+
+## Notes
+
+Nothing in the tree has changed in writing this. There is no branch carrying a
+pane, a prefix or a viewport, and the frame in the tree is still the one 0000001
+settled.
+
+0000005 proposed a library for this and proposed a custom primitive rather than
+panes. This record accepts the multiplexer shape, which is a different
+arrangement from the one 0000005 weighed, and the assessment in 0000005 about what
+would be rewritten is measured against a frame this one replaces wholesale.
+The line counts in 0000005 describe the old frame and are not a plan.
+
+**What later replaced the pane arrangement.** 0000008 put the panes in a list
+rather than a tiling, 0000010 made the whole screen the API, and the reader then
+withdrew the pane bar and the visible panes with it. Section 16 of
+`distributed-llm-system-scope-2026-10-05.txt` supersedes the requirement for
+separate visible panes entirely: pane 0 stays as a logical broker role,
+independent requests keep their identities, and everything runs on one screen.
+A session per pane is the part of this record that survives, and the pane bar
+is gone.

@@ -6,7 +6,7 @@ Code: `internal/tui/session.go`, `internal/tui/log.go`, `internal/tui/levels.go`
 `internal/tui/worker.go`.
 
 The one addition since the session was written is `SetModel`, and it exists
-because of 0004 in `staged/adr-0004-model-choice-records-replaced.txt`.
+because of 0000004 in `staged/adr-0000004-model-choice-records-replaced.txt`.
 
 ## The session is small on purpose
 
@@ -39,7 +39,7 @@ the session's own options and change what a turn is sent as.
 func (s *Session) SetModel(model string) error
 ```
 
-It exists because of 0004. A `/model` choice writes `model` and `last_model` to the
+It exists because of 0000004. A `/model` choice writes `model` and `last_model` to the
 configuration file, and without this the frame would draw one model while the
 reader was answered by another until the next turn.
 

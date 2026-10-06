@@ -1,0 +1,75 @@
+# 0000026 /copy last spells as N 0, and fenced blocks are numbered per reply
+
+- Status: accepted
+- Date: 2026-10-05
+- Supersedes: nothing. It settles question 14 in `QUESTIONS.md`, and corrects
+  the question's own framing of what `last` would spell as
+
+## Context
+
+Question 14 asked two things: whether `/copy last` exists, and whether a
+fenced block's number is per reply or per session. It framed `last` as a
+possible spelling of `N 1`.
+
+`SAVED.md` already settles what `N` means in `/copy N`: "N replies back."
+Bare `/copy`, with no `N`, copies the entire current reply. In a scheme where
+`N` counts replies back, the current reply is zero replies back, not one.
+Question 14's framing of `last` as `N 1` does not match this; `N 1` would be
+the reply before the current one.
+
+`/copy N M` takes both `N` and `M` as separate arguments. If a fenced block's
+number were unique across the whole session, `M` alone would already pick it
+out and `N` would carry nothing. The two-argument form only means something
+if `M` restarts at 1 for every reply.
+
+## Decision
+
+**Fenced blocks are numbered per reply.** Block numbering restarts at 1 at
+the start of every reply.
+
+**`/copy last` exists, and spells as `N 0` combined with a block number.**
+`/copy last M` is `/copy 0 M`: block `M` of the current reply, zero replies
+back. This is not redundant with bare `/copy`, which copies the current reply
+whole; `/copy last M` is the piece bare `/copy` cannot do today, a single
+block out of the reply that has not yet become one of the replies `N` can
+count back to.
+
+## Reasoning
+
+Per-reply numbering is what makes `/copy N M` a two-argument command rather
+than a one-argument command with an unused parameter. Choosing per-session
+numbering would make `N` inert for this command even though 0000012 and every
+other per-session decision in this redesign use `N`-like identity
+deliberately, not as a leftover.
+
+`last` as `N 0` rather than `N 1` follows directly from what `N` already
+means. Reusing `N`'s existing definition is why this needed correcting rather
+than being guessed fresh: the question offered `N 1`, and `SAVED.md`'s own
+definition of `N` as replies back rules that out without a new choice being
+made.
+
+## Consequences
+
+A reader asking for `/copy last` before any reply exists is refused the same
+way `/paste` with nothing copied is refused by name, per `SAVED.md`.
+
+`/copy last` and bare `/copy` now cover two different things on the same
+reply: the whole thing, or one block of it. Neither supersedes the other.
+
+## Alternatives considered
+
+Per-session numbering for fenced blocks. Rejected: it would make `N` in
+`/copy N M` redundant, with nothing else in this design treating an
+identifier as inert once assigned a role.
+
+`last` as `N 1`. Rejected, following directly from `SAVED.md`'s existing
+definition of `N` as replies back: the current reply is zero back, not one.
+
+## What this leaves open
+
+Nothing from question 14.
+
+## Notes
+
+Nothing in the tree has changed. There is no `/copy` command built for the
+new interface.

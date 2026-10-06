@@ -5,10 +5,44 @@ any person; the file is written to be published with the source.
 
 ## Before anything else
 
-Read `.orcli.md` before making any change. It holds the operating rules for
-this tree and they are not restated here, deliberately: a second copy is a copy
-that drifts. Where this file and `.orcli.md` appear to disagree, `.orcli.md`
-decides, and the disagreement is a bug in one of the two.
+This file is read by default. It holds the operating rules for this tree, and
+no other file holds them. The rules that were previously kept in `.orcli.md`
+live here now, and `.orcli.md` is no longer read by anything in the repository.
+
+Where this file and the code appear to disagree, the code is what exists and
+this file is what was meant, so the disagreement is a bug in one of the two.
+
+## How to work here
+
+The same rules govern the files and the replies.
+
+**Commands are run one at a time.** Evaluate the output of a command before
+running the next one, and do not string commands together.
+
+**Prose is direct.** American English. No contractions. No em dashes. Straight
+double quotes and straight apostrophes only. No long sentences. Format for
+human readability. A human-readable result goes in a fenced `text` block.
+
+**Replies are written for the reader.** Interact in the first and second
+person. A mid-task reply covers what was found, what changed, what was
+verified, and what is needed next. Questions go last, not in the middle.
+
+**The backlog is held and kept short.** It runs to no more than four active
+items. Restate it whenever a reply depends on it, since the reader may not have
+seen it.
+
+**A serious finding stops the work.** When something found is bad enough to
+stop, the reply is that finding and one question. It is not a backlog item and
+it is not followed by other work. Assume the reader does not have the full
+picture, since the real picture is larger and not yet fully understood.
+
+**The work ends green.** A repository is never left in a known-broken state.
+Build, lint and test gates pass when the work ends, and a failure that cannot
+be settled is reported rather than left for the reader to find.
+
+**Push only on the exact phrase.** Never push to a remote unless told
+otherwise with the words `YES-I-REALLY-MEAN-IT`. The repository is pushed by
+hand.
 
 ## Where things live
 
@@ -133,6 +167,31 @@ mid-session sees a worker running and a reader arriving after sees one that has
 stopped. An entry written only at the start is a record of intention, and a ledger
 whose entries describe what a worker meant to do is not a ledger.
 
+**A superseded entry is kept and is marked, never removed.** A ledger whose
+entries are deleted when they go stale is a ledger nobody can check, and the entry
+that recorded a stale belief is the evidence that the belief was corrected rather
+than never held. An entry that has been overtaken carries `SUPERCEDED` in its
+`Status` line, and the entry that overtook it names the one it overtook in its
+own, so a reader holding either learns about the other without opening both.
+
+```
+Worker ID: 8
+Merged: done
+Status: SUPERCEDED by Worker ID: 14. The seven-row frame this entry describes
+was replaced by the twenty-row one.
+```
+
+**The words are the ones the decision records use.** `SUPERCEDED` and
+`SUPERCEDES` mean the same thing in an entry and in a record: a thing that was
+taken and has been replaced by a later one that names it.
+`staged/adr-status-vocabulary.txt` is where they are defined, and a worker that
+has read the record workflow knows them already.
+
+**A `Merged` field is never changed to record a supersession.** `done` means the
+work is on the main line and that stays true whatever came after it, so an entry
+whose work has since been replaced still reads `done`. Supersession is about the
+decision, and the branch is still merged.
+
 ## Committing
 
 One unit per merge, on a branch, merged with `--no-ff`, so the unit is visible in
@@ -145,7 +204,7 @@ code does.
 Never use `git add -A`. Stage by path.
 
 Commit subjects are one line, imperative, and under 72 characters where that is
-possible.
+possible. They are written in the third person and the passive voice.
 
 Every commit carries the trailer:
 
@@ -232,6 +291,23 @@ what to do and where things are. Neither records why a decision was taken.
 The rule for adding to them: `DESIGN.md` gets a change that alters what the
 system does, and this file gets a change that alters how to work on it. A
 rationale belongs in neither and in a commit message.
+
+A rationale that is worth keeping beyond the commit that took it is a decision
+record under `staged/`, one file per decision, with an index beside them. Those
+records are numbered so a later one can supersede an earlier one by name.
+
+**A record says on its own header that it has been superseded**, and names what
+superseded it. The status line carries `SUPERCEDED` beside the number, and the
+replacing record names the record and the part of it under `Supersedes`, so a
+reader holding either file learns about the other without going to the index. The
+five status values are `accepted`, `proposed`, `UNCONFIRMED`, `SUPERCEDED` and
+`rejected`, and `staged/adr-status-vocabulary.txt` defines them and says which
+records carry each.
+
+**A superseded record is kept as it was written and is read to find what was
+replaced.** It is not edited to agree with its replacement, since a record edited
+to agree with the code is no longer a record of what was decided, and it is not
+deleted, since the rejected alternative is the thing worth keeping.
 
 Where the two disagree, one of them is wrong and the disagreement is a bug to be
 fixed rather than a nuance to be noted. Name the file that is wrong in the commit
