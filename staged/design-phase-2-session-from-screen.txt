@@ -1,5 +1,7 @@
-Status: draft for the reader's review, 2026-10-05. Nothing here is ratified
-and no code has been written.
+Design status: draft for the reader's review, 2026-10-05.
+Implementation evidence checked 2026-10-06: commit d085ba2 moves the editor
+and turn cancellation into Session on feature/tui-redesign. This observation
+does not establish acceptance of the draft or completion of every phase 2 gate.
 
 # Design: split the session from the screen
 
@@ -11,7 +13,7 @@ Phase 3 replaces the screen with a custom primitive on the library. That swap
 is only safe if nothing a conversation owns lives in the code being swapped.
 This phase moves what is in the wrong place and changes nothing a reader sees.
 
-## Where the tree stands
+## Historical starting point: 2026-10-05
 
 `Session` in `session.go` already owns the log, the levels, the workers and
 the state, and it does not mention `Screen` anywhere. That half is done.
@@ -30,6 +32,18 @@ a conversation's                    the screen's
 ```
 
 `editor` and `cancel` are used in fourteen places in `run.go`.
+
+## Implementation update: 2026-10-06
+
+Commit d085ba2 moves editor and cancel ownership from interfaceLoop into
+Session. The loop accesses the editor through Session.Editor() and turn
+cancellation through SetCancel(), ClearCancel(), and StopTurn(). Caret and
+layout tests follow the moved editor. The starting-point description above
+records the state before that commit.
+
+Source verification establishes these ownership changes only. No build,
+test, crossbuild, or terminal verification was run for this documentation
+update; the remaining painter-interface scope is not marked complete.
 
 ## In scope
 
