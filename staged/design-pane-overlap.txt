@@ -1,0 +1,54 @@
+Status: draft for the reader's review, 2026-10-06. Nothing here is ratified
+and no code has been written.
+
+# Design: panes overlap right-over-left instead of shedding
+
+Replaces the shed ladder's drop-a-region behavior
+(`staged/adr-0000016-the-shed-ladder.txt`) for a short terminal: instead of a
+pane losing a region outright, the right pane draws over the left, and the
+left pane's text steps down in brightness rather than being clipped.
+
+This also bears on the pane bar records
+(`staged/adr-0000019-the-pane-bar-returns.txt`,
+`staged/adr-0000020-the-pane-bar-truncates-rather-than-scrolling-or-folding.txt`),
+which describe panes keeping separate, non-overlapping space. Overlap only
+makes sense once panes share columns, which those records do not describe
+today.
+
+## What it is for
+
+The shed ladder's answer to "not enough room" is to remove a region. A reader
+loses the evidence that the region exists at all, not just its current
+content. Overlap keeps the region present but dimmed, so a reader scanning a
+short terminal sees that something is there and partly obscured by the
+focused pane, rather than seeing nothing and having to remember it is there.
+
+## The mechanic
+
+The rightmost pane - the focused one - draws on top, at full brightness. A
+pane to its left draws underneath it rather than being shed; where the two
+overlap, the left pane's text is visible but dimmed, and the dimming steps
+down further for each pane further back in the stack.
+
+## Open questions
+
+Raised here rather than settled, since none of them is this draft's to
+decide alone:
+
+- How many brightness steps, and what the floor is. A pane dimmed all the
+  way to invisible is shedding again under a different name, which defeats
+  the reason for choosing overlap over the ladder in the first place.
+- Whether an overlapped, dimmed pane answers scroll and copy while obscured,
+  or only once it is brought to the front and loses the dimming.
+- Whether this replaces the shed ladder outright, or only applies once the
+  pane bar (0000019/0000020) is itself decided to stay, since overlap
+  presumes panes occupy the same columns and the pane bar records as written
+  do not.
+- `UI-redesign.md`'s screen (full-screen terminal, two bottom status bars)
+  names no pane bar at all. If the pane bar is cut following that document,
+  this draft needs to be re-scoped against whatever replaces panes-as-columns
+  rather than against the shed ladder as it stands.
+
+## Notes
+
+Nothing in the tree has been changed in writing this.
