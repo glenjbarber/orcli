@@ -1,5 +1,13 @@
-Status: draft for the reader's review, 2026-10-06. Nothing here is ratified
-and no code has been written.
+Status: draft, and IMPLEMENTED. `ad87a83` ("Implement adr-0000042's
+capability message") builds `cmd/orcli/ask.go`'s `capabilities()` to this
+draft's floor: identity plus a closed list, each entry present-with-its-
+real-constraints or absent, assembled from `Session.Options()`/`Ready()`
+and a `cloudflareReady()` check rather than hand-written per capability,
+with each tool's line reusing its own `Describe().Function.Description`
+verbatim. This draft's open questions were resolved in the implementation,
+not here: the rendering is prose (not a structured block), ordering is
+model / tools / Cloudflare, and "no tools" renders as its own stated line
+rather than folded into a single sentence with "no connectors."
 
 # Design: the minimal capability message
 

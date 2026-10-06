@@ -1,5 +1,9 @@
-Status: draft for the reader's review, 2026-10-06. Nothing here is ratified
-and no code has been written.
+Status: draft, and NOT ADOPTED. Glen settled the tension this draft was
+written for a different way: `30624f3` gives the pane bar its own fifth
+fixed row (`barRows = 5`) rather than cutting it or overlapping it with
+anything. Kept as a record of an alternative that was considered and not
+taken, per the project's own convention that a record is not rewritten to
+agree with what the code ended up doing.
 
 # Design: panes overlap right-over-left instead of shedding
 
