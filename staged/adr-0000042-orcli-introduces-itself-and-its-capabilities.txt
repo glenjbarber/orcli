@@ -83,6 +83,8 @@ bar already shows.
 
 The exact wording and ordering of the capability list is open; this record
 settles that one is sent and what it is assembled from, not its prose.
+`staged/design-minimal-capability-message.txt` is a draft argument for the
+floor that prose can reach, not a settling of it.
 
 Whether `internal/tools` is wired into the request as actual tool-call
 schemas, and what that costs in the response shape, is a separate decision
