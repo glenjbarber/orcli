@@ -9,31 +9,24 @@ import (
 	"github.com/rivo/tview"
 )
 
-// The frame, as it is now: the program owns the screen.
+// The frame, as it is now: the program owns the screen, and the screen is four fixed rows
+// below a scrollback that takes whatever height is left.
 //
-// There is one region, and it is the whole terminal. Every row is a status field in the
-// first columns and a log row beside it, and the log scrolls upward through those rows as
-// it is written. The prompt is the last row, with the reader's own line rather than a log
-// row beside it.
-//
-// # The field column
-//
-// A row is a name, a value, and the log. The name is what the reader reads and the value
-// is what it says, and they are beside each other rather than on two rows, since a reader
-// looking for the model is looking for one row and not for a label and a figure.
-//
-// The column is padded to the widest name in the field list rather than to a figure, so a
-// field is at the same column on every row and a reader following one down the screen is
-// following one left edge. That is the whole of the alignment: the log starts at the same
-// column on every row, and the padding is what puts it there.
+// Bottom to top: bar two (the longer-term fields - provider, model, verbosity, mouse, and
+// a scrollback-state stand-in), bar one (the live, fast-changing fields - see
+// barOneFields/barTwoFields), one blank separator line, and the prompt. Everything above
+// those four rows is scrollback: the tail of the log, newest row just above the prompt,
+// oldest pushed off the top as it grows. This is loreloom/UI-redesign.md's shape
+// (2026-10-06), not the field-column-beside-every-log-row shape the ten ADRs this
+// supersedes (see staged/adr-index.txt) describe.
 //
 // # Why the log is not below the stack any more
 //
-// It was. Six rows were the footer's, drawn once and left alone, and the log was a region
-// below them that the terminal scrolled. That arrangement needed the program to know where
-// the region started and ended, and it got it wrong: the scroll region took a row count and
-// wrote the first row as one, so the six rows the reader was typing into were inside the
-// region and a long log went over them.
+// Before this, and before the one-row-per-field shape before that, six rows were a footer's,
+// drawn once and left alone, and the log was a region below them that the terminal scrolled.
+// That arrangement needed the program to know where the region started and ended, and it got
+// it wrong: the scroll region took a row count and wrote the first row as one, so the six
+// rows the reader was typing into were inside the region and a long log went over them.
 //
 // A frame with one owner has no seam to get wrong. The program holds the log, and decides
 // for itself what a row shows, so nothing depends on where the terminal thinks its region
@@ -47,25 +40,39 @@ import (
 // conversation.
 
 // Prompt is what the reader's line is drawn behind.
-const Prompt = "root@localhost $ "
+//
+// This is the string loreloom/UI-redesign.md gives (2026-10-06), confirmed against a
+// rendered mockup: a space on each side of the dollar sign. adr-0000010 settled on
+// `root@lolhost @ ` instead, deliberately; that disagreement is recorded in
+// staged/adr-index.txt rather than resolved there, and is resolved here in the string's
+// favour because the mockup built from this string is the one that was confirmed.
+const Prompt = "root@lolhost $ "
 
-// StatusFields is how many status fields the frame carries.
+// barRows is how many fixed rows sit below the scrollback: the prompt, one blank
+// separator line, and the two status bars loreloom/UI-redesign.md describes.
+const barRows = 4
+
+// barOneFields and barTwoFields choose which Status fields render on each status bar.
 //
-// Twenty is the count the reader settled: the six rows the stack had plus fourteen beside
-// them, which fills a twenty row terminal on the height. The prompt row is one of the twenty
-// rather than one beside them, since it is a row like every other and the reader is typing on
-// it.
-//
-// The count is a ceiling rather than a figure, since a terminal shorter than this draws every
-// row it has and sheds fields from the bottom. It is named once so the count the frame draws,
-// the count the tests assert, and the count the layout reads cannot drift apart.
+// loreloom/UI-redesign.md names bar two's fields explicitly - provider, model,
+// verbosity, mouse, scrollback - and says nothing about bar one beyond "rapidly
+// changing statistics," and it leaves the two bars' relative order open. This list and
+// that order are both provisional pending Glen's sign-off; bar one here is state, the
+// sweeping figure, and the queue depth, chosen because they are the only fields the
+// session already recomputes every redraw.
+var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
+
+// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
+// The fifth, scrollback-on, is not yet tracked anywhere on Session - renderBarTwo appends
+// a literal "scroll:unknown" rather than inventing a field that reads nothing real.
+// Wiring real scrollback state is open follow-up work, not done here.
+var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
+
+// StatusFields is how many named status fields exist, whether or not a given redesign
+// of the frame renders all of them. It no longer bounds how many rows the frame draws
+// (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
+// field added to the fieldXxx list and the array that holds its value cannot drift apart.
 const StatusFields = 20
-
-// statusGap is what sits between the fields and the log beside them.
-//
-// One space, and one space only. A wider gap is a column the log has not got on a narrow
-// terminal, and the log is what the reader came back for.
-const statusGap = " "
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -222,25 +229,6 @@ func fieldName(k int) string {
 	}
 }
 
-// nameWidth is how wide the name column is, so the log starts at one column on every row.
-//
-// It is the widest name in the field list plus a space, computed from the names rather than
-// carried as a figure. A figure here would be one more thing to go stale when a field is
-// renamed, and a name column a character narrow puts the log one column left on some rows
-// and not on others, which is a log with no left edge.
-//
-// It is the width of the names and not the width of the names and their values, since a
-// value is prose of any length and padding to it would leave the log off the right edge of a
-// narrow terminal for the sake of a field that is four characters wide.
-func nameWidth() int {
-	widest := 0
-	for k := range statusCount {
-		if w := DisplayWidth(fieldName(k)); w > widest {
-			widest = w
-		}
-	}
-	return widest
-}
 
 // Status is what each field says, field by field.
 //
@@ -268,22 +256,19 @@ type barRow struct {
 	log string
 }
 
-// screenRows is how many rows the frame draws on a terminal of this height.
+// scrollbackRows is how many rows of log the frame draws above the fixed bottom rows.
 //
-// It is the count of fields the screen can hold, since every row carries a field. A terminal
-// shorter than the count draws every row it has and takes the fields from the top, so what is
-// shed is the bottom of the list and the prompt row is still there.
-//
-// The count is a ceiling rather than the terminal's height, so a tall terminal draws twenty
-// rows and the rest of the screen is left to the terminal rather than drawn as empty rows.
-func screenRows(height int) int {
-	if height < 1 {
+// It is height minus barRows, floored at zero. A terminal shorter than barRows has no
+// scrollback at all; what a terminal that short should shed first among the prompt,
+// blank line, and two bars is not settled by loreloom/UI-redesign.md (it is silent on
+// shedding, the way adr-0000016 settled it for the design this one supersedes), so the
+// fallback below draws only the prompt rather than guessing a shedding order nobody
+// has decided.
+func scrollbackRows(height int) int {
+	if height < barRows {
 		return 0
 	}
-	if height < statusCount {
-		return height
-	}
-	return statusCount
+	return height - barRows
 }
 
 // Bar is what the frame carries that is not a field value.
@@ -341,7 +326,6 @@ func (f *Frame) PasteHandler() func(string, func(tview.Primitive)) {
 // Draw paints the frame into tcell's cell grid.
 func (f *Frame) Draw(screen tcell.Screen) {
 	x, y, width, height := f.GetRect()
-	lines := stackLines(f.bar, f.log, height, f.palette)
 	base := f.palette.BaseStyle()
 	chrome := frameStyle(f.palette, RoleChrome)
 	for row := 0; row < height; row++ {
@@ -349,51 +333,115 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			screen.SetContent(x+col, y+row, ' ', nil, base)
 		}
 	}
-	for row, line := range lines {
-		if line.fields == "" {
-			drawCellText(screen, x, y+row, width, Prompt+line.log, chrome)
-			continue
-		}
 
-		fields := stripCSI(line.fields)
-		fieldWidth := DisplayWidth(fields)
-		if row == fieldFigure {
-			prefixWidth := nameWidth() + 1
-			prefix := fields[:min(prefixWidth, len(fields))]
-			drawCellText(screen, x, y+row, width, prefix, chrome)
-			drawSweepText(screen, x+prefixWidth, y+row, width-prefixWidth,
-				f.bar.Status[fieldFigure], f.step, f.palette)
-		} else {
-			drawCellText(screen, x, y+row, width, fields, chrome)
-		}
-		if fieldWidth >= width {
-			continue
-		}
-		screen.SetContent(x+fieldWidth, y+row, ' ', nil, chrome)
-		logX := fieldWidth + DisplayWidth(statusGap)
-		logWidth := width - logX
-		if logWidth <= 0 {
-			continue
-		}
-		text, offset, cut := cutTail(line.log, logWidth)
+	if height < 1 {
+		return
+	}
+
+	// A terminal too short for the full stack draws only the prompt, pinned to the last
+	// row. No shedding order among the blank line and the two bars is settled (see
+	// scrollbackRows), so this is the one row every height still gets.
+	if height < barRows {
+		promptRow := height - 1
+		drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y+promptRow, width)
+		return
+	}
+
+	backlog := scrollbackRows(height)
+	shown := make([]Row, 0, backlog)
+	for i := len(f.log) - 1; i >= 0 && len(shown) < backlog; i-- {
+		shown = append(shown, PlainRow(f.log[i]))
+	}
+	// shown is newest first; it fills the scrollback upward from just above the prompt.
+	for i, row := range shown {
+		at := backlog - 1 - i
+		text, offset, cut := cutTail(row.Text, width)
 		if cut {
-			drawCellText(screen, x+logX, y+row, logWidth, ellipsis, base)
-			logX += DisplayWidth(ellipsis)
-			logWidth -= DisplayWidth(ellipsis)
+			drawCellText(screen, x, y+at, width, ellipsis, base)
+			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y+at, width-DisplayWidth(ellipsis), text, offset, row.Spans, f.palette, base)
+			continue
 		}
-		if logWidth > 0 {
-			drawStyledCellText(screen, x+logX, y+row, logWidth, text, offset, line.spans, f.palette, base)
-		}
+		drawStyledCellText(screen, x, y+at, width, text, offset, row.Spans, f.palette, base)
 	}
-	if len(lines) > 0 {
-		field := []rune(f.bar.Field)
-		caret := min(f.caret, len(field))
-		column := DisplayWidth(Prompt + string(field[:caret]))
-		if width > 0 {
-			column = min(column, width-1)
-			screen.ShowCursor(x+column, y+len(lines)-1)
-		}
+
+	promptRow := backlog
+	barOneRow := backlog + 2
+	barTwoRow := backlog + 3
+
+	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
+	f.showCaret(screen, x, y+promptRow, width)
+
+	prefix, figure, suffix := renderBarOne(f.bar.Status)
+	drawCellText(screen, x, y+barOneRow, width, prefix, chrome)
+	figureX := DisplayWidth(prefix)
+	drawSweepText(screen, x+figureX, y+barOneRow, width-figureX, figure, f.step, f.palette)
+	suffixX := figureX + DisplayWidth(figure)
+	if suffixX < width {
+		drawCellText(screen, x+suffixX, y+barOneRow, width-suffixX, suffix, chrome)
 	}
+
+	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status), chrome)
+}
+
+// showCaret places the terminal cursor on the prompt row at the reader's caret offset.
+func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
+	field := []rune(f.bar.Field)
+	caret := min(f.caret, len(field))
+	column := DisplayWidth(Prompt + string(field[:caret]))
+	if width > 0 {
+		column = min(column, width-1)
+	}
+	screen.ShowCursor(x+column, y)
+}
+
+// renderBarOne builds the live, fast-changing status bar.
+//
+// It returns the text before the figure, the figure's own text (drawn separately so Draw
+// can sweep it), and the text after. The field list is barOneFields; see its doc comment
+// for why these three and not others.
+func renderBarOne(status Status) (prefix, figure, suffix string) {
+	parts := make([]string, 0, len(barOneFields))
+	figureIndex := -1
+	for _, k := range barOneFields {
+		if k == fieldFigure {
+			figureIndex = len(parts)
+		}
+		parts = append(parts, fieldName(k)+":"+status[k])
+	}
+	if figureIndex < 0 {
+		return strings.Join(parts, " · "), "", ""
+	}
+	prefix = strings.Join(parts[:figureIndex], " · ")
+	if prefix != "" {
+		prefix += " · " + fieldName(fieldFigure) + ":"
+	} else {
+		prefix = fieldName(fieldFigure) + ":"
+	}
+	figure = status[fieldFigure]
+	if figureIndex+1 < len(parts) {
+		suffix = " · " + strings.Join(parts[figureIndex+1:], " · ")
+	}
+	return prefix, figure, suffix
+}
+
+// renderBarTwo builds the longer-term status bar: the four Status fields in barTwoFields,
+// plus a literal scroll:unknown stand-in for the scrollback-on field loreloom/UI-redesign.md
+// names and Session does not yet track.
+//
+// Provider and model are written bare, as a reader would say them; the rest are named,
+// matching the mockup confirmed this session (`openrouter · claude-sonnet-5 ·
+// verbosity:0 · mouse:on · scroll:on`).
+func renderBarTwo(status Status) string {
+	parts := []string{status[fieldProvider], status[fieldModel]}
+	for _, k := range barTwoFields {
+		if k == fieldProvider || k == fieldModel {
+			continue
+		}
+		parts = append(parts, fieldName(k)+":"+status[k])
+	}
+	parts = append(parts, "scroll:unknown")
+	return strings.Join(parts, " · ")
 }
 
 func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, p Palette) {
@@ -504,72 +552,6 @@ func stripCSI(text string) string {
 		i++
 	}
 	return b.String()
-}
-
-// stackLines renders the frame as rows in screen order.
-//
-// The frame is drawn downward and the terminal puts the first line it receives where the cursor
-// is, so the first row here is the top of the screen and the last is the prompt.
-//
-// The log rides beside the fields: the newest rows are at the bottom, so a row written last
-// appears above the prompt and everything above it moves up, which is what the reader asked the
-// log to do. The rows are taken from the tail of the log, since a log is ordered oldest first
-// and the screen shows the end of it.
-func stackLines(bar Bar, log []Row, height int, palette Palette) []barRow {
-	drawn := screenRows(height)
-	if drawn < 1 {
-		return nil
-	}
-
-	// The prompt row is the last of them, so every row above it carries a log row.
-	logRows := drawn - 1
-
-	// The tail of the log fills the rows from the bottom upward, so the newest log row is the
-	// one just above the prompt and a row arriving moves everything up rather than appearing
-	// at the top where a reader is not looking.
-	shown := make([]Row, 0, logRows)
-	for i := len(log) - 1; i >= 0 && len(shown) < logRows; i-- {
-		shown = append(shown, PlainRow(log[i]))
-	}
-
-	out := make([]barRow, drawn)
-	for i := range out {
-		out[i] = barRow{fields: fieldsLine(bar, i)}
-	}
-	// The log rows were gathered newest first, so they fill upward from the prompt.
-	for i, row := range shown {
-		at := drawn - 2 - i
-		if at < 0 {
-			break
-		}
-		out[at].log = row.Text
-		out[at].spans = append([]Span(nil), row.Spans...)
-	}
-
-	// The prompt row carries the reader's own line in place of a log row, and carries no
-	// fields, since the prompt is where the reader types rather than something they read.
-	if prompt := drawn - 1; prompt >= 0 {
-		out[prompt].fields = ""
-		out[prompt].log = bar.Field
-	}
-
-	return out
-}
-
-// fieldsLine renders the name and the value of the field at k, padded to the name column.
-//
-// The padding is what puts the log at one column on every row. A row whose name is shorter
-// than the column gets spaces after it and a row whose name is the width of the column gets
-// none, and the log starts in the same place either way, which is the whole of what a reader
-// following one column down the screen is asking for.
-func fieldsLine(bar Bar, k int) string {
-	name := fieldName(k)
-	if k < 0 || k >= statusCount || name == "" {
-		return ""
-	}
-
-	pad := nameWidth() - DisplayWidth(name) + 1
-	return name + strings.Repeat(" ", pad) + bar.Status[k]
 }
 
 // sweepStatus colours the Status value of a rendered top bar, horizontally.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // hue is one hue as a single comparable value, so a test can compare two of them.
@@ -15,48 +17,38 @@ func hue(h float64) int {
 	return int(r)<<16 | int(g)<<8 | int(b)
 }
 
-// TestTheFrameIsTwentyRows is the layout the reader settled: every row of the terminal
-// carries a status field in the first column and a log row beside it.
-//
-// Twenty is the six rows the stack had plus fourteen beside them, and a twenty row terminal
-// is filled on the height. The count is a ceiling rather than a figure, so a terminal taller
-// than twenty draws twenty and the rest of the screen belongs to the terminal.
-func TestTheFrameIsTwentyRows(t *testing.T) {
-	for _, height := range []int{20, 24, 40} {
-		if got, want := screenRows(height), StatusFields; got != want {
-			t.Errorf("on a %d row terminal the frame is %d rows, want %d", height, got, want)
+// TestScrollbackGrowsWithHeight covers the layout loreloom/UI-redesign.md settled: a
+// terminal taller than the four fixed rows (prompt, blank, two status bars) gives every
+// row beyond them to scrollback, rather than to a fixed field count.
+func TestScrollbackGrowsWithHeight(t *testing.T) {
+	for _, height := range []int{barRows, barRows + 1, 20, 40} {
+		if got, want := scrollbackRows(height), height-barRows; got != want {
+			t.Errorf("on a %d row terminal scrollback is %d rows, want %d", height, got, want)
 		}
 	}
 }
 
-// TestAShortTerminalDrawsWhatItHas covers the floor. A terminal shorter than the field list
-// draws every row it has and takes the fields from the top, so what is shed is the bottom of
-// the list and the prompt row is still there.
-func TestAShortTerminalDrawsWhatItHas(t *testing.T) {
-	if got, want := screenRows(9), 9; got != want {
-		t.Errorf("a nine row terminal draws %d rows, want %d", got, want)
-	}
-	if got, want := screenRows(3), 3; got != want {
-		t.Errorf("a three row terminal draws %d rows, want %d", got, want)
-	}
-	if got := screenRows(0); got != 0 {
-		t.Errorf("a terminal with no rows draws %d", got)
+// TestAShortTerminalHasNoScrollback covers the floor. A terminal shorter than the four
+// fixed rows cannot fit scrollback at all; Frame.Draw falls back to drawing only the
+// prompt rather than guessing which of the fixed rows to shed, since no shedding order
+// among them is settled (see scrollbackRows's own doc comment).
+func TestAShortTerminalHasNoScrollback(t *testing.T) {
+	for _, height := range []int{0, 1, barRows - 1} {
+		if got := scrollbackRows(height); got != 0 {
+			t.Errorf("a %d row terminal has %d rows of scrollback, want 0", height, got)
+		}
 	}
 }
 
-// TestThePromptRowIsTheLastRow covers where the caret is put. The prompt row is the last row
-// the frame draws, so on a twenty row terminal it is row twenty and on a short one it is the
-// last row the screen has. Either way it is the last row drawn, which is what puts the caret
-// where a reader expects to find it without being told the frame's height.
-func TestThePromptRowIsTheLastRow(t *testing.T) {
-	for _, height := range []int{20, 24, 40} {
-		if got, want := screenRows(height), StatusFields; got != want {
-			t.Errorf("on a %d row terminal the prompt row is %d, want %d", height, got, want)
+// TestAShortTerminalStillDrawsThePrompt covers Frame.Draw's fallback directly: a terminal
+// shorter than the fixed stack still draws the prompt, pinned to its last row.
+func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
+	for _, height := range []int{1, 2, barRows - 1} {
+		screen := drawSimulationFrame(t, height, 40, Bar{Field: "hi"}, nil, Palette{})
+		r, _, _, _ := screen.GetContent(0, height-1)
+		if r != 'r' {
+			t.Errorf("on a %d row terminal the prompt is not on the last row (got %q at row %d)", height, r, height-1)
 		}
-	}
-
-	if got := screenRows(9); got != 9 {
-		t.Errorf("on a nine row terminal the prompt row is %d, want the bottom row 9", got)
 	}
 }
 
@@ -109,26 +101,43 @@ func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
 	}
 }
 
+// rowAt reads the full text of one screen row, trimmed of trailing padding, for asserting
+// on which log line landed where.
+func rowAt(screen tcell.SimulationScreen, row int) string {
+	_, width, _ := screen.GetContents()
+	var b strings.Builder
+	for x := 0; x < width; x++ {
+		r, _, _, cellWidth := screen.GetContent(x, row)
+		if cellWidth > 0 {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
 // TestTheLogIsNewestBesideThePrompt covers the direction of the scroll. A row arriving
-// appears above the prompt and everything above it moves up, which is what the reader asked
-// the log to do, rather than appearing at the top where a reader is not looking.
+// appears just above the prompt and everything above it moves up, which is what the
+// reader asked the log to do, rather than appearing at the top where a reader is not
+// looking.
 func TestTheLogIsNewestBesideThePrompt(t *testing.T) {
 	var s Status
 	rows := []Row{{Text: "first"}, {Text: "second"}, {Text: "third"}}
 
-	frame := stackLines(Bar{Status: s}, rows, 20, plainPalette())
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, rows, plainPalette())
+	promptRow := scrollbackRows(20)
 
-	if got := frame[len(frame)-2].log; got != "third" {
+	if got := rowAt(screen, promptRow-1); got != "third" {
 		t.Errorf("the row above the prompt is %q, want the newest log row %q", got, "third")
 	}
-	if got := frame[len(frame)-3].log; got != "second" {
+	if got := rowAt(screen, promptRow-2); got != "second" {
 		t.Errorf("the row above that is %q, want %q", got, "second")
 	}
 }
 
-// TestTheLogFillsUpward covers the case where the log is longer than the frame. The newest
-// rows fill the rows from the bottom upward and the oldest are off the screen, so a reader
-// scrolling back finds them in the terminal's own scrollback rather than on the screen.
+// TestTheLogFillsUpward covers the case where the log is longer than the scrollback. The
+// newest rows fill the scrollback from the bottom upward and the oldest are off the
+// screen, so a reader scrolling back finds them in the terminal's own scrollback rather
+// than on the screen.
 func TestTheLogFillsUpward(t *testing.T) {
 	var s Status
 	log := make([]Row, 40)
@@ -136,13 +145,14 @@ func TestTheLogFillsUpward(t *testing.T) {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
 	}
 
-	frame := stackLines(Bar{Status: s}, log, 20, plainPalette())
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, log, plainPalette())
+	promptRow := scrollbackRows(20)
 
-	if got := frame[len(frame)-2].log; got != "row 39" {
+	if got := rowAt(screen, promptRow-1); got != "row 39" {
 		t.Errorf("the newest row is %q, want row 39", got)
 	}
-	if got := frame[0].log; got != "row 21" {
-		t.Errorf("the topmost row is %q, want row 21 and nineteen above it", got)
+	if got := rowAt(screen, 0); got != "row 24" {
+		t.Errorf("the topmost row is %q, want row 24 and fifteen rows beneath it", got)
 	}
 }
 
@@ -155,7 +165,7 @@ func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
 	rows := []Row{{Text: "a log row"}}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s, Field: "a question"}, rows, Palette{})
 	got := simulationText(screen)
-	if !strings.Contains(got, "root@localhost $ a question") {
+	if !strings.Contains(got, "root@lolhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
 	}
 }
