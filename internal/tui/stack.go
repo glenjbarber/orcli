@@ -56,16 +56,12 @@ const barRows = 4
 //
 // loreloom/UI-redesign.md names bar two's fields explicitly - provider, model,
 // verbosity, mouse, scrollback - and says nothing about bar one beyond "rapidly
-// changing statistics," and it leaves the two bars' relative order open. This list and
-// that order are both provisional pending Glen's sign-off; bar one here is state, the
-// sweeping figure, and the queue depth, chosen because they are the only fields the
-// session already recomputes every redraw.
+// changing statistics." Glen confirmed bar one's list (2026-10-06): state, the sweeping
+// figure, and the queue depth. The two bars' relative order is still open.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
 // barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
-// The fifth, scrollback-on, is not yet tracked anywhere on Session - renderBarTwo appends
-// a literal "scroll:unknown" rather than inventing a field that reads nothing real.
-// Wiring real scrollback state is open follow-up work, not done here.
+// The fifth, scrollback-on, is Session.AtLiveEdge - see renderBarTwo.
 var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
