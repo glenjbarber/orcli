@@ -1,6 +1,6 @@
 # 0000006 A queued message is sent one per turn, and escape sends the next one now
 
-- Status: accepted. The storage for the queue is open and is written below as
+- Status: accepted. The storage for the queue is open and is written below as, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
   the question it is rather than as a decision
 - Date: 2026-10-05
 - Supersedes: the escape rule in `staged/status-interrupt.txt`, which made

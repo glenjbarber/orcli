@@ -1,6 +1,6 @@
 # 0000017 A superseded record keeps its status line
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles how a record says it has been replaced
 

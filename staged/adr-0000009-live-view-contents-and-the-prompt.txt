@@ -2,7 +2,7 @@
 
 - Status: accepted, and SUPERCEDED by 0000010. It stands as a record of a decision
   that was taken and then replaced, and is read to find what was replaced rather
-  than what to build
+  than what to build, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It records decisions 0000007 and 0000008 left open
 

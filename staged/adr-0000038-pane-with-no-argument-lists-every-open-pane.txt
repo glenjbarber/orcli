@@ -1,6 +1,6 @@
 # 0000038 /pane with no argument lists every open pane
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 26 in `QUESTIONS.md`
 

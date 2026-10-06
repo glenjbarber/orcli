@@ -1,6 +1,6 @@
 # 0000031 The permissions ledger is deduplicated after each session, keeping the latest verdict per pane and path
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles the growth question 0000030 left open; it
   does not reopen 0000030's own decisions

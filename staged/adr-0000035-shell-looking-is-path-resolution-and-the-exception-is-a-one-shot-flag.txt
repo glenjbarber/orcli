@@ -1,6 +1,6 @@
 # 0000035 A shell-looking line is one PATH resolves, and the exception is a one-shot flag
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 21 in `QUESTIONS.md`
 

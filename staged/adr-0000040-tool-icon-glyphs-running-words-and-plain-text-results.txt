@@ -1,6 +1,6 @@
 # 0000040 Tool icon glyphs, running words, and plain-text results
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles backlog items 27, 28, and 29 in
   `QUESTIONS.md`, filling in specifics 0000028 left open

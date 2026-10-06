@@ -1,6 +1,6 @@
 # 0000024 pbcopy and OSC 52 are ruled out on Terminal.app; the clipboard path itself is not decided
 
-- Status: UNCONFIRMED
+- Status: UNCONFIRMED, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It narrows question 12 in `QUESTIONS.md` without
   closing it

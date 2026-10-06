@@ -1,6 +1,6 @@
 # 0000019 The pane bar returns, and the gap it leaves in the shed ladder is reopened
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: the withdrawal recorded in `WORKER.txt` and in the note on 0000016
   in `ANSWERS.md`. It does not supersede 0000016 itself, which stands as a record

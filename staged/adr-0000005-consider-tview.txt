@@ -1,6 +1,6 @@
 # 0000005 Consider tview for the interface
 
-- Status: accepted on 2026-10-05. The reader was asked whether to drop the
+- Status: accepted on 2026-10-05. The reader was asked whether to drop the, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
   library for the reference tree's own terminal handling and said to keep it.
   Two questions answered, the two open checks measured with the limits stated
   below, and no code in the tree has changed

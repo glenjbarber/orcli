@@ -1,6 +1,6 @@
 # 0000033 A pane defaults to ask, unless begun from another pane
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 19 in `QUESTIONS.md`, using the
   inheritance 0000032 already describes for a pane created by /begin

@@ -1,6 +1,6 @@
 # 0000010 The interface and its commands
 
-- Status: accepted. This is the API document for the interface being built.
+- Status: accepted. This is the API document for the interface being built., and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
   Nothing in it is in the tree
 - Date: 2026-10-05
 - Supersedes: 0000008 and 0000009, and the parts of 0000007 they replaced. The parts of

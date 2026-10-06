@@ -1,6 +1,6 @@
 # 0000021 The status bar fields, and that neither bar wraps
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 8 in `QUESTIONS.md`, most of which
   0000016 had already decided without being asked to close it
