@@ -1,6 +1,6 @@
 # 0000036 A plain, append-only log beside the session survives a crash
 
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 22 in `QUESTIONS.md`
 

@@ -19,47 +19,47 @@ on the record is the place, and this table is the view across all of them.
 
 | Record | Decision | Status | Supersedes |
 | --- | --- | --- | --- |
-| [0000001](adr-0000001-frame-owns-screen.txt) | the frame owns the screen | SUPERCEDED by 0000008 and 0000010, and SUPERCEDED by `UI-redesign.md` | a footer at the bottom with the log in a region above it |
-| [0000002](adr-0000002-one-character-field.txt) | a status field is one character | SUPERCEDED by 0000010, and SUPERCEDED by `UI-redesign.md` | bars that dropped whole fields when too narrow |
-| [0000003](adr-0000003-first-request-is-the-probe.txt) | the first request is the connection test | accepted, and SUPERCEDED by `UI-redesign.md` | a command that tested the connection, with no handler |
-| [0000004](adr-0000004-model-choice-records-replaced.txt) | a choice records the model it replaced | accepted, and SUPERCEDED by `UI-redesign.md` | a writer that set the model and recorded nothing about the previous one |
-| [0000005](adr-0000005-consider-tview.txt) | consider tview for the interface | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It supersedes nothing |
-| [0000006](adr-0000006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | accepted, and SUPERCEDED by `UI-redesign.md` | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
-| [0000007](adr-0000007-the-interface-is-a-multiplexer.txt) | the interface is a multiplexer of sessions | accepted, in part SUPERCEDED by 0000008 and 0000010, and SUPERCEDED by `UI-redesign.md` | 0000001, where one program drew one screen for one conversation |
-| [0000008](adr-0000008-live-view-status-pane-view.txt) | the screen is a live view, a status window and a pane view | SUPERCEDED by 0000010, and SUPERCEDED by `UI-redesign.md` | 0000001 and the pane arrangement of 0000007 |
-| [0000009](adr-0000009-live-view-contents-and-the-prompt.txt) | what the live view shows, and the prompt is a joke | SUPERCEDED by 0000010, and SUPERCEDED by `UI-redesign.md` | nothing |
-| [0000010](adr-0000010-interface-api.txt) | the interface and its commands | accepted, and SUPERCEDED by `UI-redesign.md` | 0000008 and 0000009, and the pane arrangement of 0000007. This is the API document |
-| [0000011](adr-0000011-editing-keys-and-input-history.txt) | the editing keys, and a history with no duplicates | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It fills a gap 0000010 left |
-| [0000012](adr-0000012-the-queue-is-in-memory-behind-an-interface.txt) | the queue is in memory behind an interface | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles the first question in `ANSWERS.md` |
-| [0000013](adr-0000013-the-latest-session-is-keyed-on-the-directory.txt) | the latest session is keyed on the directory | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. `%SOME_IDENTIFIER%` is the slugified working directory |
-| [0000014](adr-0000014-a-restored-session-carries-the-whole-conversation.txt) | a restored session carries the whole conversation | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles what a restore carries |
-| [0000015](adr-0000015-the-history-is-one-hundred-exact-entries.txt) | the history is one hundred exact entries | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It fills a gap 0000011 left |
-| [0000016](adr-0000016-the-shed-ladder.txt) | the shed ladder for a short terminal | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 5 |
-| [0000017](adr-0000017-a-superseded-record-keeps-its-status-line.txt) | a superseded record says so on its own header | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles how a record is marked |
-| [0000018](adr-0000018-the-bell-rings-for-error-and-needs-an-answer.txt) | the bell rings for an error or a reply that needs an answer, in an unfocused pane | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 6 |
-| [0000019](adr-0000019-the-pane-bar-returns.txt) | the pane bar returns, and the shed-ladder gap it leaves is reopened | accepted, and SUPERCEDED by `UI-redesign.md` | the withdrawal in `WORKER.txt` and in the note on 0000016 in `ANSWERS.md`. Not 0000016 itself |
-| [0000020](adr-0000020-the-pane-bar-truncates-rather-than-scrolling-or-folding.txt) | the pane bar truncates rather than scrolling or folding | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 7 |
-| [0000021](adr-0000021-the-status-bar-fields-and-that-neither-bar-wraps.txt) | the status bar fields, and that neither bar wraps | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 8 |
-| [0000022](adr-0000022-the-prompt-belongs-to-the-focused-session.txt) | the prompt belongs to the focused session | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 9 |
-| [0000023](adr-0000023-the-prefix-is-escaped-by-pressing-it-twice.txt) | the prefix is escaped by pressing it twice | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 11 |
-| [0000024](adr-0000024-pbcopy-and-osc-52-are-ruled-out-on-terminal-app.txt) | pbcopy and OSC 52 are ruled out on Terminal.app; the path itself is not decided | UNCONFIRMED, and SUPERCEDED by `UI-redesign.md` | nothing. It narrows question 12 without closing it |
-| [0000025](adr-0000025-copy-is-owned-by-the-session.txt) | copy is owned by the session, not the terminal | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 13 |
-| [0000026](adr-0000026-copy-last-spells-as-n-zero-and-blocks-are-numbered-per-reply.txt) | /copy last spells as N 0, and fenced blocks are numbered per reply | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 14 |
-| [0000027](adr-0000027-an-input-error-clears-after-three-seconds.txt) | an input error clears after three seconds | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 15 |
-| [0000028](adr-0000028-tool-icons-are-per-category-with-a-running-and-a-result-state.txt) | tool icons are per category, with a running and a result state | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 16 |
-| [0000029](adr-0000029-the-thinking-phrase-set.txt) | the thinking phrase set | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 17 |
-| [0000030](adr-0000030-the-permissions-table-is-an-append-only-ledger.txt) | the permissions table is an append-only ledger with a single verdict column | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 18 |
-| [0000031](adr-0000031-the-permissions-ledger-is-deduplicated-after-each-session.txt) | the permissions ledger is deduplicated after each session, keeping the latest verdict per pane and path | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles the growth question 0000030 left open |
-| [0000032](adr-0000032-begin-forks-a-pane-with-a-handoff-note-and-copied-permissions.txt) | /begin forks a pane, with a handoff note rather than full history, and copied permissions | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It introduces /begin |
-| [0000033](adr-0000033-a-pane-defaults-to-ask-unless-begun-from-another.txt) | a pane defaults to ask, unless begun from another pane | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 19, using 0000032's inheritance |
-| [0000034](adr-0000034-commit-attribution-is-a-map-keyed-by-provider-then-model.txt) | commit attribution in .orcli.json is a map keyed by provider, then model | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 20 |
-| [0000035](adr-0000035-shell-looking-is-path-resolution-and-the-exception-is-a-one-shot-flag.txt) | a shell-looking line is one PATH resolves, and the exception is a one-shot flag | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 21 |
-| [0000036](adr-0000036-a-plain-append-only-log-beside-the-session-survives-a-crash.txt) | a plain, append-only log beside the session survives a crash | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 22 |
-| [0000037](adr-0000037-the-pane-bar-sheds-third-after-the-indicators.txt) | the pane bar sheds third, after the indicators and before the bar fields | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 25 |
-| [0000038](adr-0000038-pane-with-no-argument-lists-every-open-pane.txt) | /pane with no argument lists every open pane | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles question 26 |
-| [0000039](adr-0000039-model-completion-is-inline-suggestion-plus-a-live-tab-list.txt) | /model completion is an inline suggestion per keystroke, plus a live Tab list from the API | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles backlog item 24 |
-| [0000040](adr-0000040-tool-icon-glyphs-running-words-and-plain-text-results.txt) | tool icon glyphs, running words, and plain-text results | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It settles backlog items 27, 28, and 29 |
-| [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It extends 0000021, 0000016 and 0000037 |
+| [0000001](adr-0000001-frame-owns-screen.txt) | the frame owns the screen | SUPERCEDED by 0000008 and 0000010 | a footer at the bottom with the log in a region above it |
+| [0000002](adr-0000002-one-character-field.txt) | a status field is one character | SUPERCEDED by 0000010 | bars that dropped whole fields when too narrow |
+| [0000003](adr-0000003-first-request-is-the-probe.txt) | the first request is the connection test | accepted | a command that tested the connection, with no handler |
+| [0000004](adr-0000004-model-choice-records-replaced.txt) | a choice records the model it replaced | accepted | a writer that set the model and recorded nothing about the previous one |
+| [0000005](adr-0000005-consider-tview.txt) | consider tview for the interface | accepted | nothing. It supersedes nothing |
+| [0000006](adr-0000006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | accepted | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
+| [0000007](adr-0000007-the-interface-is-a-multiplexer.txt) | the interface is a multiplexer of sessions | accepted, in part SUPERCEDED by 0000008 and 0000010 | 0000001, where one program drew one screen for one conversation |
+| [0000008](adr-0000008-live-view-status-pane-view.txt) | the screen is a live view, a status window and a pane view | SUPERCEDED by 0000010 | 0000001 and the pane arrangement of 0000007 |
+| [0000009](adr-0000009-live-view-contents-and-the-prompt.txt) | what the live view shows, and the prompt is a joke | SUPERCEDED by 0000010 | nothing |
+| [0000010](adr-0000010-interface-api.txt) | the interface and its commands | accepted | 0000008 and 0000009, and the pane arrangement of 0000007. This is the API document |
+| [0000011](adr-0000011-editing-keys-and-input-history.txt) | the editing keys, and a history with no duplicates | accepted | nothing. It fills a gap 0000010 left |
+| [0000012](adr-0000012-the-queue-is-in-memory-behind-an-interface.txt) | the queue is in memory behind an interface | accepted | nothing. It settles the first question in `ANSWERS.md` |
+| [0000013](adr-0000013-the-latest-session-is-keyed-on-the-directory.txt) | the latest session is keyed on the directory | accepted | nothing. `%SOME_IDENTIFIER%` is the slugified working directory |
+| [0000014](adr-0000014-a-restored-session-carries-the-whole-conversation.txt) | a restored session carries the whole conversation | accepted | nothing. It settles what a restore carries |
+| [0000015](adr-0000015-the-history-is-one-hundred-exact-entries.txt) | the history is one hundred exact entries | accepted | nothing. It fills a gap 0000011 left |
+| [0000016](adr-0000016-the-shed-ladder.txt) | the shed ladder for a short terminal | accepted | nothing. It settles question 5 |
+| [0000017](adr-0000017-a-superseded-record-keeps-its-status-line.txt) | a superseded record says so on its own header | accepted | nothing. It settles how a record is marked |
+| [0000018](adr-0000018-the-bell-rings-for-error-and-needs-an-answer.txt) | the bell rings for an error or a reply that needs an answer, in an unfocused pane | accepted | nothing. It settles question 6 |
+| [0000019](adr-0000019-the-pane-bar-returns.txt) | the pane bar returns, and the shed-ladder gap it leaves is reopened | accepted | the withdrawal in `WORKER.txt` and in the note on 0000016 in `ANSWERS.md`. Not 0000016 itself |
+| [0000020](adr-0000020-the-pane-bar-truncates-rather-than-scrolling-or-folding.txt) | the pane bar truncates rather than scrolling or folding | accepted | nothing. It settles question 7 |
+| [0000021](adr-0000021-the-status-bar-fields-and-that-neither-bar-wraps.txt) | the status bar fields, and that neither bar wraps | accepted | nothing. It settles question 8 |
+| [0000022](adr-0000022-the-prompt-belongs-to-the-focused-session.txt) | the prompt belongs to the focused session | accepted | nothing. It settles question 9 |
+| [0000023](adr-0000023-the-prefix-is-escaped-by-pressing-it-twice.txt) | the prefix is escaped by pressing it twice | accepted | nothing. It settles question 11 |
+| [0000024](adr-0000024-pbcopy-and-osc-52-are-ruled-out-on-terminal-app.txt) | pbcopy and OSC 52 are ruled out on Terminal.app; the path itself is not decided | UNCONFIRMED | nothing. It narrows question 12 without closing it |
+| [0000025](adr-0000025-copy-is-owned-by-the-session.txt) | copy is owned by the session, not the terminal | accepted | nothing. It settles question 13 |
+| [0000026](adr-0000026-copy-last-spells-as-n-zero-and-blocks-are-numbered-per-reply.txt) | /copy last spells as N 0, and fenced blocks are numbered per reply | accepted | nothing. It settles question 14 |
+| [0000027](adr-0000027-an-input-error-clears-after-three-seconds.txt) | an input error clears after three seconds | accepted | nothing. It settles question 15 |
+| [0000028](adr-0000028-tool-icons-are-per-category-with-a-running-and-a-result-state.txt) | tool icons are per category, with a running and a result state | accepted | nothing. It settles question 16 |
+| [0000029](adr-0000029-the-thinking-phrase-set.txt) | the thinking phrase set | accepted | nothing. It settles question 17 |
+| [0000030](adr-0000030-the-permissions-table-is-an-append-only-ledger.txt) | the permissions table is an append-only ledger with a single verdict column | accepted | nothing. It settles question 18 |
+| [0000031](adr-0000031-the-permissions-ledger-is-deduplicated-after-each-session.txt) | the permissions ledger is deduplicated after each session, keeping the latest verdict per pane and path | accepted | nothing. It settles the growth question 0000030 left open |
+| [0000032](adr-0000032-begin-forks-a-pane-with-a-handoff-note-and-copied-permissions.txt) | /begin forks a pane, with a handoff note rather than full history, and copied permissions | accepted | nothing. It introduces /begin |
+| [0000033](adr-0000033-a-pane-defaults-to-ask-unless-begun-from-another.txt) | a pane defaults to ask, unless begun from another pane | accepted | nothing. It settles question 19, using 0000032's inheritance |
+| [0000034](adr-0000034-commit-attribution-is-a-map-keyed-by-provider-then-model.txt) | commit attribution in .orcli.json is a map keyed by provider, then model | accepted | nothing. It settles question 20 |
+| [0000035](adr-0000035-shell-looking-is-path-resolution-and-the-exception-is-a-one-shot-flag.txt) | a shell-looking line is one PATH resolves, and the exception is a one-shot flag | accepted | nothing. It settles question 21 |
+| [0000036](adr-0000036-a-plain-append-only-log-beside-the-session-survives-a-crash.txt) | a plain, append-only log beside the session survives a crash | accepted | nothing. It settles question 22 |
+| [0000037](adr-0000037-the-pane-bar-sheds-third-after-the-indicators.txt) | the pane bar sheds third, after the indicators and before the bar fields | accepted | nothing. It settles question 25 |
+| [0000038](adr-0000038-pane-with-no-argument-lists-every-open-pane.txt) | /pane with no argument lists every open pane | accepted | nothing. It settles question 26 |
+| [0000039](adr-0000039-model-completion-is-inline-suggestion-plus-a-live-tab-list.txt) | /model completion is an inline suggestion per keystroke, plus a live Tab list from the API | accepted | nothing. It settles backlog item 24 |
+| [0000040](adr-0000040-tool-icon-glyphs-running-words-and-plain-text-results.txt) | tool icon glyphs, running words, and plain-text results | accepted | nothing. It settles backlog items 27, 28, and 29 |
+| [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted | nothing. It extends 0000021, 0000016 and 0000037 |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
@@ -116,21 +116,6 @@ nothing supersedes it.
 
 The prompt was `root@localhost $ ` in 0000009 and is `root@lolhost @ ` in 0000010.
 The reader wrote both and marked the second as deliberate.
-
-**All forty-one records above are now additionally SUPERCEDED by
-`UI-redesign.md`**, held in the `loreloom` repository rather than this one. That
-document states it supersedes every prior UI architecture decision record
-without naming which of this table's entries it means individually, so each
-row above carries the blanket note rather than a record-by-record one. It
-settles an initial login layout (full-screen terminal, two bottom status
-panes, one blank separator line, then the prompt) and leaves everything else,
-including the panes' relative order, open pending further instruction.
-
-It gives the prompt as `root@lolhost $ `, with a space on each side of the
-dollar sign. This is not the same string 0000010 settled on
-(`root@lolhost @ `, an at-sign, not a dollar sign, and marked deliberate
-there) - that disagreement is recorded here rather than resolved, since
-nothing in `UI-redesign.md` addresses 0000010's choice or says it is wrong.
 
 0000001 and 0000007 in the pane arrangement were superseded in two steps rather than
 one. 0000008 replaced the single frame with three vertical parts, and 0000010 replaced

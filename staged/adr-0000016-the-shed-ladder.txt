@@ -1,4 +1,4 @@
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: nothing. It settles the shed order question 5 asked, for the six
   regions the screen now has

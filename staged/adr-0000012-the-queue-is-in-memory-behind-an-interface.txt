@@ -1,6 +1,6 @@
 # 0000012 The message queue is in memory, behind an interface
 
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: nothing. It answers a question 0000006 left open
 

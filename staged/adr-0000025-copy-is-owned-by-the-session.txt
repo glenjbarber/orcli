@@ -1,6 +1,6 @@
 # 0000025 Copy is owned by the session, not the terminal
 
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 13 in `QUESTIONS.md`
 

@@ -3,7 +3,7 @@
 - Status: accepted, and SUPERCEDED by 0000010. It stands as a record of a decision
   that was taken and then replaced, and is read to find what was replaced rather
   than what to build. Three questions it raises were open: the shed order is
-  answered by 0000016, the pane bar is gone, and what rings it has no pane to ring, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+  answered by 0000016, the pane bar is gone, and what rings it has no pane to ring
 - Date: 2026-10-05
 - Supersedes: 0000001, in the part where it settled one frame for one
   conversation, and 0000007, in the part where it settled a multiplexer of

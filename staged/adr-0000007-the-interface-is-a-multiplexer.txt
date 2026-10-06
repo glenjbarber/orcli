@@ -3,7 +3,7 @@
 - Status: accepted for the shape, and SUPERCEDED in the pane arrangement by
   0000008 and then 0000010. A session per pane survives. Visible panes do not, and
   the pane bar went with them. This stands as a record of a decision that was
-  taken and then replaced in part, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+  taken and then replaced in part
 - Date: 2026-10-05
 - Supersedes: 0000001, in the part where it settled that one program owns one
   screen for one conversation

@@ -1,6 +1,6 @@
 # 0000003 The first request is the connection test
 
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: a command in the table that tested the connection and reported the
   key, with no handler behind it

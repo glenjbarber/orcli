@@ -1,6 +1,6 @@
 # 0000032 /begin forks a pane, with a handoff note rather than full history, and copied permissions
 
-- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which supersedes every prior UI architecture ADR
+- Status: accepted
 - Date: 2026-10-05
 - Supersedes: nothing. It introduces `/begin`, not asked by any numbered
   question in `QUESTIONS.md`
