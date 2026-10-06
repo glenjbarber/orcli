@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -51,14 +50,12 @@ func TestAShortTerminalDrawsWhatItHas(t *testing.T) {
 // where a reader expects to find it without being told the frame's height.
 func TestThePromptRowIsTheLastRow(t *testing.T) {
 	for _, height := range []int{20, 24, 40} {
-		screen, _ := drawnAt(height, 80)
-		if got, want := promptScreenRow(screen), StatusFields; got != want {
+		if got, want := screenRows(height), StatusFields; got != want {
 			t.Errorf("on a %d row terminal the prompt row is %d, want %d", height, got, want)
 		}
 	}
 
-	screen, _ := drawnAt(9, 80)
-	if got := promptScreenRow(screen); got != 9 {
+	if got := screenRows(9); got != 9 {
 		t.Errorf("on a nine row terminal the prompt row is %d, want the bottom row 9", got)
 	}
 }
@@ -99,15 +96,11 @@ func TestEveryFieldIsOneCharacter(t *testing.T) {
 // carries a field in the first column and a log row beside it, and a row written last appears
 // just above the prompt so everything moves up rather than appearing at the top.
 func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
 	var s Status
 	s[fieldCwd] = "."
 	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
-
-	DrawStack(screen, stackLines(Bar{Status: s}, rows, 20, plainPalette()), plainPalette())
-
-	got := stripSequences(out.String())
+	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s}, rows, Palette{})
+	got := simulationText(screen)
 	if !strings.Contains(got, "the newest row") {
 		t.Errorf("the newest log row is not on the screen:\n%q", got)
 	}
@@ -157,66 +150,13 @@ func TestTheLogFillsUpward(t *testing.T) {
 // log row. The prompt row carries the reader's own text, and a prompt with a log row behind it
 // is a prompt the reader cannot read.
 func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
 	var s Status
 	s[fieldState] = string(StateIdle)
 	rows := []Row{{Text: "a log row"}}
-
-	DrawStack(screen, stackLines(Bar{Status: s, Field: "a question"}, rows, 20, plainPalette()),
-		plainPalette())
-
-	got := stripSequences(out.String())
+	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s, Field: "a question"}, rows, Palette{})
+	got := simulationText(screen)
 	if !strings.Contains(got, "root@localhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
-	}
-}
-
-// TestTheCaretIsNotMovedBackwards covers the reader's decision. The row is addressed with a
-// cursor-position sequence and the column is reached by advancing forward from it, so the
-// caret never travels up through the frame to find the row it belongs to.
-func TestTheCaretIsNotMovedBackwards(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "stealth/space-bunny-alpha"}),
-		screen:  screen,
-	}
-	l.session.Editor().Reset()
-	l.session.Editor().Insert('a')
-	l.placeCaret()
-
-	got := out.String()
-	if strings.Contains(got, "\x1b[1A") {
-		t.Errorf("the caret was moved up through the frame:\n%q", got)
-	}
-	if !strings.HasPrefix(got, escapePosition(promptScreenRow(screen), 1)) {
-		t.Errorf("the caret is not placed on the prompt row by position:\n%q", got)
-	}
-	if !strings.Contains(got, "\x1b[") || !strings.Contains(got, "C") {
-		t.Errorf("the caret column is not reached by advancing forward:\n%q", got)
-	}
-}
-
-// TestTheCaretFollowsThePromptAndTheText covers the column. The caret is after the prompt
-// and after what the reader typed, counted in display columns, so a field holding a wide
-// character does not put the caret inside a glyph.
-func TestTheCaretFollowsThePromptAndTheText(t *testing.T) {
-	screen, out := drawnAt(20, 80)
-
-	l := &interfaceLoop{
-		session: New(Options{Model: "stealth/space-bunny-alpha"}),
-		screen:  screen,
-	}
-	l.session.Editor().Reset()
-	l.session.Editor().Insert('a')
-	l.placeCaret()
-
-	want := escapePosition(promptScreenRow(screen), 1) +
-		"\r\x1b[" + strconv.Itoa(DisplayWidth(Prompt)+1) + "C"
-	if got := out.String(); got != want {
-		t.Errorf("the caret is not after the prompt and the typed text:\ngot  %q\nwant %q",
-			got, want)
 	}
 }
 

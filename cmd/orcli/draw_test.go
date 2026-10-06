@@ -25,26 +25,9 @@ func standDrawFor(t *testing.T, fn func(context.Context, *tui.Session, config.Co
 	draw = fn
 }
 
-// standTerminalFor answers the terminal check as the test wants it answered.
-//
-// It is a seam for the same reason draw is one, and it is a second seam rather than a
-// folding of the first because the two answer different questions: this one asks
-// whether the streams are terminals at all, and openInterface asks whether there is a
-// descriptor and a size to draw on. A test that stood in for both would not be
-// testing that the interface opens when the reader is at a terminal, since the whole
-// condition would be the stand-in.
-func standTerminalFor(t *testing.T, answer bool) {
-	t.Helper()
-
-	restore := tuiStreamsAreTerminal
-	t.Cleanup(func() { tuiStreamsAreTerminal = restore })
-	tuiStreamsAreTerminal = func(io.Reader, io.Writer) bool { return answer }
-}
-
-// TestTheInterfaceIsOpenedAtATerminal covers the call itself, since a tui.Start with no
+// TestTheInterfaceIsStarted covers the call itself, since a tui.Start with no
 // caller is the state this wiring exists to leave.
-func TestTheInterfaceIsOpenedAtATerminal(t *testing.T) {
-	standTerminalFor(t, true)
+func TestTheInterfaceIsStarted(t *testing.T) {
 
 	withHome(t, func() {
 		writeConfig(t, `{"api_key":"k"}`)
@@ -67,10 +50,9 @@ func TestTheInterfaceIsOpenedAtATerminal(t *testing.T) {
 	})
 }
 
-// TestTheInterfaceIsNotOpenedOnARedirectedRun is the case the terminal check exists
-// for. A redirected interface writes escape sequences into whatever is reading, and
-// the reader gets noise rather than a report.
-func TestTheInterfaceIsNotOpenedOnARedirectedRun(t *testing.T) {
+// TestARedirectedRunReportsTheTerminalRequirement covers the response when tcell
+// cannot open a screen for buffered streams.
+func TestARedirectedRunReportsTheTerminalRequirement(t *testing.T) {
 	withHome(t, func() {
 		writeConfig(t, `{"api_key":"k"}`)
 
@@ -78,7 +60,7 @@ func TestTheInterfaceIsNotOpenedOnARedirectedRun(t *testing.T) {
 		standDrawFor(t, func(context.Context, *tui.Session, config.Config,
 			io.Reader, io.Writer) error {
 			called = true
-			return nil
+			return tui.ErrNoTerminal
 		})
 
 		_, stderr, err := runIn(t, false)
@@ -86,8 +68,8 @@ func TestTheInterfaceIsNotOpenedOnARedirectedRun(t *testing.T) {
 			t.Fatalf("run: %v", err)
 		}
 
-		if called {
-			t.Error("the interface was opened on a run whose streams are buffers")
+		if !called {
+			t.Error("the tcell screen opener was not asked to open the interface")
 		}
 		if !strings.Contains(stderr, "terminals") {
 			t.Errorf("a redirected run was not told why: %q", stderr)
@@ -99,8 +81,6 @@ func TestTheInterfaceIsNotOpenedOnARedirectedRun(t *testing.T) {
 // that reported nothing would leave a reader with a session report and no frame and no
 // fault to explain the gap.
 func TestAFailureOpeningTheInterfaceStopsStartup(t *testing.T) {
-	standTerminalFor(t, true)
-
 	withHome(t, func() {
 		writeConfig(t, `{"api_key":"k"}`)
 
