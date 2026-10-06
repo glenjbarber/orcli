@@ -47,7 +47,7 @@ scrollback indicator
 mouse indicator
 
 status bar 1   Provider | Model | Status | Bell | Verbosity
-status bar 2   Hostname | Context | Autosave | Stealth | Approval
+status bar 2   Hostname | Credits | Cost | Context | In | Out | Autosave | Stealth | Approval
 
 root@lolhost @ <input>
 
