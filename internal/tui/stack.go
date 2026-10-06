@@ -4,6 +4,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 // The frame, as it is now: the program owns the screen.
@@ -258,6 +261,7 @@ type Status [statusCount]string
 type barRow struct {
 	// fields is the name and the value, padded to the name column.
 	fields string
+	spans  []Span
 
 	// log is the log row shown beside the fields, which is the reader's own line on the
 	// prompt row.
@@ -282,29 +286,6 @@ func screenRows(height int) int {
 	return statusCount
 }
 
-// footerScreenRow is the row of the terminal that the field at k is on.
-//
-// The frame is at the top of the screen, so the first row is row one and field k is one
-// further down. There is no arithmetic against the terminal's height here, which is the point:
-// a row named by a height is a row that moves when the height is read a second time, and a row
-// that moves is a row the caret can end up off.
-func footerScreenRow(screen *Screen, k int) int {
-	return 1 + k
-}
-
-// promptScreenRow is the row of the terminal the prompt row is on.
-//
-// It is the last row the frame draws, so on a terminal tall enough for the whole field list it
-// is the last of the twenty and on a shorter one it is the last row the screen has. Either way
-// it is the last row drawn, which is what puts the caret where a reader expects to find it
-// without being told the frame's height.
-func promptScreenRow(screen *Screen) int {
-	if rows := screenRows(screen.Height()); rows > 0 {
-		return rows
-	}
-	return 1
-}
-
 // Bar is what the frame carries that is not a field value.
 //
 // A row is a set of field values and a log row, and the only thing neither of those carries
@@ -318,144 +299,211 @@ type Bar struct {
 	Field string
 }
 
-// DrawLog writes rows downward to the terminal, below the frame.
-//
-// It is kept as a name because a caller asks the log to be drawn and the answer is where it
-// goes. The frame owns the screen now, so a caller drawing the whole screen goes through
-// DrawStack and passes the log rows as part of the frame rather than calling this.
-func DrawLog(w *Screen, rows []Row, palette Palette) {
-	if len(rows) == 0 {
-		return
-	}
-
-	width := w.Width()
-	for _, row := range rows {
-		w.Write(foldRow(palette, PlainRow(row), width) + "\r\n")
-	}
+// Frame is the screen-sized primitive that draws the status rows and transcript.
+// tview owns terminal setup and input; this primitive owns the cell layout.
+type Frame struct {
+	*tview.Box
+	bar     Bar
+	log     []Row
+	palette Palette
+	caret   int
+	step    int
+	paste   func(string)
 }
 
-// foldRow renders one row, cut to the width.
-//
-// The palette is asked for a role per span rather than per row, since a row may carry several:
-// a tool line is a tool colour over its own words. A row with no spans is written plainly, which
-// is the common case and the one that must cost the least.
-//
-// The walk is in one piece: every byte of the row is written exactly once, either inside a
-// span or outside one. Writing the text before each span and then jumping past the span loses
-// the span's own text, so a row whose spans cover its middle arrives with a hole in it, which
-// is worse than a row with no colour at all.
-func foldRow(p Palette, row Row, width int) string {
-	text := CutColumnFromEnd(row.Text, width)
-	if !p.On() || len(row.Spans) == 0 {
-		return text
+// NewFrame builds the custom tview primitive used for the interface screen.
+func NewFrame() *Frame { return &Frame{Box: tview.NewBox()} }
+
+// SetContent replaces the values the next Draw will put on the screen.
+func (f *Frame) SetContent(bar Bar, log []Row, palette Palette) {
+	f.bar = bar
+	f.log = append(f.log[:0], log...)
+	f.palette = palette
+}
+
+// SetCaret records the prompt caret's rune offset.
+func (f *Frame) SetCaret(caret int) { f.caret = caret }
+
+// SetSweepStep sets the animation position for the changing figure field.
+func (f *Frame) SetSweepStep(step int) { f.step = step }
+
+// SetPasteHandler installs the handler for text pasted into the prompt.
+func (f *Frame) SetPasteHandler(handler func(string)) { f.paste = handler }
+
+// PasteHandler gives tview the prompt's paste handler.
+func (f *Frame) PasteHandler() func(string, func(tview.Primitive)) {
+	if f.paste == nil {
+		return nil
 	}
+	return func(text string, _ func(tview.Primitive)) { f.paste(text) }
+}
 
-	var b strings.Builder
-	b.WriteString(p.Base())
-
-	written := 0
-	for _, span := range row.Spans {
-		start, end := spanBounds(span, len(text))
-		if end <= written {
-			// Spans arrive in whatever order the writer produced them, and an out-of-order one
-			// would write its own text twice. Skipping it is better than a row that says the
-			// same words in the wrong colours.
+// Draw paints the frame into tcell's cell grid.
+func (f *Frame) Draw(screen tcell.Screen) {
+	x, y, width, height := f.GetRect()
+	lines := stackLines(f.bar, f.log, height, f.palette)
+	base := f.palette.BaseStyle()
+	chrome := frameStyle(f.palette, RoleChrome)
+	for row := 0; row < height; row++ {
+		for col := 0; col < width; col++ {
+			screen.SetContent(x+col, y+row, ' ', nil, base)
+		}
+	}
+	for row, line := range lines {
+		if line.fields == "" {
+			drawCellText(screen, x, y+row, width, Prompt+line.log, chrome)
 			continue
 		}
 
-		b.WriteString(text[written:start])
-		b.WriteString(p.Sequence(span.Role))
-		b.WriteString(text[start:end])
-		written = end
-	}
-	b.WriteString(text[written:])
-
-	// The reset carries the theme's base back, so a row ending mid-span leaves the next row
-	// on the theme's background rather than on whatever the last colour was. It is written
-	// after the whole row rather than inside the loop, since a reset before the tail would
-	// leave the tail on the wrong background.
-	b.WriteString(p.Reset())
-	return b.String()
-}
-
-// spanBounds clamps one span to the text as written and as cut.
-//
-// A span is a byte range over the whole row, and a row cut from the tail has fewer bytes than
-// it did, so a span past the cut ends at the cut rather than running past the end of what is
-// written. A span beginning past the cut is dropped, which is the same as being empty.
-func spanBounds(span Span, length int) (int, int) {
-	if span.Start < 0 || span.Start > length {
-		return 0, 0
-	}
-	end := span.End
-	if end > length {
-		end = length
-	}
-	if end <= span.Start {
-		return span.Start, span.Start
-	}
-	return span.Start, end
-}
-
-// DrawStack writes the whole frame, row by row, from the top of the screen.
-//
-// It is written by position rather than from wherever the cursor is, since the frame owns the
-// screen and does not inherit the cursor from the shell that ran before it. Every row is
-// addressed and cleared before it is written, since a row being written is shorter than the
-// row it replaces and writing over the top of it leaves the tail of the old row visible.
-func DrawStack(w *Screen, rows []barRow, palette Palette) {
-	if w.Height() < 1 {
-		return
-	}
-
-	for i, row := range rows {
-		w.Write(escapePosition(footerScreenRow(w, i), 1))
-		w.Write(escapeEraseLine)
-		w.Write(frameLine(row, w.Width(), palette))
-	}
-}
-
-// DrawFooterRow rewrites one row of the frame where it stands.
-//
-// It is the case that stops a keystroke advancing the frame. The whole frame is written as
-// terminal rows, so writing it again for one character appended the frame's height and a line
-// ending, and pushed the reader's own line down the screen by that much every time they typed.
-// One row rewritten in place moves nothing.
-//
-// The row is addressed by arithmetic rather than by counting back up from wherever the cursor
-// is, since the frame is written downward and leaves the cursor below it.
-func DrawFooterRow(w *Screen, at int, rows []barRow, palette Palette) {
-	if at < 0 || at >= len(rows) {
-		return
-	}
-	w.Write(escapePosition(at+1, 1))
-	w.Write(escapeEraseLine)
-	w.Write(frameLine(rows[at], w.Width(), palette))
-}
-
-// frameLine renders one row of the frame: the fields, then the log beside them.
-//
-// The prompt row is the one row that does not take this shape, since it carries the prompt and
-// the reader's own line rather than a set of fields and a log row. It is recognised by having
-// no fields rather than by its row number, so a frame that shed rows from the bottom still
-// draws its prompt row as a prompt row.
-func frameLine(row barRow, width int, palette Palette) string {
-	if row.fields == "" {
-		return chromeLine(palette, Prompt+row.log)
-	}
-
-	line := row.fields + statusGap + row.log
-	if width > 0 {
-		// The log beside the fields is cut from the tail, since the fields are the thing a
-		// reader is looking down the left of and cutting them would move every log row one
-		// column left. The fields are the widest thing on the row and are never the thing cut.
-		keep := width - DisplayWidth(row.fields) - DisplayWidth(statusGap)
-		if keep < 0 {
-			keep = 0
+		fields := stripCSI(line.fields)
+		fieldWidth := DisplayWidth(fields)
+		if row == fieldFigure {
+			prefixWidth := nameWidth() + 1
+			prefix := fields[:min(prefixWidth, len(fields))]
+			drawCellText(screen, x, y+row, width, prefix, chrome)
+			drawSweepText(screen, x+prefixWidth, y+row, width-prefixWidth,
+				f.bar.Status[fieldFigure], f.step, f.palette)
+		} else {
+			drawCellText(screen, x, y+row, width, fields, chrome)
 		}
-		line = row.fields + statusGap + CutColumnFromEnd(row.log, keep)
+		if fieldWidth >= width {
+			continue
+		}
+		screen.SetContent(x+fieldWidth, y+row, ' ', nil, chrome)
+		logX := fieldWidth + DisplayWidth(statusGap)
+		logWidth := width - logX
+		if logWidth <= 0 {
+			continue
+		}
+		text, offset, cut := cutTail(line.log, logWidth)
+		if cut {
+			drawCellText(screen, x+logX, y+row, logWidth, ellipsis, base)
+			logX += DisplayWidth(ellipsis)
+			logWidth -= DisplayWidth(ellipsis)
+		}
+		if logWidth > 0 {
+			drawStyledCellText(screen, x+logX, y+row, logWidth, text, offset, line.spans, f.palette, base)
+		}
 	}
-	return chromeLine(palette, line)
+	if len(lines) > 0 {
+		field := []rune(f.bar.Field)
+		caret := min(f.caret, len(field))
+		column := DisplayWidth(Prompt + string(field[:caret]))
+		if width > 0 {
+			column = min(column, width-1)
+			screen.ShowCursor(x+column, y+len(lines)-1)
+		}
+	}
+}
+
+func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, p Palette) {
+	col := 0
+	for _, r := range text {
+		w := runewidth(r)
+		if w == 0 {
+			if col > 0 {
+				screen.SetContent(x+col-1, y, r, nil, p.BaseStyle())
+			}
+			continue
+		}
+		if col+w > width {
+			break
+		}
+		red, green, blue := hueRGB(float64(sweepStepDegrees*step + col))
+		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(red), int32(green), int32(blue)))
+		screen.SetContent(x+col, y, r, nil, style)
+		col += w
+	}
+}
+
+func frameStyle(p Palette, role Role) tcell.Style {
+	if !p.On() {
+		return tcell.StyleDefault
+	}
+	fg, _, attrs := p.Style(role).Decompose()
+	_, bg, _ := p.BaseStyle().Decompose()
+	return tcell.StyleDefault.Foreground(fg).Background(bg).Attributes(attrs)
+}
+
+func cutTail(text string, width int) (string, int, bool) {
+	cut := CutColumnFromEnd(text, width)
+	if cut == text {
+		return text, 0, false
+	}
+	if cut == ellipsis {
+		return "", len(text), true
+	}
+	tail := strings.TrimPrefix(cut, ellipsis)
+	return tail, len(text) - len(tail), true
+}
+
+func drawStyledCellText(screen tcell.Screen, x, y, width int, text string, offset int, spans []Span, palette Palette, base tcell.Style) {
+	col := 0
+	byteOffset := offset
+	for _, r := range text {
+		if col >= width {
+			break
+		}
+		style := base
+		for _, span := range spans {
+			if byteOffset >= span.Start && byteOffset < span.End {
+				style = frameStyle(palette, span.Role)
+				break
+			}
+		}
+		runeWidth := runewidth(r)
+		if runeWidth == 0 {
+			if col > 0 {
+				screen.SetContent(x+col-1, y, r, nil, style)
+			}
+		} else if col+runeWidth <= width {
+			screen.SetContent(x+col, y, r, nil, style)
+			col += runeWidth
+		}
+		byteOffset += len(string(r))
+	}
+}
+
+func drawCellText(screen tcell.Screen, x, y, width int, text string, style tcell.Style) {
+	col := 0
+	for _, r := range text {
+		if col >= width {
+			break
+		}
+		w := runewidth(r)
+		if w < 1 {
+			screen.SetContent(x+col-1, y, r, nil, style)
+			continue
+		}
+		if col+w > width {
+			break
+		}
+		screen.SetContent(x+col, y, r, nil, style)
+		col += w
+	}
+}
+
+func runewidth(r rune) int {
+	return DisplayWidth(string(r))
+}
+
+func stripCSI(text string) string {
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
+			i += 2
+			for i < len(text) && (text[i] < 0x40 || text[i] > 0x7e) {
+				i++
+			}
+			if i < len(text) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(text[i])
+		i++
+	}
+	return b.String()
 }
 
 // stackLines renders the frame as rows in screen order.
@@ -495,6 +543,7 @@ func stackLines(bar Bar, log []Row, height int, palette Palette) []barRow {
 			break
 		}
 		out[at].log = row.Text
+		out[at].spans = append([]Span(nil), row.Spans...)
 	}
 
 	// The prompt row carries the reader's own line in place of a log row, and carries no
@@ -521,18 +570,6 @@ func fieldsLine(bar Bar, k int) string {
 
 	pad := nameWidth() - DisplayWidth(name) + 1
 	return name + strings.Repeat(" ", pad) + bar.Status[k]
-}
-
-// chromeLine wraps a frame row in the chrome role when colour is on.
-//
-// It takes a palette rather than reading one so the frame is testable with colour off, and so a
-// row with no colour in it is the same row of text a reader would get with colour on and a
-// terminal that ignores it.
-func chromeLine(p Palette, line string) string {
-	if !p.On() || line == "" {
-		return line
-	}
-	return p.Sequence(RoleChrome) + line + p.Reset()
 }
 
 // sweepStatus colours the Status value of a rendered top bar, horizontally.

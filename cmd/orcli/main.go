@@ -35,22 +35,8 @@ var gate = ensureTrusted
 // here keeps the wiring visible and lets a test run the whole of startup without
 // one.
 //
-// See openInterface for why the interface is opened only when the streams are
-// terminals and the terminal reported a size.
+// See openInterface for how the terminal is handed to tview.
 var draw = openInterface
-
-// tuiStreamsAreTerminal is the terminal check, as a variable rather than a call.
-//
-// It is a seam for the same reason draw is one, and it is a second seam rather than a
-// folding of the first because the two answer different questions: this one asks
-// whether the streams are terminals at all, and openInterface asks whether there is a
-// descriptor and a size to draw on. A test that stood in for both would not be
-// testing that the interface opens when the reader is at a terminal, since the whole
-// condition would be the stand-in.
-//
-// The real check is a termios read in internal/tui, and it is what runs outside a
-// test.
-var tuiStreamsAreTerminal = tui.StreamsAreTerminal
 
 // newTransport is the API client, as a variable rather than a call.
 //
@@ -174,25 +160,19 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	// The interface is opened here, between the trust question and the report, so the
 	// directory the reader just answered about is the one the session carries.
 	//
-	// A redirected run is told why rather than drawn on. The interface writes escape
-	// sequences, and a reader who piped this on purpose would get noise in their
-	// pipe rather than a transcript. The check is a real termios read rather than a
-	// stub, since a stub that always says no tells a reader at a terminal that their
-	// terminal is not one.
-	if tuiStreamsAreTerminal(stdin, stdout) {
-		if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout); err != nil {
+	if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout); err != nil {
+		if !errors.Is(err, tui.ErrNoTerminal) {
 			return err
 		}
-
+		fmt.Fprintf(stderr, "orcli: %v\n", err)
 		printSession(stdout, s)
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout,
+			"The interface needs a terminal. Nothing reads keys and no turn is sent.")
 		return nil
 	}
 
-	fmt.Fprintf(stderr, "orcli: %v\n", tui.ErrNoTerminal)
 	printSession(stdout, s)
-	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout,
-		"The interface needs a terminal. Nothing reads keys and no turn is sent.")
 	return nil
 }
 
@@ -265,11 +245,7 @@ func tuiApproval(mode config.Approval) tui.Approval {
 
 // openInterface runs the interface over a terminal until the reader leaves.
 //
-// The size is read here rather than inside internal/tui because the descriptor is
-// the caller's: this is the program that opened stdout, so this is the program that
-// can name it. A terminal that reports no size is reported rather than drawn into,
-// since every row would be cut to no width and the reader would see a screen of
-// empty lines and no way to tell that from a log with nothing in it.
+// tcell owns terminal setup, input, output, and screen size for this run.
 //
 // The dispatcher is built here rather than held on the session, since a command
 // needs the configuration and the held proposal and the interface needs neither. The
@@ -279,14 +255,10 @@ func tuiApproval(mode config.Approval) tui.Approval {
 func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	stdin io.Reader, stdout io.Writer) error {
 
-	out, ok := stdout.(*os.File)
-	if !ok {
+	in, inOK := stdin.(*os.File)
+	out, outOK := stdout.(*os.File)
+	if !inOK || !outOK || in != os.Stdin || out != os.Stdout {
 		return tui.ErrNoTerminal
-	}
-
-	size := tui.SizeOf(out.Fd())
-	if size.Rows < 1 || size.Cols < 1 {
-		return fmt.Errorf("read the terminal size: %w", tui.ErrNoSize)
 	}
 
 	d := newDispatcherFor(cfg)
@@ -299,7 +271,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// The confirmation is wired here rather than in ask, since the writer belongs to
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
-	return tui.Start(ctx, s, tui.NewScreen(out, size),
+	return tui.Start(ctx, s,
 		d.Run,
 		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
 	)

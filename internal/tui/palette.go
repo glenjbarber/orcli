@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // Palette turns a role into the bytes that write it.
@@ -32,7 +34,9 @@ type Palette struct {
 	// fg and bg are the theme sequences written before and after a row. They are
 	// empty when the theme named no colour on that side, which is the case a
 	// reader following the terminal theme is in.
-	fg, bg string
+	fg, bg           string
+	fgColor, bgColor tcell.Color
+	hasFG, hasBG     bool
 
 	// faint is the alternative for the dim role: the faint attribute rather than a
 	// colour. Whether a terminal draws it is unverified, so it is offered rather
@@ -57,9 +61,13 @@ func NewPalette(on bool, chosen Ground, theme *Theme) Palette {
 	if theme != nil {
 		if rgb, ok := theme.ForegroundRGB(); ok {
 			p.fg = rgb.Sequence()
+			p.fgColor = rgb.TCellColor()
+			p.hasFG = true
 		}
 		if rgb, ok := theme.BackgroundRGB(); ok {
 			p.bg = rgb.BackgroundSequence()
+			p.bgColor = rgb.TCellColor()
+			p.hasBG = true
 		}
 	}
 	return p
@@ -127,6 +135,52 @@ func (p Palette) Reset() string {
 		return bareReset
 	}
 	return bareReset + p.Base()
+}
+
+// Style returns the tcell.Style for a role.
+//
+// It is an alternative to Sequence, which returns an ANSI escape sequence rather
+// than a tcell.Style. Both can be used in parallel: callers that want a tcell.Style
+// call this, and callers that want an escape sequence call Sequence.
+//
+// An unknown role returns a style with no foreground set, which reads as the
+// terminal's default.
+func (p Palette) Style(role Role) tcell.Style {
+	if !p.on {
+		return tcell.StyleDefault
+	}
+
+	table := RoleTableFor(p.ground)
+	rgb, ok := table[role]
+	if !ok {
+		rgb = table[RoleChrome]
+	}
+	style := tcell.StyleDefault.Foreground(rgb.TCellColor())
+	if role == RoleDim && p.faint {
+		style = style.Attributes(tcell.AttrDim)
+	}
+	return style
+}
+
+// BaseStyle returns the tcell.Style for the palette's base (foreground and background).
+//
+// It is an alternative to Base, which returns ANSI escape sequences rather than a
+// tcell.Style. Both can be used in parallel: callers that want a tcell.Style call this,
+// and callers that want escape sequences call Base.
+//
+// An empty base (palette off) returns StyleDefault.
+func (p Palette) BaseStyle() tcell.Style {
+	if !p.on {
+		return tcell.StyleDefault
+	}
+	style := tcell.StyleDefault
+	if p.hasFG {
+		style = style.Foreground(p.fgColor)
+	}
+	if p.hasBG {
+		style = style.Background(p.bgColor)
+	}
+	return style
 }
 
 // faintSequence is the alternative to a dim colour.
