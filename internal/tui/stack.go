@@ -13,8 +13,9 @@ import (
 // below a scrollback that takes whatever height is left.
 //
 // Bottom to top: bar two (the longer-term fields - provider, model, verbosity, mouse, and
-// a scrollback-state stand-in), bar one (the live, fast-changing fields - see
-// barOneFields/barTwoFields), one blank separator line, and the prompt. Everything above
+// whether the viewport is at the live edge), bar one (the live, fast-changing fields -
+// state, the sweeping figure, queue depth; see barOneFields/barTwoFields), one blank
+// separator line, and the prompt - this order confirmed by Glen (2026-10-06). Everything above
 // those four rows is scrollback: the tail of the log, newest row just above the prompt,
 // oldest pushed off the top as it grows. This is loreloom/UI-redesign.md's shape
 // (2026-10-06), not the field-column-beside-every-log-row shape the ten ADRs this
@@ -56,8 +57,9 @@ const barRows = 4
 //
 // loreloom/UI-redesign.md names bar two's fields explicitly - provider, model,
 // verbosity, mouse, scrollback - and says nothing about bar one beyond "rapidly
-// changing statistics." Glen confirmed bar one's list (2026-10-06): state, the sweeping
-// figure, and the queue depth. The two bars' relative order is still open.
+// changing statistics." Glen confirmed bar one's list and the bars' order
+// (2026-10-06): state, the sweeping figure, and the queue depth, with bar one
+// above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
 // barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
