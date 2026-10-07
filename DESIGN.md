@@ -49,7 +49,7 @@ mouse indicator
 status bar 1   Provider | Model | Status | Bell | Verbosity
 status bar 2   Hostname | Credits | Cost | Context | In | Out | Autosave | Stealth | Approval
 
-root@lolhost @ <input>
+root@lolhost $ <input>
 
 pane bar       0 | 1 | 2
 ```
@@ -117,15 +117,17 @@ that one place.
 
 ## 4. The prompt
 
-`root@lolhost @ ` and a space before the caret.
+`root@lolhost $ ` and a space before the caret.
 
 It is not computed. It is not the reader's user, their host or their
 directory, and a reader on a machine whose host is `lolhost` still gets
-`lolhost`. The reader wrote `root@localhost $ ` first and then this, and marked
-the second as deliberate rather than a typo.
+`lolhost`. The reader wrote `root@localhost $ ` first, then `root@lolhost @ `,
+and this is the third and ratified form: Glen confirmed it (2026-10-06) against
+a rendered loreloom/UI-redesign.md mockup, and `internal/tui/stack.go` carries
+it as the `Prompt` constant.
 
 The prompt belongs to the focused session, which follows from a pane being a
-viewport. It is not ratified and is open.
+viewport. That part remains open.
 
 ## 5. Scrolling and scrollback
 
