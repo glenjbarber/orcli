@@ -46,7 +46,9 @@ func TestAShortTerminalHasNoScrollback(t *testing.T) {
 func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
 	for _, height := range []int{1, 2, barRows - 1} {
 		screen := drawSimulationFrame(t, height, 40, Bar{Field: "hi"}, nil, Palette{})
-		r, _, _, _ := screen.GetContent(0, 0)
+		// Prompt now has a leading space (see stack.go's Prompt doc comment), so column
+		// 0 is that space and column 1 is "r" of "root@lolhost".
+		r, _, _, _ := screen.GetContent(1, 0)
 		if r != 'r' {
 			t.Errorf("on a %d row terminal the prompt is not on row 0 (got %q)", height, r)
 		}
@@ -81,7 +83,8 @@ func TestTheSheddingLadderDropsInGlensOrder(t *testing.T) {
 
 	// Height 1: bar one is shed too; only the prompt remains.
 	screen = drawSimulationFrame(t, 1, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
-	r, _, _, _ := screen.GetContent(0, 0)
+	// Prompt now has a leading space (see stack.go's Prompt doc comment).
+	r, _, _, _ := screen.GetContent(1, 0)
 	if r != 'r' {
 		t.Errorf("at height 1 the only row is %q, want the prompt", string(r))
 	}
@@ -200,7 +203,7 @@ func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
 	rows := []Row{{Text: "a log row"}}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s, Field: "a question"}, rows, Palette{})
 	got := simulationText(screen)
-	if !strings.Contains(got, "root@lolhost $ a question") {
+	if !strings.Contains(got, " root@lolhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
 	}
 }

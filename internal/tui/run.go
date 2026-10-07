@@ -49,7 +49,16 @@ type LineRunner func(ctx context.Context, line string) (Result, error)
 // It is passed in rather than reached for, so this package keeps no credential and no
 // client. The transport is in internal/openrouter and the session is here, and something
 // has to hold the two together; naming the seam keeps this a leaf.
-type AskFunc func(ctx context.Context, question string, level int) error
+//
+// silent tells the implementation not to write the question itself into the log as a
+// row, while still sending it to the model and still delivering whatever comes back
+// through the normal reply path. The startup hello is the one caller that passes
+// true: its text is an instruction aimed at the model ("greet the reader, using the
+// capability message above"), not something the reader typed, and showing it as a
+// row would read as a second voice in the transcript that nobody wrote. A reader's
+// own line, and a command's Result.Ask, both pass false - what they type is exactly
+// what should appear.
+type AskFunc func(ctx context.Context, question string, level int, silent bool) error
 
 // Key is the editing action selected from a tcell event.
 type Key int
@@ -203,11 +212,16 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello s
 //
 // An empty hello, or a loop built with no ask at all, sends nothing - a caller's
 // choice not to greet, read here rather than decided here.
+//
+// It starts the turn silent: the hello's own text is an instruction to the model,
+// not a line the reader typed, so it is sent but never written into the log as a
+// question row. Only the model's reply - the actual greeting - lands in the log, the
+// same way any other turn's reply does.
 func maybeSendHello(ctx context.Context, l *interfaceLoop, hello string) {
 	if hello == "" || l.ask == nil {
 		return
 	}
-	l.start(ctx, hello)
+	l.start(ctx, hello, true)
 }
 
 // interfaceLoop is the state one run of the interface carries.
@@ -576,7 +590,7 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 	}
 	l.writeResult(result.Text)
 	if result.Ask != "" && l.ask != nil {
-		l.start(ctx, result.Ask)
+		l.start(ctx, result.Ask, false)
 	}
 	return false
 }
@@ -666,7 +680,7 @@ func splitRows(text string) []string {
 // drawn, so a reader who leaves while a turn is in flight waits for it rather than handing
 // the terminal back with a request still writing to it. A turn refused by the count never
 // started, which is why it is a refusal rather than a silent skip.
-func (l *interfaceLoop) start(ctx context.Context, question string) {
+func (l *interfaceLoop) start(ctx context.Context, question string, silent bool) {
 	if err := l.group.Add(); err != nil {
 		l.session.Notice(err.Error(), 0, RoleFailure)
 		return
@@ -682,7 +696,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 		// waited for it for ever.
 		defer l.group.Done()
 
-		err := l.ask(turnCtx, question, 0)
+		err := l.ask(turnCtx, question, 0, silent)
 
 		l.session.ClearCancel()
 		cancel()

@@ -144,6 +144,12 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"autosave": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.autosave(args)
 		},
+		"save": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.save(args)
+		},
+		"load": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.load(args)
+		},
 	}
 	return d
 }
