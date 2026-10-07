@@ -81,6 +81,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"model": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.model(args)
 		},
+		"level": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.level(args)
+		},
 		"test": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.test(args)
 		},
@@ -112,6 +115,45 @@ func (d *dispatcher) model(args string) (tui.Result, error) {
 		return tui.Result{}, fmt.Errorf("/model needs an open interface")
 	}
 	return modelHandler(d.session, args)
+}
+
+// level is the handler for `/level`.
+//
+// It mirrors model's shape: an empty argument reports the state rather than
+// changing it, and a name this build does not have is refused by name rather than
+// guessed at. The table of presets it chooses from, what each one sets and why only
+// these four, is internal/tui/preset.go; this function is just the seam that reads
+// the typed name and reports what happened, the way model is the seam for /model.
+func (d *dispatcher) level(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/level needs an open interface")
+	}
+
+	want := strings.TrimSpace(args)
+	if want == "" {
+		return tui.Result{Text: reportLevel(d.session.Preset())}, nil
+	}
+
+	p, found := tui.LookupPreset(want)
+	if !found {
+		return tui.Result{}, fmt.Errorf("/level %s is not a preset; the presets are %s",
+			want, strings.Join(tui.PresetNames(), ", "))
+	}
+
+	d.session.SetPreset(p)
+	return tui.Result{Text: fmt.Sprintf("the level is %s: %s", p.Name, p.Summary)}, nil
+}
+
+// reportLevel is what `/level` with no argument prints.
+//
+// It names every preset rather than only saying "none", since a reader who has
+// never used /level and asks it what is there should not have to look elsewhere for
+// the list `/help` would otherwise be the only source of.
+func reportLevel(name string) string {
+	if name == "" {
+		return "no level preset is set; the presets are " + strings.Join(tui.PresetNames(), ", ")
+	}
+	return "the level is " + name
 }
 
 // Run executes a typed line.

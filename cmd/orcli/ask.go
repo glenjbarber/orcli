@@ -297,6 +297,14 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 	// not left to guess whether the question was never asked.
 	b.WriteString("Plugins: no plugin system exists in this build; none can be enabled.\n")
 
+	// /level's active preset, when there is one, is written as its own sentence
+	// rather than folded into the paragraph above: it is an instruction about how
+	// to answer rather than a fact about what is configured, and the two should
+	// not read as one kind of statement.
+	if style := s.PresetStyle(); style != "" {
+		b.WriteString("\n" + style + "\n")
+	}
+
 	return b.String()
 }
 

@@ -68,15 +68,19 @@ const barRows = 5
 // above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
-// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
-// The fifth, scrollback-on, is Session.AtLiveEdge - see renderBarTwo.
-var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
+// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two,
+// plus fieldPreset. The fifth of the original five, scrollback-on, is
+// Session.AtLiveEdge - see renderBarTwo. fieldPreset is added rather than fitted into
+// the original five, since /level's active preset is the one thing today's build
+// already shows for a mode the reader set (mouse, bell) and the mockup predates
+// /level, so it was never going to name a field that was not built yet.
+var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldPreset, fieldMouse}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 21
+const StatusFields = 22
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -172,6 +176,14 @@ const (
 	// fieldLevels is how many conversation levels exist.
 	fieldLevels
 
+	// fieldPreset is the /level preset in force, "-" when none is.
+	//
+	// Named fieldPreset rather than fieldLevel so it cannot be mistaken, reading
+	// this file, for fieldLevels just above it: that one counts conversation
+	// levels, and this one names a /level reply-style preset. See preset.go's
+	// doc comment for the same distinction from the command's side.
+	fieldPreset
+
 	// fieldPrompt is the prompt row, and it is the row the caret is on.
 	fieldPrompt
 )
@@ -236,6 +248,8 @@ func fieldName(k int) string {
 		return "folded"
 	case fieldLevels:
 		return "levels"
+	case fieldPreset:
+		return "level"
 	case fieldPrompt:
 		return ""
 	default:
