@@ -203,6 +203,43 @@ func pause(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// get makes one GET request against path and decodes a successful body into out.
+//
+// It is the transport [Client.Models] and [Client.KeyUsage] share, the way [post] is
+// what [Client.Chat] alone uses: those two calls are not streamed, carry no body of
+// their own, and have no partial reply worth retrying around, so they do not belong
+// in [Client.Chat]'s own retry loop, which exists for exactly that partial-reply
+// case. A caller of this method gets back either a decoded value or an error with
+// the endpoint's own message quoted in it, never a half-decoded value with the
+// error swallowed.
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	if c.apiKey == "" {
+		return ErrNoAPIKey
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("openrouter: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("openrouter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return boundedError(c, resp)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("openrouter: decode %s: %w", path, err)
+	}
+	return nil
+}
+
 // Filter redacts the credential from a string bound for a diagnostic.
 //
 // The credential travels in a header, so it is in no body this client builds and

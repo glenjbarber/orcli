@@ -9,6 +9,7 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
@@ -65,6 +66,15 @@ type dispatcher struct {
 	client    *cloudflare.APIClient
 	newClient func(key string) *cloudflare.APIClient
 
+	// orClient is the OpenRouter catalog client /key, /models, /freemodels and
+	// /attribute share, built on first use the way client above is. newORClient is
+	// the seam a test points at a fake: openrouter.Client's base URL cannot be
+	// pointed at a test server from outside its own package (see catalogClient's
+	// doc comment in openrouter_cmds.go), so a dispatcher test stands in for the
+	// whole client rather than for one request.
+	orClient    catalogClient
+	newORClient func(key string) catalogClient
+
 	// canAsk reports whether a model can be asked at all, which decides whether
 	// /cloudflare sends its guidance to the model or falls back to its own text.
 	canAsk func() bool
@@ -87,6 +97,7 @@ type dispatcher struct {
 // newDispatcherFor builds a dispatcher over a configuration.
 func newDispatcherFor(cfg config.Config) *dispatcher {
 	d := &dispatcher{cfg: cfg, newClient: cloudflare.New}
+	d.newORClient = func(key string) catalogClient { return openrouter.New(key) }
 	d.canAsk = func() bool { return false }
 	d.commands = map[string]handler{
 		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
@@ -189,6 +200,28 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		},
 		"load": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.load(args)
+		},
+		"key": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.key(ctx)
+		},
+		"search": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.search(args)
+		},
+		"models": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.models(ctx, args)
+		},
+		"freemodels": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.freemodels(ctx, args)
+		},
+		// /attribute and its alias /attribution (internal/tui/attribute.go's table
+		// entry) both answer here, on the same grounds /stealth and /cognito above
+		// both do: Run looks a typed name up in this map directly rather than
+		// through the table's own alias resolution.
+		"attribute": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.attribute(ctx, args)
+		},
+		"attribution": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.attribute(ctx, args)
 		},
 	}
 	return d
