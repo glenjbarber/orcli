@@ -14,7 +14,12 @@ here; see the table below for the current total.)
 that the model is never told what `orcli` is or what it can reach this
 session. 0000043 follows it and settles a second gap: a change to the tree
 was never required to say how big it was, in the unit `git diff --stat`
-already uses.)
+already uses. 0000044 corrects a choice `46a6320` made, separate from
+0000042's own capability message: the introduction file `46a6320` wired in
+was `CONTEXT.md`, a name already claimed elsewhere for a different purpose
+with its own instruction to fetch an external policy, and 0000044 points
+the mechanism at `AGENTS.md` instead, the file this project's own
+convention already calls read by default.)
 
 A record carries its own status in its header. `SUPERCEDED` goes on the record
 that was replaced, beside the number that replaced it, and the replacing record
@@ -68,6 +73,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000041](adr-0000041-credits-cost-in-and-out-join-status-bar-2.txt) | Credits, Cost, In and Out join status bar 2 | accepted, and SUPERCEDED by `UI-redesign.md` | nothing. It extends 0000021, 0000016 and 0000037 |
 | [0000042](adr-0000042-orcli-introduces-itself-and-its-capabilities.txt) | orcli introduces itself to the model, and names its real capabilities | accepted | nothing. It closes a gap no earlier record settled |
 | [0000043](adr-0000043-a-change-reports-its-own-line-count.txt) | a change reports the lines it added and removed from the tree | accepted | nothing. It names a unit no earlier record used |
+| [0000044](adr-0000044-the-introduction-file-is-agents-md-not-context-md.txt) | the introduction file is AGENTS.md, not CONTEXT.md | accepted | `46a6320`'s choice of CONTEXT.md as the introduction file |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read

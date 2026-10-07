@@ -44,7 +44,7 @@ func newTestSession(dir string) *tui.Session {
 }
 
 // TestAskSendsTheQuestionAlone covers the plain path: no tools called, no
-// CONTEXT.md, one request carrying just the user's question.
+// AGENTS.md, one request carrying just the user's question.
 func TestAskSendsTheQuestionAlone(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestSession(dir)
@@ -169,12 +169,12 @@ func TestAskStopsAfterTooManyToolRounds(t *testing.T) {
 	}
 }
 
-// TestIntroductionCarriesContextMD covers CONTEXT.md: when it exists in the working
+// TestIntroductionCarriesAgentsMD covers AGENTS.md: when it exists in the working
 // directory, its exact contents are sent as the system message ahead of the question.
-func TestIntroductionCarriesContextMD(t *testing.T) {
+func TestIntroductionCarriesAgentsMD(t *testing.T) {
 	dir := t.TempDir()
-	const contextText = "This project is orcli. Be terse."
-	if err := os.WriteFile(filepath.Join(dir, "CONTEXT.md"), []byte(contextText), 0o644); err != nil {
+	const agentsText = "This project is orcli. Be terse."
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(agentsText), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -190,19 +190,19 @@ func TestIntroductionCarriesContextMD(t *testing.T) {
 
 	msgs := fake.seen[0].Messages
 	if len(msgs) != 3 {
-		t.Fatalf("messages = %+v, want the capability message, the CONTEXT.md message, and the question", msgs)
+		t.Fatalf("messages = %+v, want the capability message, the AGENTS.md message, and the question", msgs)
 	}
-	if msgs[1].Role != "system" || msgs[1].Content != contextText {
-		t.Errorf("the second message is %+v, want role system carrying %q", msgs[1], contextText)
+	if msgs[1].Role != "system" || msgs[1].Content != agentsText {
+		t.Errorf("the second message is %+v, want role system carrying %q", msgs[1], agentsText)
 	}
 	if msgs[2].Role != "user" || msgs[2].Content != "hi" {
 		t.Errorf("the third message is %+v, want the user's question", msgs[2])
 	}
 }
 
-// TestNoIntroductionWithoutContextMD covers the absence: a working directory with no
-// CONTEXT.md sends no system message at all, not an empty one.
-func TestNoIntroductionWithoutContextMD(t *testing.T) {
+// TestNoIntroductionWithoutAgentsMD covers the absence: a working directory with no
+// AGENTS.md sends no system message at all, not an empty one.
+func TestNoIntroductionWithoutAgentsMD(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestSession(dir)
 	fake := &fakeChat{rounds: [][]openrouter.Event{
@@ -216,7 +216,7 @@ func TestNoIntroductionWithoutContextMD(t *testing.T) {
 
 	msgs := fake.seen[0].Messages
 	if len(msgs) != 2 || msgs[0].Role != "system" || msgs[1].Role != "user" {
-		t.Errorf("messages = %+v, want the capability message and the user's question, no CONTEXT.md message", msgs)
+		t.Errorf("messages = %+v, want the capability message and the user's question, no AGENTS.md message", msgs)
 	}
 }
 

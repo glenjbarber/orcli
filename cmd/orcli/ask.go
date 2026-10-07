@@ -62,7 +62,7 @@ type chatClient interface {
 //
 // adr-0000042's capability message - orcli naming itself and what this session
 // actually has, assembled from Session.Options()/Ready() and the Cloudflare check -
-// is sent first, built fresh every turn by capabilities. If CONTEXT.md also exists in
+// is sent first, built fresh every turn by capabilities. If AGENTS.md also exists in
 // the session's working directory, its contents follow as a second system message,
 // naming it as the reader's own introduction rather than folding it into the first.
 // The two are kept separate because they come from different places and change for
@@ -289,12 +289,16 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 	return b.String()
 }
 
-// introduction reads CONTEXT.md from dir, for the one system message a turn sends
-// ahead of the question. A missing file is silence, not a failure: most working
-// directories have none, and a session without one sends no introduction at all
-// rather than an empty one.
+// introduction reads AGENTS.md from dir, for the one system message a turn sends
+// ahead of the question. AGENTS.md, not CONTEXT.md: it is the file a tree already
+// names as read by default (see this repository's own AGENTS.md, "This file is read
+// by default"), and the one goose and other tools already converge on, where
+// CONTEXT.md was a project-specific pointer file with no standing outside Loreloom's
+// own coordination documents and no claim on this role. A missing file is silence,
+// not a failure: most working directories have none, and a session without one
+// sends no introduction at all rather than an empty one.
 func introduction(dir string) string {
-	text, err := os.ReadFile(filepath.Join(dir, "CONTEXT.md"))
+	text, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
 		return ""
 	}
