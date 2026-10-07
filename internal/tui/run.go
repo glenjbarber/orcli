@@ -346,6 +346,7 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldCopy] = onOff(false, "available", "none")
 	s[fieldBell] = onOff(opts.Bell, "on", "off")
 	s[fieldPane] = "main"
+	s[fieldPaneState] = l.session.PaneState()
 	s[fieldWorkers] = plural(len(l.session.Workers()), "worker", "workers")
 	s[fieldQueue] = plural(0, "prompt", "prompts")
 	s[fieldHeld] = plural(log.Len(), "row", "rows")
@@ -676,5 +677,7 @@ func (l *interfaceLoop) stop() {
 // session. A session with colour off writes no palette sequence at all, which falls out of
 // Palette.Sequence returning nothing rather than out of a check here.
 func paletteOf(s *Session) Palette {
-	return NewPalette(s.Options().Color, GroundAuto, nil)
+	opts := s.Options()
+	p := NewPalette(opts.Color, GroundAuto, nil)
+	return p.WithPaneColors(opts.PaneActiveColor, opts.PaneDoneColor)
 }

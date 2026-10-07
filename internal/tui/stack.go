@@ -76,7 +76,7 @@ var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 20
+const StatusFields = 21
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -149,6 +149,14 @@ const (
 	// fieldPane is which pane is shown.
 	fieldPane
 
+	// fieldPaneState is whether a worker is running or has just finished at the
+	// shown pane: "running", "done", or "" for neither. It is not printed on any
+	// bar - fieldName gives it no text - and exists only to tell the pane bar
+	// which colour to draw in, which is a second configurable pair of colours
+	// kept apart from the plain on/off Color toggle (see config.PaneActiveColor
+	// and config.PaneDoneColor).
+	fieldPaneState
+
 	// fieldWorkers is how many workers are running.
 	fieldWorkers
 
@@ -216,6 +224,8 @@ func fieldName(k int) string {
 		return "bell"
 	case fieldPane:
 		return "pane"
+	case fieldPaneState:
+		return ""
 	case fieldWorkers:
 		return "workers"
 	case fieldQueue:
@@ -365,7 +375,8 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 4 {
-			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width), chrome)
+			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width),
+				paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
 		}
 		return
 	}
@@ -405,7 +416,22 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
 	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
-	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
+	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
+		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+// paneBarStyle picks the style the pane bar draws in: a configured colour for
+// "running" or "done" when the palette has one, chrome otherwise - which is
+// how the bar drew before Status carried colour when the pane is active.
+// This is the renderPaneBar sibling adr-0000020's comment promised and the
+// stack.go history above never built; it is built here, as a configurable
+// pair of colours apart from the plain Color on/off toggle rather than as the
+// fixed colour the ADR assumed.
+func paneBarStyle(p Palette, chrome tcell.Style, state string) tcell.Style {
+	if style, ok := p.PaneStyle(state); ok {
+		return style
+	}
+	return chrome
 }
 
 // renderPaneBar builds the pane bar's text, truncated to width with an ellipsis rather

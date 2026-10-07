@@ -95,6 +95,24 @@ type Options struct {
 	// a file records what it did even though the transcript records nothing, and a
 	// reader who asked for nothing recorded should not get a findings file.
 	Cognito bool
+
+	// PaneActiveColor is the colour the pane bar is drawn in while a worker is
+	// running at the shown pane. Nil leaves the bar in chrome, the way it drew
+	// before this existed, and is what a session built with no opinion about it
+	// (every test in this package but the ones that ask for it) gets.
+	//
+	// It is separate from Color above on purpose: Color is the plain on/off
+	// toggle this package already had, and this is a second, distinct pair of
+	// colours for pane state that only applies once Color is on.
+	PaneActiveColor *RGB
+
+	// PaneDoneColor is the colour the pane bar is drawn in once a worker at the
+	// shown pane has finished on its own, and keeps drawing in until another
+	// worker starts there. See Session.PaneState for why "until the next one
+	// starts" rather than a timed flash: there is no clock in the frame to lose
+	// a race against, and a reader who has not looked back since still finds
+	// the pane coloured the way they left it.
+	PaneDoneColor *RGB
 }
 
 // Approval is the mode a tool call is settled under.

@@ -214,6 +214,31 @@ func (s *Session) Stop(w *Worker, reason string) {
 	s.Finish(w, WorkerStopped, reason)
 }
 
+// PaneState reports what the pane bar should show about this session's workers:
+// "running" while one is in flight, "done" once one has finished on its own and
+// none is running, or "" when neither has ever been true.
+//
+// "done" is sticky rather than timed: it holds from the worker's own finish
+// until the next Spawn, with no clock involved and nothing to race against a
+// draw. A reader who stepped away and comes back still finds the pane coloured
+// the way the worker left it, which is the point of a state a reader did not
+// have to be watching to catch.
+//
+// It does not distinguish which worker is running or done when several are,
+// since the pane bar draws one colour for the one pane there is today (see
+// stack.go's renderPaneBar) rather than a colour per worker.
+func (s *Session) PaneState() string {
+	if len(s.Running()) > 0 {
+		return "running"
+	}
+	for _, w := range s.Workers() {
+		if s.WorkerStateOf(w) == WorkerDone {
+			return "done"
+		}
+	}
+	return ""
+}
+
 // ErrNoQuestion reports a spawn with nothing to ask.
 //
 // It is a named value rather than a string at each call site, so the two spellings
