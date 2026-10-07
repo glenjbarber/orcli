@@ -560,6 +560,18 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 }
 
 // submit acts on a line the reader finished typing.
+//
+// A line is one of two things, and they are told apart before either is run. A
+// command (IsCommand says so) goes to l.runner, which is cmd/orcli/dispatch.go's
+// Run: it resolves the name against the command table and reports a Result, never
+// a question for the model on its own. Everything else is a plain question, and
+// this is the one place that sends it to the model - not the dispatcher, whose own
+// doc comment on Run says plainly that a line which is not a command is not its
+// business. A result's own Result.Ask field is still honored afterward, since a
+// command can itself decide to ask the model something (the Cloudflare-not-set-up
+// guidance in cmd/orcli/dispatch.go is one such case); that is a second, narrower
+// reason to ask and does not make the dispatcher the place a reader's own typed
+// question goes.
 func (l *interfaceLoop) submit(ctx context.Context) bool {
 	// SubmitText rather than Text: a still-collapsed pasted block is
 	// substituted back to its real, raw text here, so the runner and the
@@ -574,8 +586,22 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 	// Recorded here, where a line is actually sent, rather than where it was typed.
 	// There is no message-queue mechanism in this tree yet, so this is the only
 	// moment that exists: a future queue would still record at the point it drains
-	// into a send, not at the point a reader queued it (adr-0000011).
+	// into a send, not at the point a reader queued it (adr-0000011). A plain
+	// question is recorded exactly as a command is: Up/Down walks a reader's own
+	// typed lines regardless of which kind each one was.
 	l.session.History().Record(line)
+
+	if _, _, ok := IsCommand(line); !ok {
+		if l.ask == nil {
+			// The same situation Session.Ready reports for a turn with no model:
+			// there is nothing to send this to, and the reader is told so as a
+			// notice rather than having the line discarded with no trace of it.
+			l.session.Notice(ErrNoModel.Error(), 0, RoleFailure)
+			return false
+		}
+		l.start(ctx, line, false)
+		return false
+	}
 
 	result, err := l.runner(ctx, line)
 	if err != nil {

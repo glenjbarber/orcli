@@ -72,24 +72,34 @@ func TestMultiLinePasteDoesNotTriggerSubmit(t *testing.T) {
 }
 
 // TestSubmitSendsTheRealTextNotThePlaceholder covers the submit path end to
-// end: Enter on a line holding a still-collapsed block must hand the runner,
-// and the history, the real multi-line text, never the placeholder string.
+// end: Enter on a line holding a still-collapsed block must hand whichever
+// path a pasted, non-command line now reaches - ask, since submit sends a
+// plain question straight to the model rather than through the runner - and
+// the history, the real multi-line text, never the placeholder string.
 func TestSubmitSendsTheRealTextNotThePlaceholder(t *testing.T) {
 	s := New(Options{Model: "stealth/space-bunny-alpha"})
 	var got string
 	l := &interfaceLoop{
 		session: s,
 		runner: func(ctx context.Context, line string) (Result, error) {
-			got = line
+			t.Fatalf("runner was called with %q, want a plain pasted line sent to ask instead", line)
 			return Result{}, nil
 		},
+		ask: func(_ context.Context, question string, level int, _ bool) error {
+			got = question
+			return nil
+		},
+		group: newGroup(),
 	}
 
 	s.Editor().InsertPastedText("alpha\nbeta\ngamma")
 	l.act(context.Background(), KeyEnter, 0)
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
 
 	if want := "alpha\nbeta\ngamma"; got != want {
-		t.Fatalf("runner received %q, want the real text %q", got, want)
+		t.Fatalf("ask received %q, want the real text %q", got, want)
 	}
 
 	entries := s.History().Entries()

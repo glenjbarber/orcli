@@ -291,13 +291,16 @@ const breakDuration = 2 * time.Minute
 //
 // The log starts with one row: the banner. A session that opens onto an empty screen
 // gives a reader nothing to tell it has started, and a row that names the program is
-// the one line of state a reader wants before typing anything.
+// the one line of state a reader wants before typing anything. The banner names the
+// frame this package draws - the pane bar, the two status bars, and the scrollback
+// log above them (see the package doc comment) - rather than the pre-redesign
+// description of a bare log, which stopped being true once the frame returned.
 func New(opts Options) *Session {
 	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now(), history: NewHistory()}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
-		Text:  "orcli, a log and nothing else yet",
+		Text:  "orcli, a log with a frame around it",
 		Spans: []Span{{Start: 0, End: 5, Role: RoleEmphasis}},
 	})
 	return s

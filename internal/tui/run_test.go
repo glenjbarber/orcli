@@ -161,6 +161,86 @@ func TestStartDoesNotDrainTheQueueAfterAFailedTurn(t *testing.T) {
 	}
 }
 
+// TestSubmitSendsAPlainQuestionToTheModel covers the bug a reader hit from the very
+// first version of this file: a line that is not a /command used to go through
+// l.runner (cmd/orcli/dispatch.go's Run), which has always answered any non-command
+// line with an empty Result and no error, so the line was discarded with nothing
+// written and nothing sent. submit now tells the two apart itself and sends a
+// plain question straight to l.ask, the way the hello already does.
+func TestSubmitSendsAPlainQuestionToTheModel(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	var asked string
+	var gotSilent bool
+	ran := false
+	ask := func(_ context.Context, question string, level int, silent bool) error {
+		asked = question
+		gotSilent = silent
+		s.Deliver("an answer", level)
+		return nil
+	}
+	runner := func(context.Context, string) (Result, error) {
+		ran = true
+		return Result{}, nil
+	}
+
+	l := &interfaceLoop{session: s, runner: runner, ask: ask, group: newGroup()}
+	s.Editor().SetText("what is the weather doing")
+	l.submit(context.Background())
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if ran {
+		t.Error("a plain question went through l.runner, want it sent directly to ask")
+	}
+	if asked != "what is the weather doing" {
+		t.Errorf("ask was called with %q, want the typed line", asked)
+	}
+	if gotSilent {
+		t.Error("ask was called with silent = true, want false: a reader's own typed line is shown")
+	}
+	if last, ok := s.History().Up(""); !ok || last != "what is the weather doing" {
+		t.Errorf("History().Up() = %q, %v, want the plain question recorded", last, ok)
+	}
+}
+
+// TestSubmitSendsACommandLineThroughTheRunner covers the other side: a line
+// IsCommand recognizes still goes through l.runner exactly as before, and is never
+// sent to ask on its own (a command's own Result.Ask, when it sets one, still
+// reaches ask through the existing path below, which this test does not exercise).
+func TestSubmitSendsACommandLineThroughTheRunner(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	ranWith := ""
+	runner := func(_ context.Context, line string) (Result, error) {
+		ranWith = line
+		return Result{Text: "ok"}, nil
+	}
+	asked := false
+	ask := func(context.Context, string, int, bool) error {
+		asked = true
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, runner: runner, ask: ask, group: newGroup()}
+	s.Editor().SetText("/model some/model")
+	l.submit(context.Background())
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if ranWith != "/model some/model" {
+		t.Errorf("runner was called with %q, want the typed command line", ranWith)
+	}
+	if asked {
+		t.Error("ask was called for a command line, want it left to the runner alone")
+	}
+	if last, ok := s.History().Up(""); !ok || last != "/model some/model" {
+		t.Errorf("History().Up() = %q, %v, want the command line recorded", last, ok)
+	}
+}
+
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
 
 func TestTheBottomBarCarriesIdentityAndApproval(t *testing.T) {
