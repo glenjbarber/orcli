@@ -1,6 +1,6 @@
 # 0000026 /copy last spells as N 0, and fenced blocks are numbered per reply
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 14 in `QUESTIONS.md`, and corrects
   the question's own framing of what `last` would spell as

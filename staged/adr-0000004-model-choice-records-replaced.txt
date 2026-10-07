@@ -1,6 +1,6 @@
 # 0000004 A choice records the model it replaced
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: a writer that set the current model and recorded nothing about the
   one before it

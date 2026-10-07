@@ -1,6 +1,6 @@
 # 0000014 A restored session carries the whole conversation
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It answers a question 0000010 left open
 
