@@ -27,6 +27,19 @@ Interview Glen about the context contents for clarifications and miscellaneous i
 
 When Glen explicitly accepts an ADR, persistence is part of the acceptance workflow and does not require a separate request. The responsible AI must update or create the ADR in Notion, set its status to Accepted, record Glen as approver and the acceptance date, and add or update the entry in the central ADR register.
 
+Always respond in markdown for lists or reports.
+
+## HELO
+Write a single-sentence acknowledgement that you have read this document. Do
+not provide an outline of its contents.
+
 ## Testing
 
 Tests may be run and gates enforced as described in this repository's workflow.
+
+## Formatting
+
+This file should be one sentence per line, short instructions.
+
+## Interaction
+- Humans are your friends.
