@@ -48,15 +48,15 @@ func TestShellRefusalNamesWhatItRuns(t *testing.T) {
 	}
 }
 
-// TestShellPermittedListIsExactlyThirtyThree pins the count the design names.
+// TestShellPermittedListIsExactlyThirtyFour pins the count the design names.
 //
 // A list that grows without a decision is a list nobody has agreed to, and the count is
-// the cheapest way to notice that happening. It is raised from thirty-two by the addition
-// of dmesg, which is a reader that takes no path and may not be given the option that
-// clears what it reads.
-func TestShellPermittedListIsExactlyThirtyThree(t *testing.T) {
-	if got := len(shellPermitted); got != 33 {
-		t.Errorf("the list holds %d programs, want 33", got)
+// the cheapest way to notice that happening. It is raised from thirty-three by the
+// addition of notmuch, an email indexing and search tool - the same precedent
+// openrouter-cli, this project's predecessor, already set for it (Glen, 2026-10-07).
+func TestShellPermittedListIsExactlyThirtyFour(t *testing.T) {
+	if got := len(shellPermitted); got != 34 {
+		t.Errorf("the list holds %d programs, want 34", got)
 	}
 
 	seen := map[string]bool{}

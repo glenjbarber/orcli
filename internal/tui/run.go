@@ -52,7 +52,7 @@ type LineRunner func(ctx context.Context, line string) (Result, error)
 //
 // silent tells the implementation not to write the question itself into the log as a
 // row, while still sending it to the model and still delivering whatever comes back
-// through the normal reply path. The startup hello is the one caller that passes
+// through the normal reply path. The startup HELO is the one caller that passes
 // true: its text is an instruction aimed at the model ("greet the reader, using the
 // capability message above"), not something the reader typed, and showing it as a
 // row would read as a second voice in the transcript that nobody wrote. A reader's
@@ -95,13 +95,13 @@ const (
 // choose to leave. Every path out restores the terminal, since a reader handed a shell with
 // echo cleared has to fix it by hand and did not cause it.
 //
-// hello, when not empty, is sent through ask once, automatically, before the reader has
+// helo, when not empty, is sent through ask once, automatically, before the reader has
 // pressed a key - the same path a typed question takes, run on the same goroutine
 // mechanics as any other turn. It is a caller's choice, not this package's: a caller with
 // no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
 // passes an empty string and nothing is sent. Start does not decide whether to greet, only
 // how, once asked to.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello string) error {
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -156,13 +156,13 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello s
 	}()
 	l.paint()
 
-	// The hello is sent here, after the frame is first painted and before the
+	// The HELO is sent here, after the frame is first painted and before the
 	// reader's keys are read, so it is in flight from the moment the screen is up
 	// rather than waiting on the first line they submit. It runs through the same
 	// l.start as any other turn, so a reader who presses escape while it is still
 	// running stops it the same way, and leaving while it is in flight waits for it
 	// through the same l.group.Close() every other turn is waited for by.
-	maybeSendHello(ctx, l, hello)
+	maybeSendHELO(ctx, l, helo)
 
 	finished := make(chan struct{})
 	defer close(finished)
@@ -206,22 +206,22 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello s
 	return err
 }
 
-// maybeSendHello starts the one turn Start sends on its own, with no key pressed
+// maybeSendHELO starts the one turn Start sends on its own, with no key pressed
 // and no line runner consulted: the capability and introduction message a reader
 // would otherwise only see once they had typed something.
 //
-// An empty hello, or a loop built with no ask at all, sends nothing - a caller's
+// An empty helo, or a loop built with no ask at all, sends nothing - a caller's
 // choice not to greet, read here rather than decided here.
 //
-// It starts the turn silent: the hello's own text is an instruction to the model,
+// It starts the turn silent: the HELO's own text is an instruction to the model,
 // not a line the reader typed, so it is sent but never written into the log as a
 // question row. Only the model's reply - the actual greeting - lands in the log, the
 // same way any other turn's reply does.
-func maybeSendHello(ctx context.Context, l *interfaceLoop, hello string) {
-	if hello == "" || l.ask == nil {
+func maybeSendHELO(ctx context.Context, l *interfaceLoop, helo string) {
+	if helo == "" || l.ask == nil {
 		return
 	}
-	l.start(ctx, hello, true)
+	l.start(ctx, helo, true)
 }
 
 // interfaceLoop is the state one run of the interface carries.
@@ -304,7 +304,17 @@ func (l *interfaceLoop) paint() {
 			// reader's terminal-native selection.
 			l.step++
 		}
-		figure = twiddleWord(state)
+		// The HELO replaces thinking/working with its own word for the whole of
+		// its one turn: "thinking" describes a model reasoning about a
+		// question, and the HELO is not that, it is the client proving its
+		// credential and model for the first time. HELOInFlight is false for
+		// every other turn a session ever runs, so this never reaches past the
+		// one exchange it is for.
+		if l.session.HELOInFlight() {
+			figure = "Connecting..."
+		} else {
+			figure = twiddleWord(state)
+		}
 	} else if !copyMode {
 		l.step = 0
 	}

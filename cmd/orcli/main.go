@@ -129,6 +129,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 	}
 
+	// ~/.orcli is ensured before anything else, so it exists from the moment
+	// orcli starts rather than only appearing once some later feature - a save,
+	// a /begin, cognito - happens to write beneath it as a side effect of its
+	// own first write.
+	if err := config.EnsureDir(); err != nil {
+		return err
+	}
+
 	// A missing configuration file is installed before it is loaded, so the report
 	// a first-time reader gets names a file that exists rather than one they have to
 	// create themselves.
@@ -367,18 +375,18 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
 	//
-	// The hello is only sent when canAsk(s) agrees a turn can be sent at all: a
+	// The HELO is only sent when canAsk(s) agrees a turn can be sent at all: a
 	// session with no model configured has nothing to greet with, and Begin would
 	// only refuse it and leave a failure notice as the first thing the reader sees.
-	hello := ""
+	helo := ""
 	if canAsk(s) {
-		hello = helloQuestion
+		helo = heloQuestion
 	}
 
 	return tui.Start(ctx, s,
 		d.Run,
 		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
-		hello,
+		helo,
 	)
 }
 

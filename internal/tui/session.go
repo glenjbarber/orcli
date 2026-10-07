@@ -237,6 +237,15 @@ type Session struct {
 	// time because it only reads this field while state is StateBreak.
 	breakEnd time.Time
 
+	// helo reports whether the turn now in flight, if any, is the session's own
+	// startup HELO - the one exchange BeginSilent is ever called for. The figure
+	// field reads this to show "Connecting..." in place of the ordinary
+	// thinking/working words, since "thinking" describes a model reasoning about
+	// a question, not a client proving its credential and model for the first
+	// time. It is set in BeginSilent and cleared in Finished, so it never outlives
+	// the one turn it describes.
+	helo bool
+
 	// breakInput reports whether a key reached the session while the current
 	// break was showing. A reader who kept typing through the reminder has not
 	// taken the break, and TickBreak reads this to decide whether to say so
@@ -746,7 +755,7 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 
 // BeginSilent is Begin for a question the reader never typed.
 //
-// The startup hello is the one caller: its text is sent to the model so it knows
+// The startup HELO is the one caller: its text is sent to the model so it knows
 // what to greet about, but it is an instruction this session wrote to itself, not a
 // line the reader submitted, and the log is a record of what the reader and the
 // model said to each other. Writing the hello's own instruction into it as a
@@ -756,8 +765,32 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 // session; only the row that would have named the question is left out. The reply
 // still reaches the log normally, through Deliver, because Deliver does not
 // re-derive anything from the question it is answering.
+//
+// This is also where helo is set, since this method is itself the one reliable
+// signal that the turn about to run is the HELO and nothing else ever calls it.
+// A failure here (Ready, or an empty question) never reaches StateThinking at
+// all, so the flag is cleared again immediately rather than left set for a turn
+// that never actually started.
 func (s *Session) BeginSilent(ctx context.Context, question string, level int) (context.Context, error) {
-	return s.begin(ctx, question, level, false)
+	s.mu.Lock()
+	s.helo = true
+	s.mu.Unlock()
+
+	turnCtx, err := s.begin(ctx, question, level, false)
+	if err != nil {
+		s.mu.Lock()
+		s.helo = false
+		s.mu.Unlock()
+	}
+	return turnCtx, err
+}
+
+// HELOInFlight reports whether the turn now running, if any, is the session's
+// own startup HELO. See helo's own doc comment for what reads this and why.
+func (s *Session) HELOInFlight() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.helo
 }
 
 // begin is the shared body of Begin and BeginSilent, differing only in whether the
@@ -819,28 +852,6 @@ func (s *Session) Deliver(text string, level int) {
 	s.log.Append(Row{Kind: KindReply, Level: level, Text: text, Spans: ParseMarkdown(text)})
 }
 
-// DeliverSilent is Deliver for a reply the reader must never see.
-//
-// The hello exchange is the one caller: BeginSilent already keeps the question off
-// the log, and a silent turn's reply has to be kept off it too, or the model's own
-// answer to a question the reader never asked would still surface as a row a few
-// seconds later. The state transition Deliver makes - thinking to working - still
-// happens, so the rest of the session sees the same shape of turn; only the row is
-// left out.
-func (s *Session) DeliverSilent(text string, level int) {
-	if text == "" {
-		return
-	}
-
-	s.mu.Lock()
-	thinking := s.state == StateThinking
-	s.mu.Unlock()
-
-	if thinking {
-		s.SetState(StateWorking, "")
-	}
-}
-
 // Notice records a message from the client: a refusal, a failure, a milestone.
 //
 // It is a method rather than a caller reaching for the log, so that a notice lands in
@@ -856,17 +867,16 @@ func (s *Session) Notice(text string, level int, role Role) {
 	})
 }
 
-// NoticeSilent is Notice for a silent turn: it reports nothing to the log, since a
-// notice about a question the reader never asked would be as misplaced as the
-// question or the reply would be. See DeliverSilent's own doc comment.
-func (s *Session) NoticeSilent(text string, level int, role Role) {}
-
 // Finished records that a turn ended and returns the session to idle.
 //
 // A turn that ended is idle whether it finished cleanly or was stopped, since a
 // reader who stopped a model should not be told something is still running. The
 // detail carries why, so the bar says `idle, stopped` rather than making the reader
 // work out which kind of not-running this is.
+//
+// Every turn ends here, the HELO included, so this is also where helo is
+// cleared - the one point every path through a turn, success or failure,
+// passes through on its way back to idle.
 func (s *Session) Finished(reason string) {
 	s.log.Append(Row{
 		Kind:  KindNotice,
@@ -874,13 +884,9 @@ func (s *Session) Finished(reason string) {
 		Text:  reason,
 		Spans: []Span{{Start: 0, End: len(reason), Role: RoleDim}},
 	})
-	s.SetState(StateIdle, "")
-}
-
-// FinishedSilent is Finished for a silent turn: the session still returns to idle,
-// but no row names why, since there is nothing the reader asked for it to explain.
-// See DeliverSilent's own doc comment.
-func (s *Session) FinishedSilent(reason string) {
+	s.mu.Lock()
+	s.helo = false
+	s.mu.Unlock()
 	s.SetState(StateIdle, "")
 }
 

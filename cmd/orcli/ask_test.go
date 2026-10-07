@@ -436,21 +436,21 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 	}
 }
 
-// TestHelloQuestionAsksForAnIntroduction covers the question the session sends
+// TestHELOQuestionAsksForAnIntroduction covers the question the session sends
 // itself at startup: it is non-empty and, run through ask like any other
 // question, carries the same capability message, AGENTS.md introduction, and
 // documentation listing a reader's own question would, so the model answering it
 // has everything it needs to actually introduce the session rather than guess.
 //
 // It is sent silent, the same way main.go wires it through tui.Start, so this also
-// covers the reason that call exists: the hello's own instruction text must reach
-// the model but never appear as a row in the log, and - unlike an earlier version
-// of this behavior - neither may the model's reply. The whole exchange is a
-// connection probe the session runs on itself, not something the reader asked
-// about, so no row from it should ever be visible.
-func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
-	if strings.TrimSpace(helloQuestion) == "" {
-		t.Fatal("helloQuestion is empty")
+// covers the reason that call exists: the HELO's own instruction text must reach
+// the model but never appear as a row in the log, while the model's reply - the
+// actual greeting - does. An earlier version of this behavior silenced the reply
+// too; Glen confirmed (2026-10-07) that was itself the bug, since a HELO whose
+// reply nobody ever sees is a HELO that might as well not have run.
+func TestHELOQuestionAsksForAnIntroduction(t *testing.T) {
+	if strings.TrimSpace(heloQuestion) == "" {
+		t.Fatal("heloQuestion is empty")
 	}
 
 	dir := t.TempDir()
@@ -463,31 +463,38 @@ func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), helloQuestion, 0, true); err != nil {
+	if err := a(context.Background(), heloQuestion, 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
 	msgs := fake.seen[0].Messages
 	last := msgs[len(msgs)-1]
-	if last.Role != "user" || last.Content != helloQuestion {
-		t.Errorf("the last message is %+v, want the hello question", last)
+	if last.Role != "user" || last.Content != heloQuestion {
+		t.Errorf("the last message is %+v, want the HELO question", last)
 	}
 
 	rows := s.Log().Rows()
 	for _, row := range rows {
-		if row.Text == helloQuestion {
-			t.Errorf("the hello's own instruction text appeared as a log row: %+v, want no row at all", row)
+		if row.Text == heloQuestion {
+			t.Errorf("the HELO's own instruction text appeared as a log row: %+v, want no row at all", row)
 		}
+	}
+	found := false
+	for _, row := range rows {
 		if row.Text == "Hi, I'm orcli." {
-			t.Errorf("the hello's reply appeared as a log row: %+v, want no row at all", row)
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("the HELO's reply did not appear as a log row: %+v, want it visible", rows)
 	}
 }
 
-// TestSilentTurnAppendsNoRowAtAll covers the general case behind the hello: any
-// turn asked with silent=true must leave nothing in the log, question or reply,
-// while a turn asked with silent=false behaves exactly as before.
-func TestSilentTurnAppendsNoRowAtAll(t *testing.T) {
+// TestSilentTurnHidesOnlyTheQuestion covers the general case behind the HELO:
+// a turn asked with silent=true leaves its own question text out of the log,
+// while its reply and the notice naming how it finished land exactly as they
+// would for any other turn.
+func TestSilentTurnHidesOnlyTheQuestion(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestSession(dir)
 	fake := &fakeChat{rounds: [][]openrouter.Event{
@@ -497,15 +504,32 @@ func TestSilentTurnAppendsNoRowAtAll(t *testing.T) {
 		},
 	}}
 
-	before := len(s.Log().Rows())
-
 	a := ask(s, fake, "", nil, nil)
 	if err := a(context.Background(), "a quiet question", 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
-	if rows := s.Log().Rows(); len(rows) != before {
-		t.Errorf("a silent turn appended rows, want none beyond the %d already there: %+v", before, rows)
+	rows := s.Log().Rows()
+	for _, row := range rows {
+		if row.Text == "a quiet question" {
+			t.Errorf("the silent turn's own question appeared as a log row: %+v, want it hidden", row)
+		}
+	}
+
+	foundReply, foundFinish := false, false
+	for _, row := range rows {
+		if row.Text == "a quiet reply" {
+			foundReply = true
+		}
+		if row.Text == "stop" {
+			foundFinish = true
+		}
+	}
+	if !foundReply {
+		t.Errorf("the silent turn's reply did not appear as a log row: %+v, want it visible", rows)
+	}
+	if !foundFinish {
+		t.Errorf("the silent turn's finish notice did not appear as a log row: %+v, want it visible", rows)
 	}
 }
 
