@@ -798,6 +798,11 @@ func (s *Session) begin(ctx context.Context, question string, level int, record 
 // Text is written whole rather than a piece at a time, which is the decision the
 // interface was redesigned for. A reply held for its turn arrives as a block, so
 // the folding and the copy path see the same text the reader does.
+//
+// The row's spans come from ParseMarkdown, run here rather than by ask.go's
+// caller - see ParseMarkdown's own doc comment for why this is the seam: every
+// reply, from every caller of Deliver, is styled the same way with nothing for
+// a caller to remember to do first.
 func (s *Session) Deliver(text string, level int) {
 	if text == "" {
 		return
@@ -811,7 +816,7 @@ func (s *Session) Deliver(text string, level int) {
 		s.SetState(StateWorking, "")
 	}
 
-	s.log.Append(Row{Kind: KindReply, Level: level, Text: text})
+	s.log.Append(Row{Kind: KindReply, Level: level, Text: text, Spans: ParseMarkdown(text)})
 }
 
 // DeliverSilent is Deliver for a reply the reader must never see.
