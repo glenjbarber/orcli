@@ -71,3 +71,7 @@ The arrangement this record settled no longer exists. 0000008 replaced it and 00
 replaced that, and the reader's own later work replaced the pane bar that 0000008's
 third part held. Read this for the two symptoms and the two failures the footer
 had, and not for a screen.
+
+## See also
+
+Superseded by `UI-redesign.md`, the final authority for the screen arrangement (not by adr-0000008 or adr-0000010, which are themselves superseded). See also adr-0000002, the companion record for the one-character status field, decided in the same session and also superseded by `UI-redesign.md`.

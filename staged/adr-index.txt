@@ -184,6 +184,18 @@ removes the region is in progress and its result is not known here. This is
 recorded as a disagreement rather than a supersession, since no record replaces
 0000010 on this point yet.
 
+## See also, per record
+
+Each record file now carries its own `## See also` section, man-page style:
+a short list of related record numbers, with any supersession direction
+stated explicitly. Where a record's header names an intermediate link in a
+supersession chain (0000001 naming 0000008 and 0000010, for instance), its
+`## See also` section names only the chain's final, current authority -
+`UI-redesign.md` for every chain in this table that ends there - rather than
+repeating the intermediate link. The header field is unchanged; the `See
+also` section is the forward-pointing view, kept consistent with this table
+rather than a second source of truth for it.
+
 ## What these records are not
 
 They are not a specification. `DESIGN.md` describes the interface being built,

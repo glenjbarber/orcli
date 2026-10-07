@@ -299,3 +299,7 @@ qualified above for the same reason.
 Nothing about the tree has been changed in writing it. There is no branch, no
 commit, and no worktree for it, and the frame in the tree is the one 0000001
 settled.
+
+## See also
+
+Supersedes nothing. Superseded by `UI-redesign.md`.

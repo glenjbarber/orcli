@@ -50,3 +50,7 @@ not two queues.
 ## Notes
 
 Nothing in the tree has been changed in writing this.
+
+## See also
+
+Supersedes adr-0000006's escape clause only; every other decision in adr-0000006 stands and is the current authority for the rest of the queue's behaviour (adr-0000006 itself is superseded by `UI-redesign.md`).

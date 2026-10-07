@@ -73,3 +73,7 @@ Nothing from question 14.
 
 Nothing in the tree has changed. There is no `/copy` command built for the
 new interface.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000025, the companion record about who owns copy.

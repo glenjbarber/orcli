@@ -66,3 +66,7 @@ one field rather than emptying gradually. That is a different decision with a
 different reason, and 0000016 is the record of it. Read this for why a field that
 cannot say what it means in one character cannot be drawn at all, and not for the
 screen.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000001, the frame record this field lived in, also superseded by `UI-redesign.md`.

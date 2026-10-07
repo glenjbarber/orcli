@@ -68,3 +68,7 @@ some other rule. Not asked by question 17 and not answered here.
 
 Nothing in the tree has changed. There is no thinking-phrase display in the
 tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

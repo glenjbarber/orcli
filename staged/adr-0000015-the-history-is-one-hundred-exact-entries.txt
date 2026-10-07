@@ -87,3 +87,7 @@ reason context has to survive.
 Nothing in the tree has changed. The line editor in `internal/tui` has its own
 history behaviour for a frame that is being replaced, and neither
 `/autosave` nor `/autocompact` is built.
+
+## See also
+
+Fills a gap left by adr-0000011. Superseded by `UI-redesign.md`.

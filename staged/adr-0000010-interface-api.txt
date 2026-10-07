@@ -287,3 +287,7 @@ interface, and `AGENTS.md` is where it belongs.
 
 Nothing in the tree has changed. There is no pane, no prefix, no queue and no
 restore.
+
+## See also
+
+Supersedes adr-0000008 and adr-0000009, and the pane arrangement of adr-0000007. Superseded by `UI-redesign.md`. See also adr-0000011, read together with this record for the keys it left out.

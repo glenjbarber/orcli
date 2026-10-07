@@ -57,3 +57,7 @@ Nothing from question 26.
 ## Notes
 
 Nothing in the tree has changed. There is no `/pane` command in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

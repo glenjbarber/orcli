@@ -58,3 +58,7 @@ TODO, separate from this record.
 ## Notes
 
 Nothing in the tree has changed. There is no prefix key read in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

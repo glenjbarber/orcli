@@ -98,3 +98,7 @@ Nothing in the tree has changed. This is a convention over files that are not
 committed, and the four records it changes are in `staged/`, which is ignored.
 The status lines of 0000001, 0000002, 0000007, 0000008 and 0000009 are the ones that carry the
 word, and they are edited to say so.
+
+## See also
+
+Supersedes nothing; this is the convention every other record's status line follows. See also adr-status-vocabulary.txt.

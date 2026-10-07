@@ -84,3 +84,7 @@ Which pane a restore lands in, and what happens to the panes that were open.
 
 Nothing in the tree has changed. `internal/saved` writes and reads whole
 conversations already, and no `/restore` exists.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000013, the companion record about how a session is keyed.

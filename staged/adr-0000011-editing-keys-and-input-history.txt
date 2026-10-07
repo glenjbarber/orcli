@@ -112,3 +112,7 @@ key someone has to read about.
 Nothing in the tree has changed. The editor in `internal/tui` implements its
 own keys for a frame that is being replaced, and those keys were not consulted
 in taking this decision.
+
+## See also
+
+Fills a gap left by adr-0000010; read together with it. Superseded by `UI-redesign.md`. See also adr-0000015, which fills a further gap in the history this record settles.
