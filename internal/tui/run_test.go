@@ -2,9 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+// errFailedTurn is a stand-in failure for TestStartDoesNotDrainTheQueueAfterAFailedTurn.
+var errFailedTurn = errors.New("the turn failed")
 
 // TestStartSendsHelloAutomatically covers the startup hello at the level Start's
 // own event loop runs it at, without opening a real terminal screen: a test binary
@@ -70,6 +75,80 @@ func TestMaybeSendHelloSkipsWithNoAsk(t *testing.T) {
 
 	maybeSendHello(context.Background(), l, "introduce yourself")
 	_ = l.group.Close()
+}
+
+// TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean covers the chain /queue is
+// built on: l.start's own goroutine, after a turn returns with no error, drains the
+// session's queue and starts whatever it finds next on the same group, the way the
+// hello above is started - with no key pressed, and no second call this test has to
+// make itself.
+func TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.Enqueue("the queued follow-up")
+
+	// done is signalled once the second, chained turn has run, so the test waits
+	// for the chain to actually happen rather than for group.Close - which would
+	// itself mark the group closing and refuse the chained start's own Add before
+	// it ever runs, racing ahead of the very thing this test means to observe.
+	done := make(chan struct{})
+
+	var asked []string
+	ask := func(_ context.Context, question string, level int) error {
+		asked = append(asked, question)
+		s.Deliver("ok", level)
+		if len(asked) == 2 {
+			close(done)
+		}
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	l.start(context.Background(), "the first question")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the queued follow-up was never sent")
+	}
+
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if len(asked) != 2 || asked[0] != "the first question" || asked[1] != "the queued follow-up" {
+		t.Errorf("asked = %v, want the first question followed by the queued one", asked)
+	}
+	if got := s.QueueLen(); got != 0 {
+		t.Errorf("QueueLen() after the chain = %d, want 0", got)
+	}
+}
+
+// TestStartDoesNotDrainTheQueueAfterAFailedTurn covers the other side of that same
+// judgment call, named in start's own doc comment: a turn that came back with an
+// error leaves the queue alone, so a reader who watched one fail is not surprised
+// by a second request starting on top of it.
+func TestStartDoesNotDrainTheQueueAfterAFailedTurn(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.Enqueue("should not be sent")
+
+	calls := 0
+	ask := func(_ context.Context, _ string, _ int) error {
+		calls++
+		return errFailedTurn
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	l.start(context.Background(), "the first question")
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if calls != 1 {
+		t.Errorf("ask was called %d times, want exactly 1", calls)
+	}
+	if got := s.QueueLen(); got != 1 {
+		t.Errorf("QueueLen() after a failed turn = %d, want the queued prompt left alone", got)
+	}
 }
 
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
