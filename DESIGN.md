@@ -390,3 +390,31 @@ Everything below is a decision that has not been taken.
 to a buffer, and a buffer is not a terminal. Whether the regions feel right,
 whether the prefix is reachable, whether scrolling and copying work together,
 and whether a mouse wheel behaves on the target machine, are all unverified.
+
+## 20. The screen-break reminder
+
+**A session runs for a configurable interval, 22 minutes by default, before a
+screen-break reminder interrupts it.** `break_interval_minutes` in
+`.orcli.json` and `--break-interval` at startup both name it, in minutes, and
+either must be positive: zero or less is refused by name rather than
+substituted for.
+
+**The break itself is a fixed two minutes,** not configurable. The interval
+before a break is the reader's choice; the length of it is not, since two
+minutes is what the design took as long enough for an eye to recover.
+
+**The reminder waits for idle.** A turn in flight is not interrupted; the
+reminder fires once the session next has nothing running.
+
+**The prompt is cleared when the reminder appears, and stays usable through
+the break.** Nothing about the break locks the input, matching the working
+interaction assumption this was built against: a reader can keep typing
+through a break and the countdown does not stop them.
+
+**The countdown is shown in the state field**, the same field that shows
+`idle`, `thinking` and the rest, rather than in a bar field of its own.
+
+**The screen-break bell is a separate toggle from the reply-completion
+bell,** `break_bell` and `--break-bell`. A reader who wants to know a reply
+arrived without being startled by a break reminder, or the other way around,
+is choosing between two different events.
