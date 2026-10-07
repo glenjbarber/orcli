@@ -209,6 +209,10 @@ func init() {
 			Summary: "turn mouse reporting on or off, for wheel scrolling",
 		},
 		{
+			Name:    "copymode",
+			Summary: "freeze the footer and twiddle sweep for a terminal-native copy",
+		},
+		{
 			Name:    "pause",
 			Summary: "stop what the client writes, and toggle the mouse",
 		},

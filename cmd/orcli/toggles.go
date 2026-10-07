@@ -146,6 +146,35 @@ func (d *dispatcher) mouse(args string) (tui.Result, error) {
 	return tui.Result{Text: reportOnOff("the mouse", on)}, nil
 }
 
+// copymode is the handler for /copymode.
+//
+// It is the same shape as /bell and /mouse: no argument reports the state already
+// in force, and `on`/`off` moves it. There is nothing to persist, the same as
+// /bell - a reader turns it on for one terminal-native selection and off again
+// right after, not for good, so it is not a flag at startup either.
+//
+// While it is on, the footer's stat fields and the twiddle sweep freeze at their
+// last-computed values - see Options.CopyMode's own doc comment in internal/tui for
+// what exactly stops moving and why - so a reader can click-drag a selection in
+// their terminal without the screen repainting under it. The log itself keeps
+// rendering new rows as usual; only the footer's noise is held still.
+func (d *dispatcher) copymode(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/copymode needs an open interface")
+	}
+
+	set, on, err := onOff(args)
+	if err != nil {
+		return tui.Result{}, fmt.Errorf("/copymode %w", err)
+	}
+	if !set {
+		return tui.Result{Text: reportOnOff("copy mode", d.session.Options().CopyMode)}, nil
+	}
+
+	d.session.SetCopyMode(on)
+	return tui.Result{Text: reportOnOff("copy mode", on)}, nil
+}
+
 // stealth is the handler for /stealth, and for /cognito, which is now a hidden
 // alias of it rather than a command of its own.
 //

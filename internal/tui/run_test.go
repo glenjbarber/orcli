@@ -309,6 +309,43 @@ func TestBarWithNoWidthIsNotCut(t *testing.T) {
 	}
 }
 
+// TestCopyModeFreezesStatusAndSweep covers the toggle: while copy mode is on,
+// repeated status() calls return an unchanged Status even as state that would
+// normally move it changes (a turn running, a row appended), and paint() stops
+// advancing the sweep step. Turning copy mode back off resumes tracking live
+// state immediately.
+func TestCopyModeFreezesStatusAndSweep(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	l := &interfaceLoop{session: s, frame: NewFrame(), group: newGroup()}
+
+	s.SetCopyMode(true)
+
+	l.paint()
+	stepAfterFirst := l.step
+	first := l.status(StateThinking, "", "thinking")
+
+	// A turn "running" would otherwise advance the sweep and change fieldHeld
+	// by appending rows; with copy mode on, neither should move.
+	s.Notice("a row that would otherwise move fieldHeld", 0, RoleNotice)
+	l.paint()
+	if l.step != stepAfterFirst {
+		t.Errorf("l.step moved from %d to %d while copy mode was on", stepAfterFirst, l.step)
+	}
+
+	second := l.status(StateThinking, "", "thinking")
+	if first != second {
+		t.Errorf("status() changed while copy mode was on:\nfirst:  %+v\nsecond: %+v", first, second)
+	}
+
+	// Turning copy mode off resumes live tracking: fieldHeld must now reflect
+	// the row that was appended while it was frozen.
+	s.SetCopyMode(false)
+	third := l.status(StateThinking, "", "thinking")
+	if third[fieldHeld] == first[fieldHeld] && third == first {
+		t.Errorf("status() stayed frozen after copy mode turned off")
+	}
+}
+
 func stripSequences(s string) string {
 	var b strings.Builder
 	runes := []rune(s)
