@@ -114,11 +114,12 @@ func TestFrameSweepsTheFigureAsCellStyles(t *testing.T) {
 		t.Fatal("adjacent figure cells use the same hue")
 	}
 
-	frame.SetSweepStep(10)
+	cycle := len(sweepColors(GroundDark))
+	frame.SetSweepStep(cycle)
 	frame.Draw(screen)
 	_, _, cycled, _ := screen.GetContent(start, barOneRow)
 	cycledFG, _, _ := cycled.Decompose()
 	if cycledFG != firstFG {
-		t.Fatalf("figure hue after ten steps = %v, want cycle back to %v", cycledFG, firstFG)
+		t.Fatalf("figure hue after %d steps = %v, want cycle back to %v", cycle, cycledFG, firstFG)
 	}
 }
