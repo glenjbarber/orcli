@@ -72,6 +72,7 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 	toolset := newToolset(s.Options().WorkingDir)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
+	docs := documentation(s.Options().WorkingDir)
 
 	return func(ctx context.Context, question string, level int) error {
 		turnCtx, err := s.Begin(ctx, question, level)
@@ -93,6 +94,9 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 		})
 		if intro != "" {
 			messages = append(messages, openrouter.Message{Role: "system", Content: intro})
+		}
+		if docs != "" {
+			messages = append(messages, openrouter.Message{Role: "system", Content: docs})
 		}
 		messages = append(messages, openrouter.Message{Role: "user", Content: question})
 
@@ -286,6 +290,13 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 		b.WriteString("Cloudflare: no credential is configured; the connector is not available.\n")
 	}
 
+	// There is no plugin system in this build: nothing in the tree registers a
+	// plugin, enables one, or carries a list of them to read. This is named rather
+	// than left out, on the same "absence is a statement" grounds as every other
+	// line above, so a reader who asks what plugins are enabled is told none can be,
+	// not left to guess whether the question was never asked.
+	b.WriteString("Plugins: no plugin system exists in this build; none can be enabled.\n")
+
 	return b.String()
 }
 
@@ -303,6 +314,63 @@ func introduction(dir string) string {
 		return ""
 	}
 	return string(text)
+}
+
+// helloQuestion is the question a session asks itself once, at the very start, so
+// the reader's screen carries an introduction before they have typed anything.
+//
+// It is sent through the same ask closure as any question a reader types, which is
+// what lets it see the same capability message, the same AGENTS.md introduction,
+// and the same documentation listing every other turn sees - a second path that
+// built its own greeting would be a second thing to keep in step with those three.
+const helloQuestion = "This is the start of the session, before the reader has " +
+	"typed anything. Greet them briefly: say you are orcli, summarize in a " +
+	"sentence or two what this session has configured from the capability " +
+	"message above, and name doc/ and staged/ as where the detail behind any " +
+	"of it lives if they ask for more."
+
+// documentation lists the names of orcli's own documentation under dir, so the
+// capability message can point the model at doc/ and staged/ by name rather than
+// have it guess at what detail exists or describe this build from training data
+// rather than from the tree it is actually running in.
+//
+// Only names are listed, not contents: a reader who wants the detail behind a
+// capability can read the file itself, through the filesystem tool when one is
+// wired in, and a listing that inlined every file would be the AGENTS.md mistake
+// repeated - a second copy of material that lives in one place already.
+//
+// Either directory missing is silence for that directory, on the same grounds as
+// introduction's missing AGENTS.md: most working directories are not orcli's own
+// checkout, and a session outside it has neither to list.
+func documentation(dir string) string {
+	var b strings.Builder
+	list := func(heading, sub string) {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if err != nil {
+			return
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		if len(names) == 0 {
+			return
+		}
+		fmt.Fprintf(&b, "%s (%s/):\n", heading, sub)
+		for _, name := range names {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+	}
+
+	list("Reference documentation", "doc")
+	list("Design records and ADRs", "staged")
+
+	if b.Len() == 0 {
+		return ""
+	}
+	return "orcli's own documentation, for detail beyond this message:\n\n" + b.String()
 }
 
 // canAsk reports whether a model can be asked anything at all.
