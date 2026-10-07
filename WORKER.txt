@@ -175,7 +175,8 @@ order, each carrying this trailer:
 
 Co-Authored-By:	Space Bunny Alpha
 
-Stage explicit paths. Never git add -A. Never push.
+Stage explicit paths. Never git add -A. Push only when the user explicitly
+requests it.
 
 ================================================================
 OPEN, AND DO NOT INVENT AN ANSWER
