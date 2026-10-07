@@ -75,6 +75,13 @@ type dispatcher struct {
 	// something to move and /autosave with no argument has something to report,
 	// ahead of the save/load mechanism this is meant to drive once it exists.
 	autosaveOn bool
+
+	// permissions is the in-memory grant list `/permission` writes to and reports
+	// from. It is keyed by directory, and it is the v1 this build has rather than
+	// the persisted, consulted store the command's own doc comment (see
+	// permission.go) names as the open gap: nothing in internal/tools reads this
+	// map, so a grant recorded here records intent and nothing else yet.
+	permissions map[string]*permissionGrant
 }
 
 // newDispatcherFor builds a dispatcher over a configuration.
@@ -143,6 +150,15 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		},
 		"autosave": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.autosave(args)
+		},
+		"approve": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.approve(args)
+		},
+		"permission": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.permission(args)
+		},
+		"tools": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.tools()
 		},
 		"save": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.save(args)
