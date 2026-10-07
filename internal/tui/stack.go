@@ -80,7 +80,7 @@ var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldPreset,
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 21
+const StatusFields = 22
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
