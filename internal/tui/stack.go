@@ -50,13 +50,23 @@ import (
 // `root@lolhost @ ` instead, deliberately; that disagreement is recorded in
 // staged/adr-index.txt rather than resolved there, and is resolved here in the string's
 // favour because the mockup built from this string is the one that was confirmed.
-const Prompt = "root@lolhost $ "
+//
+// Glen confirmed a further adjustment to this same string in this session
+// (2026-10-07): a leading space before the host name, so the prompt row's own text does
+// not start flush against the terminal's left edge. The space on each side of the dollar
+// sign from the 2026-10-06 mockup is unchanged; this only adds the one before "root".
+const Prompt = " root@lolhost $ "
 
 // barRows is how many fixed rows sit below the scrollback: the prompt, one blank
 // separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
 // bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
 // (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
 // cutting it, dropping it into bar two, or leaving it homeless.
+//
+// The separator line stays one row. Glen confirmed in this session (2026-10-07) that it
+// should carry two leading spaces rather than being left to the frame's own blank fill
+// (see Draw's separatorRow write); that is a change to what the row draws, not to how
+// many rows the stack has, so barRows is still five.
 const barRows = 5
 
 // barOneFields and barTwoFields choose which Status fields render on each status bar.
@@ -420,12 +430,22 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	promptRow := backlog
+	separatorRow := backlog + 1
 	barOneRow := backlog + 2
 	barTwoRow := backlog + 3
 	paneBarRow := backlog + 4
 
 	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
 	f.showCaret(screen, x, y+promptRow, width)
+
+	// The separator row between the prompt and bar one. It was left to the base clear
+	// above (every cell already a space) rather than drawn; Glen asked, in this session
+	// (2026-10-07), that it carry two spaces explicitly, matching the indent he asked for
+	// on the prompt row above it, rather than being blank only because nothing writes to
+	// it. Two spaces at a width of two or more look identical to the blank fill they
+	// replace - the row was already all spaces - so this is a deliberate row of content
+	// rather than a visible change.
+	drawCellText(screen, x, y+separatorRow, width, "  ", chrome)
 
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 

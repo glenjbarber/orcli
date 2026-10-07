@@ -509,6 +509,28 @@ func (s *Session) Ready() error {
 	return nil
 }
 
+// Restore replaces the session's log with rows read back from a saved
+// conversation, and returns the viewport to the live edge.
+//
+// `/load` is this method's one caller, and it replaces the log rather than
+// appending to it: a reader who loads a conversation wants exactly what was
+// saved in front of them, not that conversation stacked underneath whatever
+// they had been looking at. The scroll offset is reset for the same reason -
+// an offset measured against the log that was there is meaningless against the
+// one that has just replaced it, and a reader left scrolled away from the live
+// edge of a conversation they just asked to see would find nothing on the
+// screen.
+//
+// The levels table, the workers and the model are untouched here; `/load`
+// itself decides which of those a restored conversation also carries.
+func (s *Session) Restore(rows []Row) {
+	s.log.Restore(rows)
+
+	s.mu.Lock()
+	s.scroll = 0
+	s.mu.Unlock()
+}
+
 // Begin turns a question into a turn and reports what it took.
 //
 // The context is the caller's so that stopping a model stops the request and not
