@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -339,7 +340,8 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldState] = string(state) + detailSuffix(detail)
 	s[fieldFigure] = figure
 	s[fieldApproval] = orNone(string(opts.Approval))
-	s[fieldVerbosity] = "0"
+	s[fieldVerbosity] = strconv.Itoa(opts.Verbosity)
+	s[fieldPreset] = orNone(l.session.Preset())
 	s[fieldCognito] = onOff(opts.Cognito, "on", "off")
 	s[fieldColor] = onOff(opts.Color, "on", "off")
 	s[fieldMouse] = onOff(opts.Mouse, "on", "off")

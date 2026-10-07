@@ -113,6 +113,14 @@ type Options struct {
 	// a race against, and a reader who has not looked back since still finds
 	// the pane coloured the way they left it.
 	PaneDoneColor *RGB
+
+	// Verbosity is how much the model is asked to answer with, 0 to 5.
+	//
+	// It starts at zero, unchanged from today's default, and nothing moves it
+	// until the reader asks: /level's preset is the one thing in this build that
+	// writes it (see internal/tui/preset.go), and there is no /verbosity handler
+	// yet even though the name is in the command table.
+	Verbosity int
 }
 
 // Approval is the mode a tool call is settled under.
@@ -211,6 +219,16 @@ type Session struct {
 	// time while no break is running, which TickBreak never mistakes for a due
 	// time because it only reads this field while state is StateBreak.
 	breakEnd time.Time
+
+	// preset is the name of the /level preset in force, or "" when none has been
+	// set. It is guarded by mu for the reason opts.Model is: /level runs on the
+	// input goroutine and a turn reads it on the request goroutine.
+	//
+	// This is unrelated to levels above (and to Level/Levels below): those name a
+	// conversation branch a pane reaches with /copy and /btw. /level names a
+	// bundle of reply characteristics. The two share an English word and nothing
+	// else - see preset.go's doc comment for the same note from the other side.
+	preset string
 }
 
 // State is what the client is doing, and it is one of four.
@@ -294,6 +312,47 @@ func (s *Session) SetModel(model string) error {
 	s.opts.Model = model
 	s.mu.Unlock()
 	return nil
+}
+
+// SetPreset makes a /level preset the active one, moving Verbosity to what it
+// defines.
+//
+// It takes the preset's data rather than a name the session resolves for itself,
+// since the table it would be resolved against lives in preset.go beside the
+// command's own doc comments, and a session that imported that lookup would carry a
+// dependency it has no other reason to hold.
+func (s *Session) SetPreset(p Preset) {
+	s.mu.Lock()
+	s.preset = p.Name
+	s.opts.Verbosity = p.Verbosity
+	s.mu.Unlock()
+}
+
+// Preset reports the name of the active /level preset, or "" when none has been
+// set. /level with no argument reports this.
+func (s *Session) Preset() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.preset
+}
+
+// PresetStyle reports the active preset's style instruction, or "" when no preset
+// is active. capabilities() in cmd/orcli/ask.go reads this to add the instruction
+// to the system message sent with every turn, which is how /level reaches tone and
+// not only Options().Verbosity.
+func (s *Session) PresetStyle() string {
+	s.mu.RLock()
+	name := s.preset
+	s.mu.RUnlock()
+
+	if name == "" {
+		return ""
+	}
+	p, found := LookupPreset(name)
+	if !found {
+		return ""
+	}
+	return p.Style
 }
 
 // State reports what the client is doing, and any detail worth showing beside it.

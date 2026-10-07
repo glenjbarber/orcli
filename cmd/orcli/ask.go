@@ -286,6 +286,14 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 		b.WriteString("Cloudflare: no credential is configured; the connector is not available.\n")
 	}
 
+	// /level's active preset, when there is one, is written as its own sentence
+	// rather than folded into the paragraph above: it is an instruction about how
+	// to answer rather than a fact about what is configured, and the two should
+	// not read as one kind of statement.
+	if style := s.PresetStyle(); style != "" {
+		b.WriteString("\n" + style + "\n")
+	}
+
 	return b.String()
 }
 
