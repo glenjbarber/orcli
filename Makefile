@@ -1,7 +1,8 @@
 # Makefile for orcli.
 #
-# This file is written in the syntax common to BSD make and GNU make, because
-# the port host uses BSD make. That rules out several conveniences that appear
+# `make` must pass, and `bmake` must work too. Keep this file within the syntax
+# honored by both BSD make and GNU make. The port host uses BSD make, so that
+# rules out several conveniences that appear
 # in almost every Makefile:
 #
 #   $(shell ...)   not a thing in BSD make, and its absence is deliberate

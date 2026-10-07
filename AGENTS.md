@@ -78,18 +78,19 @@ pick up a stray file placed there.
 ## Building
 
 ```
-bmake build        the binary into staged/bin/orcli
-bmake test         the suite
-bmake check        the suite under the race detector
-bmake lint         gofmt check and go vet
-bmake crossbuild   compile and vet every supported target
-bmake clean        remove staged/bin/
+make build         the binary into staged/bin/orcli
+make test          the suite
+make check         the suite under the race detector
+make lint          gofmt check and go vet
+make crossbuild    compile and vet every supported target
+make clean         remove staged/bin/
 ```
 
-`bmake` and `make` are both supported and both are expected to work; the
-`Makefile` avoids every construct that is not common to both. `make clean` removes
-build output and never touches `worktrees/`, which holds checkouts of this
-repository.
+`make` must pass the documented build and check targets. The Makefile must also
+work with `bmake`; preserve syntax accepted by both BSD make and GNU make, and
+verify changes with both when both programs are available. Do not use syntax or
+behavior specific to either implementation. `make clean` removes build output
+and never touches `worktrees/`, which holds checkouts of this repository.
 
 Output goes to `staged/bin/`, which is ignored.
 New worktrees sit outside this repository, at `/Users/gjb/Documents/work/orcli-worktrees/<type>-<name>`.
@@ -106,7 +107,7 @@ carries it.
 Tests that need a real dependency should skip rather than fail when it is absent,
 so a machine without git or SQLite can still run the suite.
 
-`go test` alone is not the gate. `bmake check` is, because it runs the race
+`go test` alone is not the gate. `make check` is, because it runs the race
 detector and that is what catches a session or a spinner.
 
 ## The work log and its lock
