@@ -40,9 +40,11 @@ picture, since the real picture is larger and not yet fully understood.
 Build, lint and test gates pass when the work ends, and a failure that cannot
 be settled is reported rather than left for the reader to find.
 
-**Push only on the exact phrase.** Never push to a remote unless told
-otherwise with the words `YES-I-REALLY-MEAN-IT`. The repository is pushed by
-hand.
+**Push the working branch and open a pull request against main.** This is the
+normal delivery mechanism, not something that waits to be asked for each
+time, per Loreloom's coordination policy (ADR-0000000), which explicitly
+supersedes the older rule that every push was done by hand. A direct push to
+`main`, or any destructive history rewrite, still waits for the reader.
 
 ## Where things live
 
@@ -206,13 +208,12 @@ Never use `git add -A`. Stage by path.
 Commit subjects are one line, imperative, and under 72 characters where that is
 possible. They are written in the third person and the passive voice.
 
-Every commit carries the trailer:
+Commit attribution follows the acting AI's own identity (for example
+`Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`), not a fixed
+trailer.
 
-```
-Co-Authored-By:	Space Bunny Alpha
-```
-
-Never push. The repository is pushed by hand.
+Push the working branch and open a pull request against main; see the
+delivery note above.
 
 ## Editing
 
