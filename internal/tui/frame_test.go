@@ -54,7 +54,9 @@ func TestFrameDrawsCellsAndPlacesPromptCaret(t *testing.T) {
 	frame.SetCaret(2)
 	frame.Draw(screen)
 
-	r, _, _, _ := screen.GetContent(0, 0)
+	// Prompt now has a leading space (see stack.go's Prompt doc comment), so column 0
+	// is that space and column 1 is "r" of "root@lolhost".
+	r, _, _, _ := screen.GetContent(1, 0)
 	if r != 'r' {
 		t.Fatalf("prompt row begins with %q, want 'r'", r)
 	}

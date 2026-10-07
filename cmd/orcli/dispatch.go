@@ -117,6 +117,12 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"redirect": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.redirect(args)
 		},
+		"save": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.save(args)
+		},
+		"load": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.load(args)
+		},
 	}
 	return d
 }

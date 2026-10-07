@@ -598,6 +598,28 @@ func (s *Session) Ready() error {
 	return nil
 }
 
+// Restore replaces the session's log with rows read back from a saved
+// conversation, and returns the viewport to the live edge.
+//
+// `/load` is this method's one caller, and it replaces the log rather than
+// appending to it: a reader who loads a conversation wants exactly what was
+// saved in front of them, not that conversation stacked underneath whatever
+// they had been looking at. The scroll offset is reset for the same reason -
+// an offset measured against the log that was there is meaningless against the
+// one that has just replaced it, and a reader left scrolled away from the live
+// edge of a conversation they just asked to see would find nothing on the
+// screen.
+//
+// The levels table, the workers and the model are untouched here; `/load`
+// itself decides which of those a restored conversation also carries.
+func (s *Session) Restore(rows []Row) {
+	s.log.Restore(rows)
+
+	s.mu.Lock()
+	s.scroll = 0
+	s.mu.Unlock()
+}
+
 // Begin turns a question into a turn and reports what it took.
 //
 // The context is the caller's so that stopping a model stops the request and not
@@ -612,6 +634,31 @@ func (s *Session) Ready() error {
 // thing that will hold them is a separate concern, so this returns what a caller needs
 // to start one and says nothing about what it will carry.
 func (s *Session) Begin(ctx context.Context, question string, level int) (context.Context, error) {
+	return s.begin(ctx, question, level, true)
+}
+
+// BeginSilent is Begin for a question the reader never typed.
+//
+// The startup hello is the one caller: its text is sent to the model so it knows
+// what to greet about, but it is an instruction this session wrote to itself, not a
+// line the reader submitted, and the log is a record of what the reader and the
+// model said to each other. Writing the hello's own instruction into it as a
+// question row would misrepresent it as something the reader typed. Everything
+// else Begin does - checking readiness, moving the session to StateThinking - still
+// happens, so the turn that follows looks like any other to the rest of the
+// session; only the row that would have named the question is left out. The reply
+// still reaches the log normally, through Deliver, because Deliver does not
+// re-derive anything from the question it is answering.
+func (s *Session) BeginSilent(ctx context.Context, question string, level int) (context.Context, error) {
+	return s.begin(ctx, question, level, false)
+}
+
+// begin is the shared body of Begin and BeginSilent, differing only in whether the
+// question itself becomes a row. Keeping one implementation behind both exported
+// names is what keeps the readiness check and the state transition from drifting
+// apart between a turn that is shown and one that is not - the two should behave
+// identically except for the one row Begin's own doc comment describes.
+func (s *Session) begin(ctx context.Context, question string, level int, record bool) (context.Context, error) {
 	if err := s.Ready(); err != nil {
 		return nil, err
 	}
@@ -619,12 +666,14 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 		return nil, ErrNoQuestion
 	}
 
-	s.log.Append(Row{
-		Kind:  KindQuestion,
-		Level: level,
-		Text:  question,
-		Spans: []Span{{Start: 0, End: len(question), Role: RoleEmphasis}},
-	})
+	if record {
+		s.log.Append(Row{
+			Kind:  KindQuestion,
+			Level: level,
+			Text:  question,
+			Spans: []Span{{Start: 0, End: len(question), Role: RoleEmphasis}},
+		})
+	}
 
 	s.SetState(StateThinking, "")
 	_ = ctx

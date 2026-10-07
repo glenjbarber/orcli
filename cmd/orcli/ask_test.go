@@ -56,7 +56,7 @@ func TestAskSendsTheQuestionAlone(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "a question", 0); err != nil {
+	if err := a(context.Background(), "a question", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestAskRunsAToolCallAndReplays(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "do something", 0); err != nil {
+	if err := a(context.Background(), "do something", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestAskStopsAfterTooManyToolRounds(t *testing.T) {
 	fake := &fakeChat{rounds: rounds}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "loop forever", 0); err != nil {
+	if err := a(context.Background(), "loop forever", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestIntroductionCarriesAgentsMD(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "hi", 0); err != nil {
+	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -210,7 +210,7 @@ func TestNoIntroductionWithoutAgentsMD(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "hi", 0); err != nil {
+	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), "hi", 0); err != nil {
+	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -436,6 +436,11 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 // question, carries the same capability message, AGENTS.md introduction, and
 // documentation listing a reader's own question would, so the model answering it
 // has everything it needs to actually introduce the session rather than guess.
+//
+// It is sent silent, the same way main.go wires it through tui.Start, so this also
+// covers the reason that call exists: the hello's own instruction text must reach
+// the model but never appear as a row in the log, while the model's reply - the
+// actual greeting - lands in the log exactly as a normal turn's reply would.
 func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	if strings.TrimSpace(helloQuestion) == "" {
 		t.Fatal("helloQuestion is empty")
@@ -451,7 +456,7 @@ func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	}}
 
 	a := ask(s, fake, "", nil, nil)
-	if err := a(context.Background(), helloQuestion, 0); err != nil {
+	if err := a(context.Background(), helloQuestion, 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
@@ -464,5 +469,10 @@ func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	rows := s.Log().Rows()
 	if got := rows[len(rows)-2].Text; got != "Hi, I'm orcli." {
 		t.Errorf("the delivered reply is %q, want the hello's own reply", got)
+	}
+	for _, row := range rows {
+		if row.Text == helloQuestion {
+			t.Errorf("the hello's own instruction text appeared as a log row: %+v, want only its reply visible", row)
+		}
 	}
 }
