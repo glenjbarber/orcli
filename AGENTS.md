@@ -91,10 +91,11 @@ bmake clean        remove staged/bin/
 build output and never touches `worktrees/`, which holds checkouts of this
 repository.
 
-Output goes to `staged/bin/`, worktrees to `worktrees/`, and both are ignored.
+Output goes to `staged/bin/`, which is ignored.
+New worktrees sit outside this repository, at `/Users/gjb/Documents/work/orcli-worktrees/<type>-<name>`.
 Never write a build product beside a source file.
 
-Worktrees are named `{feature,bug,security}/{three-word-summary}`.
+Worktrees are named `<type>-<name>`, for example `docs-session-implementation-note`.
 
 ## Testing
 
