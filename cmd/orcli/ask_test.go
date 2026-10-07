@@ -15,13 +15,18 @@ import (
 // records every request it was handed - the seam chatClient exists for, since
 // *openrouter.Client's base URL cannot be pointed at a test server from this package.
 type fakeChat struct {
-	rounds [][]openrouter.Event
-	seen   []openrouter.Request
+	rounds          [][]openrouter.Event
+	seen            []openrouter.Request
+	calls           int
+	discardRequests bool
 }
 
 func (f *fakeChat) Chat(_ context.Context, req openrouter.Request, onEvent func(openrouter.Event)) error {
-	f.seen = append(f.seen, req)
-	round := len(f.seen) - 1
+	if !f.discardRequests {
+		f.seen = append(f.seen, req)
+	}
+	round := f.calls
+	f.calls++
 	if round >= len(f.rounds) {
 		onEvent(openrouter.Event{Kind: openrouter.EventFinish, Reason: "stop", Finished: true})
 		return nil
@@ -142,15 +147,15 @@ func TestAskStopsAfterTooManyToolRounds(t *testing.T) {
 	for i := range rounds {
 		rounds[i] = toolCallEvents
 	}
-	fake := &fakeChat{rounds: rounds}
+	fake := &fakeChat{rounds: rounds, discardRequests: true}
 
 	a := ask(s, fake, "", nil)
 	if err := a(context.Background(), "loop forever", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 
-	if len(fake.seen) != maxToolRounds {
-		t.Errorf("saw %d requests, want exactly maxToolRounds (%d)", len(fake.seen), maxToolRounds)
+	if fake.calls != maxToolRounds {
+		t.Errorf("saw %d requests, want exactly maxToolRounds (%d)", fake.calls, maxToolRounds)
 	}
 	state, _ := s.State()
 	if state != tui.StateIdle {
