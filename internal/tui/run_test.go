@@ -103,7 +103,7 @@ func TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean(t *testing.T) {
 	done := make(chan struct{})
 
 	var asked []string
-	ask := func(_ context.Context, question string, level int) error {
+	ask := func(_ context.Context, question string, level int, _ bool) error {
 		asked = append(asked, question)
 		s.Deliver("ok", level)
 		if len(asked) == 2 {
@@ -113,7 +113,7 @@ func TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean(t *testing.T) {
 	}
 
 	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
-	l.start(context.Background(), "the first question")
+	l.start(context.Background(), "the first question", false)
 
 	select {
 	case <-done:
@@ -142,13 +142,13 @@ func TestStartDoesNotDrainTheQueueAfterAFailedTurn(t *testing.T) {
 	s.Enqueue("should not be sent")
 
 	calls := 0
-	ask := func(_ context.Context, _ string, _ int) error {
+	ask := func(_ context.Context, _ string, _ int, _ bool) error {
 		calls++
 		return errFailedTurn
 	}
 
 	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
-	l.start(context.Background(), "the first question")
+	l.start(context.Background(), "the first question", false)
 	if err := l.group.Close(); err != nil {
 		t.Fatalf("group.Close: %v", err)
 	}

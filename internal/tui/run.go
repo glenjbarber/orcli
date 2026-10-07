@@ -714,7 +714,7 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 		// comment flags rather than one settled by a design record: there is no
 		// existing precedent in this tree for when a queued message should fire.
 		if next, ok := l.session.Drain(); ok {
-			l.start(ctx, next)
+			l.start(ctx, next, false)
 		}
 	}()
 }
