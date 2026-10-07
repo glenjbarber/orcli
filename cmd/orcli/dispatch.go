@@ -93,6 +93,12 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"begin": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.begin(args)
 		},
+		"save": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.save(args)
+		},
+		"load": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.load(args)
+		},
 	}
 	return d
 }
