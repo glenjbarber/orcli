@@ -52,6 +52,13 @@ type dispatcher struct {
 	before  cloudflare.Record
 	existed bool
 
+	// worker is the session /begin most recently opened, forked off the calling
+	// session rather than replacing it. There is no pane set in this tree yet (see
+	// staged/adr-0000032 and staged/adr-0000047), so this one field is the whole of
+	// what the dispatcher keeps of it; a second /begin replaces it rather than
+	// adding to a set that does not exist.
+	worker *tui.Session
+
 	// client is the API client, built on first use, and newClient is what builds it.
 	// It is a field rather than a package variable so two dispatchers in one test run
 	// cannot reach each other's transport.
@@ -79,6 +86,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		},
 		"quit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return tui.Result{Quit: true}, nil
+		},
+		"begin": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.begin(args)
 		},
 	}
 	return d
