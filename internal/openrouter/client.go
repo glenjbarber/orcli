@@ -93,9 +93,12 @@ func New(apiKey string) *Client {
 // tool call is never retried, since the reply was paid for and the text arriving
 // before a cut is kept rather than taken back.
 //
-// A failure carrying an HTTP status is not retried. The status is the endpoint
-// refusing the request rather than an upstream stalling behind it, and a second
-// request cannot satisfy a rejected credential or a malformed request.
+// A failure carrying an HTTP status is not retried, with one exception: 502,
+// 503, and 504 are the gateway or the upstream behind it stalling rather than
+// the endpoint refusing the request, and are retried the same as an
+// undelivered stream. Every other status - 401, 403, 429 included - is the
+// endpoint answering the request it was sent, and a second request cannot
+// satisfy a rejected credential or a malformed one.
 //
 // Exactly one [EventFinish] is delivered per call, whichever way it ends. The
 // stream parser stays silent about a failure it will be retried over, which means
@@ -111,7 +114,7 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 
 	waits := retryWaits(retryBound)
 
-	var last *undeliveredError
+	var last error
 	for attempt := range retryBound {
 		if attempt > 0 {
 			if err := pause(ctx, waits[attempt-1]); err != nil {
@@ -132,10 +135,15 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		if resp.StatusCode != http.StatusOK {
 			err := boundedError(c, resp)
 			resp.Body.Close()
+			if retryableStatus(resp.StatusCode) {
+				last = err
+				continue
+			}
 			onEvent(Event{Kind: EventError, Err: err})
 			return nil
 		}
 
+		var undelivered *undeliveredError
 		err = c.stream(ctx, resp.Body, onEvent)
 		resp.Body.Close()
 
@@ -147,7 +155,8 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 			// attempt at a request the reader abandoned is one they did not ask
 			// for.
 			return err
-		case errors.As(err, &last):
+		case errors.As(err, &undelivered):
+			last = err
 			continue
 		default:
 			return nil
@@ -160,6 +169,23 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 	onEvent(Event{Kind: EventError, Err: last})
 	onEvent(Event{Kind: EventFinish, Finished: false})
 	return nil
+}
+
+// retryableStatus reports whether a non-200 status is the gateway or the
+// upstream behind it stalling, rather than the endpoint refusing the
+// request.
+//
+// Only 502, 503, and 504 qualify - the three shapes of "unavailable right
+// now" that a second attempt with backoff can plausibly outlast. Every
+// other status, 401/403/429 included, is the endpoint's own answer to the
+// request it was sent, which a second attempt cannot change.
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // retryWaits returns the pause preceding each attempt after the first.
