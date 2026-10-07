@@ -128,13 +128,13 @@ func TestEveryFieldIsOneCharacter(t *testing.T) {
 func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
 	var s Status
 	s[fieldCwd] = "."
-	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
+	rows := []Row{{Text: "orcli, a log with a frame around it"}, {Text: "the newest row"}}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s}, rows, Palette{})
 	got := simulationText(screen)
 	if !strings.Contains(got, "the newest row") {
 		t.Errorf("the newest log row is not on the screen:\n%q", got)
 	}
-	if !strings.Contains(got, "orcli, a log and nothing else yet") {
+	if !strings.Contains(got, "orcli, a log with a frame around it") {
 		t.Errorf("the oldest log row is not on the screen:\n%q", got)
 	}
 }
