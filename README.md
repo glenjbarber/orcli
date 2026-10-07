@@ -16,6 +16,11 @@
 
 A terminal client for the [OpenRouter.ai](https://openrouter.ai) API.
 
+`orcli` is the replacement for [`openrouter-cli`](https://github.com/glenjbarber/openrouter-cli),
+informed by lessons learned while building that project. The earlier tool and
+its history are documented in its [upstream repository](https://github.com/glenjbarber/openrouter-cli);
+this repository documents the replacement and its design.
+
 `orcli` is built around one substantial feature: an interactive, full-screen chat
 interface in the manner of Codex, ChatGPT, Claude, and Perplexity. Around it
 sits a thin surface of non-interactive commands (`version`, `help`, and the flag
