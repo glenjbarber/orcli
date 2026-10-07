@@ -374,6 +374,57 @@ func TestTheFileDecidesWhatTheFlagsDoNot(t *testing.T) {
 	})
 }
 
+// TestSessionReportsTheConfiguredBreakInterval covers the default, read from the
+// configuration file's own default rather than from a flag.
+func TestSessionReportsTheConfiguredBreakInterval(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "break          every 22m, bell off") {
+			t.Errorf("the report does not carry the default break interval:\n%s", stdout)
+		}
+	})
+}
+
+// TestBreakIntervalFlagOverridesTheFile covers the one exception to
+// TestTheFileDecidesWhatTheFlagsDoNot: --break-interval is a figure, not a
+// toggle, and a reader who passes one means it literally rather than meaning
+// "at least as much as the file already says."
+func TestBreakIntervalFlagOverridesTheFile(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k","break_interval_minutes":10}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir(), "--break-interval", "5", "--break-bell")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "break          every 5m, bell on") {
+			t.Errorf("the report does not show the flag's figure:\n%s", stdout)
+		}
+	})
+}
+
+// TestANegativeBreakIntervalIsRefusedByName covers the same rule the
+// configuration file's own break_interval_minutes is held to: a negative
+// figure is reported rather than silently floored.
+func TestANegativeBreakIntervalIsRefusedByName(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		_, _, err := runIn(t, false, "--dir", t.TempDir(), "--break-interval", "-5")
+		if err == nil {
+			t.Fatal("run returned nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "break-interval") {
+			t.Errorf("the refusal is %q, want it to name --break-interval", err)
+		}
+	})
+}
+
 // TestAFieldWithNoValueIsADashNotNothing covers the reporting rule. A report whose
 // shape shifts as values arrive is harder to read than one that holds its shape and
 // says dash.
