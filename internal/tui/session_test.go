@@ -94,6 +94,43 @@ func TestBeginEchoesTheQuestion(t *testing.T) {
 	}
 }
 
+// TestBeginSilentWritesNoRow covers BeginSilent's one difference from Begin: the
+// question it is given reaches the model (the turn still starts, with the same
+// readiness check and state transition Begin gives), but it never appears in the
+// log as a question row the reader would read as something they typed.
+func TestBeginSilentWritesNoRow(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	before := s.Log().Len()
+
+	if _, err := s.BeginSilent(context.Background(), "greet the reader", 0); err != nil {
+		t.Fatalf("BeginSilent: %v", err)
+	}
+
+	if got := s.Log().Len(); got != before {
+		t.Errorf("the log holds %d rows after BeginSilent, want %d: no question row should be written", got, before)
+	}
+	if s.state != StateThinking {
+		t.Errorf("session state = %v, want StateThinking: BeginSilent should still start the turn", s.state)
+	}
+}
+
+// TestBeginSilentRefusesLikeBegin covers that BeginSilent shares Begin's
+// readiness and empty-question checks rather than skipping them along with the
+// row: a silent turn is still a turn, and must fail exactly where a normal one
+// would.
+func TestBeginSilentRefusesLikeBegin(t *testing.T) {
+	s := New(Options{})
+
+	if _, err := s.BeginSilent(context.Background(), "greet the reader", 0); !errors.Is(err, ErrNoModel) {
+		t.Errorf("BeginSilent returned %v, want ErrNoModel", err)
+	}
+
+	s = New(Options{Model: "some/model"})
+	if _, err := s.BeginSilent(context.Background(), "", 0); !errors.Is(err, ErrNoQuestion) {
+		t.Errorf("BeginSilent returned %v, want ErrNoQuestion", err)
+	}
+}
+
 // TestThinkingBecomesWorkingOnTheFirstDelivery covers the transition that makes both
 // states worth having. Before the first delivery the reader has no evidence a turn
 // is running, and after it they do.

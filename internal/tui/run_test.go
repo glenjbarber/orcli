@@ -18,8 +18,10 @@ func TestStartSendsHelloAutomatically(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 
 	var asked string
-	ask := func(_ context.Context, question string, level int) error {
+	var gotSilent bool
+	ask := func(_ context.Context, question string, level int, silent bool) error {
 		asked = question
+		gotSilent = silent
 		s.Deliver("hello back", level)
 		return nil
 	}
@@ -33,10 +35,18 @@ func TestStartSendsHelloAutomatically(t *testing.T) {
 	if asked != "introduce yourself" {
 		t.Errorf("ask was called with %q, want the hello text", asked)
 	}
+	if !gotSilent {
+		t.Error("ask was called with silent = false, want the hello sent silent so its own text never becomes a log row")
+	}
 
 	rows := s.Log().Rows()
 	if got := rows[len(rows)-1].Text; got != "hello back" {
 		t.Errorf("last log row = %q, want the hello's own reply, written with no line submitted", got)
+	}
+	for _, row := range rows {
+		if row.Text == "introduce yourself" {
+			t.Errorf("the hello's own question text appeared as a log row: %+v, want only its reply visible", row)
+		}
 	}
 }
 
@@ -47,7 +57,7 @@ func TestStartSendsNoHelloWhenEmpty(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 
 	called := false
-	ask := func(context.Context, string, int) error {
+	ask := func(context.Context, string, int, bool) error {
 		called = true
 		return nil
 	}
