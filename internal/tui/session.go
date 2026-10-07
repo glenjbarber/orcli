@@ -237,6 +237,18 @@ type Session struct {
 	// time because it only reads this field while state is StateBreak.
 	breakEnd time.Time
 
+	// breakInput reports whether a key reached the session while the current
+	// break was showing. A reader who kept typing through the reminder has not
+	// taken the break, and TickBreak reads this to decide whether to say so
+	// rather than close out the break as if they had.
+	breakInput bool
+
+	// breakExtended reports whether this break has already been given its one
+	// second chance - the halved countdown TickBreak runs once, and only once,
+	// when breakInput is set. A reader still typing through that halved period
+	// gets no second halving; the break ends at its close regardless.
+	breakExtended bool
+
 	// preset is the name of the /level preset in force, or "" when none has been
 	// set. It is guarded by mu for the reason opts.Model is: /level runs on the
 	// input goroutine and a turn reads it on the request goroutine.
@@ -895,6 +907,8 @@ func (s *Session) StartBreak(now time.Time) {
 	s.state = StateBreak
 	s.detail = formatRemaining(breakDuration)
 	s.breakEnd = now.Add(breakDuration)
+	s.breakInput = false
+	s.breakExtended = false
 	s.mu.Unlock()
 
 	s.editor.Reset()
@@ -907,12 +921,36 @@ func (s *Session) StartBreak(now time.Time) {
 	})
 }
 
-// TickBreak advances a running break's countdown, or ends it once breakEnd
-// has passed.
+// NoteBreakActivity records that a key reached the session right now.
+//
+// It is a no-op outside a running break - nothing before or after one reads
+// breakInput - so every caller can report every key unconditionally rather
+// than first checking the state itself.
+func (s *Session) NoteBreakActivity() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == StateBreak {
+		s.breakInput = true
+	}
+}
+
+// TickBreak advances a running break's countdown, or closes it out once
+// breakEnd has passed.
 //
 // It is driven by the repaint tick rather than by a timer of its own, since
 // the frame already wakes on an interval and a second clock could disagree
 // with the first about when the break is over.
+//
+// A close has two shapes. Ordinarily the break just ends: state returns to
+// idle, lastBreak resets so the next one is a full BreakInterval away, and
+// the reader is told it ended. But a reader who kept typing through the
+// reminder (breakInput) has not taken the break, and saying it "ended" to
+// someone who never stopped would be telling them something that did not
+// happen. The first such close instead halves the remaining time and tries
+// once more, silently; only a second close - the halved period's own, which
+// gets no further halving regardless of whether typing continued through it
+// - resets lastBreak and ends the break, and even then without the "ended"
+// line if the reader was still typing at the close that ends it.
 func (s *Session) TickBreak(now time.Time) {
 	s.mu.Lock()
 	if s.state != StateBreak {
@@ -927,11 +965,32 @@ func (s *Session) TickBreak(now time.Time) {
 		return
 	}
 
+	if s.breakInput && !s.breakExtended {
+		s.breakExtended = true
+		s.breakInput = false
+		half := breakDuration / 2
+		s.breakEnd = now.Add(half)
+		s.detail = formatRemaining(half)
+		s.mu.Unlock()
+
+		s.log.Append(Row{
+			Kind:  KindNotice,
+			Level: 0,
+			Text:  "screen break: still there - one more minute, then this reminder lets go",
+			Spans: []Span{{Start: 0, End: len("screen break"), Role: RoleEmphasis}},
+		})
+		return
+	}
+
+	tookNoBreak := s.breakInput
 	s.state = StateIdle
 	s.detail = ""
 	s.lastBreak = now
 	s.mu.Unlock()
 
+	if tookNoBreak {
+		return
+	}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
