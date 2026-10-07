@@ -383,10 +383,10 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldMouse] = onOff(opts.Mouse, "on", "off")
 	s[fieldCopy] = onOff(false, "available", "none")
 	s[fieldBell] = onOff(opts.Bell, "on", "off")
-	s[fieldPane] = "main"
+	s[fieldPane] = l.session.Pane()
 	s[fieldPaneState] = l.session.PaneState()
 	s[fieldWorkers] = plural(len(l.session.Workers()), "worker", "workers")
-	s[fieldQueue] = plural(0, "prompt", "prompts")
+	s[fieldQueue] = plural(l.session.QueueLen(), "prompt", "prompts")
 	s[fieldHeld] = plural(log.Len(), "row", "rows")
 	s[fieldFolded] = plural(log.Folded(), "row", "rows")
 	s[fieldLevels] = plural(len(l.session.Levels()), "level", "levels")
@@ -703,6 +703,18 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 
 		if err != nil {
 			l.session.Notice(err.Error(), 0, RoleFailure)
+			return
+		}
+
+		// A queued prompt is sent only once the turn ahead of it has finished with
+		// no error, never after one that failed or was stopped. `/queue` is a
+		// follow-up on work that went well; chaining it onto a turn the reader
+		// just watched fail would send a second request behind a first one they
+		// may want to look at or retype first, which is a judgment call this
+		// comment flags rather than one settled by a design record: there is no
+		// existing precedent in this tree for when a queued message should fire.
+		if next, ok := l.session.Drain(); ok {
+			l.start(ctx, next, false)
 		}
 	}()
 }

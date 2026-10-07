@@ -97,11 +97,13 @@ func TestQuitIsTheOneResultThatAsksTheLoopToLeave(t *testing.T) {
 }
 
 // TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne covers the case a
-// reader meets on day one: the table names thirty commands and this build runs two.
+// reader meets on day one: the table names more commands than this build runs.
+// /search is used here as one still unbuilt; it is not the point of the test, only a
+// name this build does not yet have a handler for.
 func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
 
-	_, err := d.Run(context.Background(), "/copy 1")
+	_, err := d.Run(context.Background(), "/search 1")
 	if err == nil {
 		t.Fatal("a command this build does not run was accepted")
 	}
