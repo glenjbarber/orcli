@@ -100,8 +100,12 @@ func New(apiKey string) *Client {
 // endpoint answering the request it was sent, and a second request cannot
 // satisfy a rejected credential or a malformed one.
 //
-// Exactly one [EventFinish] is delivered per call, whichever way it ends. The
-// stream parser stays silent about a failure it will be retried over, which means
+// Exactly one [EventFinish] is delivered per call, whichever way it ends - a
+// transport error, a non-retried HTTP status, and a stopped backoff wait each
+// pair their [EventError] with one, the same as a stream that ran out of
+// retries does, so a caller driving state off EventFinish alone never waits
+// on a turn that has actually already stopped. The stream parser stays
+// silent about a failure it will be retried over, which means
 // an attempt that was retried reports nothing and the reader is told the cause
 // and the unfinished turn here, once the attempts are exhausted.
 func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) error {
@@ -119,6 +123,7 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		if attempt > 0 {
 			if err := pause(ctx, waits[attempt-1]); err != nil {
 				onEvent(Event{Kind: EventError, Err: err})
+				onEvent(Event{Kind: EventFinish, Finished: false})
 				return nil
 			}
 		}
@@ -129,6 +134,7 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		resp, err := c.post(ctx, req)
 		if err != nil {
 			onEvent(Event{Kind: EventError, Err: err})
+			onEvent(Event{Kind: EventFinish, Finished: false})
 			return nil
 		}
 
@@ -140,6 +146,7 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 				continue
 			}
 			onEvent(Event{Kind: EventError, Err: err})
+			onEvent(Event{Kind: EventFinish, Finished: false})
 			return nil
 		}
 

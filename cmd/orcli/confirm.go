@@ -58,15 +58,11 @@ func confirmModel(s *tui.Session) func(string, bool) {
 		}
 		written = true
 
-		// A silent turn - the startup hello - must leave no row behind, the same
-		// rule the turn's own question and reply are held to. Confirmation still
-		// happens, since the file still needs the model the endpoint just proved
-		// out, but the notices explaining it are swapped for a no-op so the hello
-		// stays exactly as invisible as the rest of it.
+		// Unlike the HELO's own synthetic question, this notice is not silenced.
+		// Glen confirmed (2026-10-07) that startup activity - this write included
+		// - should be visible rather than leaving him wondering what happened, the
+		// same reasoning that un-silenced the HELO's reply itself.
 		notice := s.Notice
-		if silent {
-			notice = s.NoticeSilent
-		}
 
 		path, err := configPath()
 		if err != nil {

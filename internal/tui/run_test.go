@@ -11,15 +11,15 @@ import (
 // errFailedTurn is a stand-in failure for TestStartDoesNotDrainTheQueueAfterAFailedTurn.
 var errFailedTurn = errors.New("the turn failed")
 
-// TestStartSendsHelloAutomatically covers the startup hello at the level Start's
+// TestStartSendsHELOAutomatically covers the startup HELO at the level Start's
 // own event loop runs it at, without opening a real terminal screen: a test binary
 // has none, and driving tview's own Application through a fake screen is more than
 // this hook needs proving. interfaceLoop.start is the exact call Start makes for a
-// non-empty hello, on the same group a reader's own line would be started on, so
+// non-empty HELO, on the same group a reader's own line would be started on, so
 // calling it directly here exercises the real mechanism - the goroutine, the
 // group accounting, and the session writes - with no key pressed and no line
 // runner consulted at all.
-func TestStartSendsHelloAutomatically(t *testing.T) {
+func TestStartSendsHELOAutomatically(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 
 	var asked string
@@ -27,38 +27,38 @@ func TestStartSendsHelloAutomatically(t *testing.T) {
 	ask := func(_ context.Context, question string, level int, silent bool) error {
 		asked = question
 		gotSilent = silent
-		s.Deliver("hello back", level)
+		s.Deliver("HELO back", level)
 		return nil
 	}
 
 	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
-	maybeSendHello(context.Background(), l, "introduce yourself")
+	maybeSendHELO(context.Background(), l, "introduce yourself")
 	if err := l.group.Close(); err != nil {
 		t.Fatalf("group.Close: %v", err)
 	}
 
 	if asked != "introduce yourself" {
-		t.Errorf("ask was called with %q, want the hello text", asked)
+		t.Errorf("ask was called with %q, want the HELO text", asked)
 	}
 	if !gotSilent {
-		t.Error("ask was called with silent = false, want the hello sent silent so its own text never becomes a log row")
+		t.Error("ask was called with silent = false, want the HELO sent silent so its own text never becomes a log row")
 	}
 
 	rows := s.Log().Rows()
-	if got := rows[len(rows)-1].Text; got != "hello back" {
-		t.Errorf("last log row = %q, want the hello's own reply, written with no line submitted", got)
+	if got := rows[len(rows)-1].Text; got != "HELO back" {
+		t.Errorf("last log row = %q, want the HELO's own reply, written with no line submitted", got)
 	}
 	for _, row := range rows {
 		if row.Text == "introduce yourself" {
-			t.Errorf("the hello's own question text appeared as a log row: %+v, want only its reply visible", row)
+			t.Errorf("the HELO's own question text appeared as a log row: %+v, want only its reply visible", row)
 		}
 	}
 }
 
-// TestStartSendsNoHelloWhenEmpty covers the other side: an empty hello is a
-// caller's choice not to greet, and maybeSendHello - the exact call Start makes -
+// TestStartSendsNoHELOWhenEmpty covers the other side: an empty HELO is a
+// caller's choice not to greet, and maybeSendHELO - the exact call Start makes -
 // starts no turn at all when it is given one.
-func TestStartSendsNoHelloWhenEmpty(t *testing.T) {
+func TestStartSendsNoHELOWhenEmpty(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 
 	called := false
@@ -68,22 +68,22 @@ func TestStartSendsNoHelloWhenEmpty(t *testing.T) {
 	}
 
 	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
-	maybeSendHello(context.Background(), l, "")
+	maybeSendHELO(context.Background(), l, "")
 	_ = l.group.Close()
 
 	if called {
-		t.Error("ask was called despite an empty hello")
+		t.Error("ask was called despite an empty HELO")
 	}
 }
 
-// TestMaybeSendHelloSkipsWithNoAsk covers a loop built with no ask at all - a
+// TestMaybeSendHELOSkipsWithNoAsk covers a loop built with no ask at all - a
 // session with no model configured, say - sending nothing rather than calling a
 // nil function.
-func TestMaybeSendHelloSkipsWithNoAsk(t *testing.T) {
+func TestMaybeSendHELOSkipsWithNoAsk(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 	l := &interfaceLoop{session: s, group: newGroup()}
 
-	maybeSendHello(context.Background(), l, "introduce yourself")
+	maybeSendHELO(context.Background(), l, "introduce yourself")
 	_ = l.group.Close()
 }
 
@@ -166,7 +166,7 @@ func TestStartDoesNotDrainTheQueueAfterAFailedTurn(t *testing.T) {
 // l.runner (cmd/orcli/dispatch.go's Run), which has always answered any non-command
 // line with an empty Result and no error, so the line was discarded with nothing
 // written and nothing sent. submit now tells the two apart itself and sends a
-// plain question straight to l.ask, the way the hello already does.
+// plain question straight to l.ask, the way the HELO already does.
 func TestSubmitSendsAPlainQuestionToTheModel(t *testing.T) {
 	s := New(Options{Model: "some/model"})
 

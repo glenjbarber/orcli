@@ -77,19 +77,22 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 		notice := s.Notice
 		finishedFn := s.Finished
 		if silent {
-			// The hello is the only caller that passes silent: its text instructs the
+			// The HELO is the only caller that passes silent: its text instructs the
 			// model, it is not something the reader typed, and BeginSilent is the
 			// primitive that sends it to the model without writing it into the log as
-			// a question row. See BeginSilent's own doc comment for why. The reply
-			// side has to be kept just as invisible, or the model's own answer to a
-			// question the reader never asked would still surface as a row a few
-			// seconds later - that was the bug this silences: Deliver, Notice and
-			// Finished all swap to their *Silent counterparts, which make the same
-			// state transitions without ever appending a row.
+			// a question row. See BeginSilent's own doc comment for why.
+			//
+			// The reply is not silenced the same way. A prior version of this code
+			// swapped Deliver, Notice and Finished to their *Silent counterparts too,
+			// on the theory that the model's own answer to a question the reader
+			// never asked should not surface as a row - but that directly contradicts
+			// maybeSendHELO's own doc comment, which promises the greeting "lands in
+			// the log, the same way any other turn's reply does," and Glen confirmed
+			// (2026-10-07) that the visible greeting is what he actually wants: a
+			// HELO whose reply nobody ever sees is a HELO that might as well not have
+			// run. Only begin stays silent; the question text is synthetic and still
+			// should not show as a fake question row, but the answer is real.
 			begin = s.BeginSilent
-			deliver = s.DeliverSilent
-			notice = s.NoticeSilent
-			finishedFn = s.FinishedSilent
 		}
 		turnCtx, err := begin(ctx, question, level)
 		if err != nil {
@@ -340,8 +343,10 @@ func introduction(dir string) string {
 	return string(text)
 }
 
-// helloQuestion is the question a session asks itself once, at the very start, so
+// heloQuestion is the question a session asks itself once, at the very start, so
 // the reader's screen carries an introduction before they have typed anything.
+// Glen named this exchange the HELO, canonically, after SMTP's own greeting
+// command (2026-10-07).
 //
 // It is sent through the same ask closure as any question a reader types, which is
 // what lets it see the same capability message, the same AGENTS.md introduction,
@@ -349,9 +354,9 @@ func introduction(dir string) string {
 // built its own greeting would be a second thing to keep in step with those three.
 // The documentation listing reaching the model this way, unchanged, is what lets the
 // greeting stay silent about doc/ and staged/ below: the names are already in its
-// context the moment the reader does ask, so the hello does not need to recite them
+// context the moment the reader does ask, so the HELO does not need to recite them
 // first to make that true later.
-const helloQuestion = "This is the start of the session, before the reader has " +
+const heloQuestion = "This is the start of the session, before the reader has " +
 	"typed anything. Greet them briefly: say you are orcli and summarize in a " +
 	"sentence or two what this session has configured from the capability " +
 	"message above."

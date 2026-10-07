@@ -237,8 +237,43 @@ func TestChatDoesNotRetryAnHTTPStatus(t *testing.T) {
 	if !mentions(events, "429") {
 		t.Errorf("the status did not reach the reader: %v", events)
 	}
-	if got := count(events, EventFinish); got != 0 {
-		t.Errorf("%d finish events, want 0: a refused request is not a cut stream", got)
+	finish, ok := last(events, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want exactly one: a caller driving state off EventFinish must not wait on this turn forever")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: a refused request is not a completed reply")
+	}
+	if got := count(events, EventFinish); got != 1 {
+		t.Errorf("%d finish events, want exactly 1", got)
+	}
+}
+
+// TestChatSendsOneFinishOnATransportError covers the other branch that used
+// to return before ever sending one: a dial failure, a DNS error, anything
+// http.Client.Do itself fails on rather than a response with a status on it.
+// A caller driving state off EventFinish must not be left waiting on a turn
+// that already stopped here just as much as on any other failure shape.
+func TestChatSendsOneFinishOnATransportError(t *testing.T) {
+	c := New("sk-or-v1-retry-test")
+	c.http = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	})}
+
+	events := retryEvents(t, c)
+
+	if !mentions(events, "connection refused") {
+		t.Errorf("the transport error did not reach the reader: %v", events)
+	}
+	finish, ok := last(events, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want exactly one")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: the request never reached the endpoint")
+	}
+	if got := count(events, EventFinish); got != 1 {
+		t.Errorf("%d finish events, want exactly 1", got)
 	}
 }
 
