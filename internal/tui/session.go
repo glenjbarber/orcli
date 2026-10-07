@@ -314,6 +314,58 @@ func (s *Session) SetModel(model string) error {
 	return nil
 }
 
+// SetBell changes whether the terminal bell is rung when a reply finishes
+// arriving.
+//
+// It is a method rather than a caller reaching into the options, for the reason
+// SetModel gives: the frame's status bar reads Bell off a copy of the options taken
+// at draw time, so a command that changed the field some other way would leave the
+// bar answering a question nobody asked. There is nothing to refuse here the way an
+// empty model is refused by SetModel, since both true and false are states a reader
+// might want.
+func (s *Session) SetBell(on bool) {
+	s.mu.Lock()
+	s.opts.Bell = on
+	s.mu.Unlock()
+}
+
+// SetMouse changes whether mouse reporting is on.
+//
+// It exists for the same reason SetBell does, and /pause calls it as well as
+// /mouse: a screen held still for the reader is a screen where the wheel ought to
+// do something different, which is the whole of what /pause's own summary asks for
+// alongside holding the log.
+func (s *Session) SetMouse(on bool) {
+	s.mu.Lock()
+	s.opts.Mouse = on
+	s.mu.Unlock()
+}
+
+// SetCognito changes whether nothing is to be recorded.
+//
+// It is a method for the same reason SetBell is one: Cognito is read off a copy of
+// the options the status bar takes at draw time, and a write that bypassed this
+// would leave that copy answering a question the reader already changed the answer
+// to.
+func (s *Session) SetCognito(on bool) {
+	s.mu.Lock()
+	s.opts.Cognito = on
+	s.mu.Unlock()
+}
+
+// SetColor changes whether colour output is on.
+//
+// The session's own copy is what the status bar and the palette read, so /color has
+// to move this as well as whatever it writes to the configuration file: a choice
+// written to disk and not to the running session is a choice the reader does not see
+// until they restart, which is not what "save the choice" promises alongside taking
+// effect now.
+func (s *Session) SetColor(on bool) {
+	s.mu.Lock()
+	s.opts.Color = on
+	s.mu.Unlock()
+}
+
 // SetApproval changes the mode a tool call is settled under.
 //
 // It is a method for the same reason SetModel is: `/approve` is read by a turn in

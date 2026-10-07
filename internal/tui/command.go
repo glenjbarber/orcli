@@ -124,8 +124,12 @@ func init() {
 			Hidden:  []string{"colour"},
 		},
 		{
-			Name:    "cognito",
+			// Renamed from /cognito, confirmed by Glen on 2026-10-07; /cognito is
+			// kept as a hidden alias on the same grounds /colour is kept for
+			// /color, above.
+			Name:    "stealth",
 			Summary: "record nothing, on or off",
+			Hidden:  []string{"cognito"},
 		},
 		{
 			Name:    "verbosity",
