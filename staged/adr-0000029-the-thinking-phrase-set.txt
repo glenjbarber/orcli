@@ -1,6 +1,6 @@
 # 0000029 The thinking phrase set
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 17 in `QUESTIONS.md`
 
@@ -68,3 +68,7 @@ some other rule. Not asked by question 17 and not answered here.
 
 Nothing in the tree has changed. There is no thinking-phrase display in the
 tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

@@ -1,6 +1,6 @@
 # 0000028 Tool icons are per category, with a running state and a result state
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 16 in `QUESTIONS.md`
 
@@ -77,3 +77,7 @@ check or the red x either.
 
 Nothing in the tree has changed. There is no tool line drawn in the tree for
 the new interface.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000040, which replaces this record's icon scheme with glyphs, running words, and plain-text results.

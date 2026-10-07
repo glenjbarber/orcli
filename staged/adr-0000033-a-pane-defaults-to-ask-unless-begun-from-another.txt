@@ -80,3 +80,7 @@ Nothing from question 19 that 0000032 had not already settled.
 
 Nothing in the tree has changed. There is no pane set and no permissions
 ledger in the tree.
+
+## See also
+
+Supersedes nothing; not superseded. See also adr-0000032, which introduces /begin and the inheritance this record relies on (adr-0000032 itself is superseded by `UI-redesign.md`).

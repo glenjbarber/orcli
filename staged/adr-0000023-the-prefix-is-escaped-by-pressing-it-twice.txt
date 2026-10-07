@@ -1,6 +1,6 @@
 # 0000023 The prefix is escaped by pressing it twice
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 11 in `QUESTIONS.md`
 
@@ -58,3 +58,7 @@ TODO, separate from this record.
 ## Notes
 
 Nothing in the tree has changed. There is no prefix key read in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

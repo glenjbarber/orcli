@@ -1,0 +1,35 @@
+# 0000046 Status-bar collisions with faded left text
+
+- Status: proposed
+- Date: 2026-10-07
+- Supersedes: nothing
+
+## Context
+
+The accepted UI redesign leaves detailed status-bar behavior open. The status bar has two halves, and their items can run out of room when the terminal narrows. A prior TODO proposed dropping fields in a priority order. Glen rejected that proposal and specified overlap with a visual indication of which text is behind.
+
+## Decision
+
+**When the two halves of status bar 2 collide for space, their items overlap.** They are not dropped according to a shed order.
+
+**Text on the left-most items visibly fades in font color to indicate that it is "behind" the other half.**
+
+This record establishes the collision and fading behavior only. Field membership and order remain separate design details.
+
+## Consequences
+
+Status-bar items remain present in a narrow layout. The fading treatment indicates which text is behind the other half when the halves overlap. The earlier field-shed proposal is not authoritative.
+
+## References
+
+- The accepted UI redesign leaves detailed status-bar behavior open.
+- The updated status-bar TODO records the same collision and fading behavior.
+- The legacy orcli ADR-0000041 is superseded by the accepted UI redesign. This record does not reinstate it.
+
+## Notes
+
+This proposal records the design decision only. It does not claim implementation.
+
+## See also
+
+Supersedes nothing. See also adr-0000016, the current, unsuperseded record for the shed order this collision/fade treatment bears on, and adr-0000021 and adr-0000041, both superseded by `UI-redesign.md`, for the fields this record does not reinstate.

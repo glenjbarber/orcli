@@ -81,8 +81,11 @@ bar already shows.
 
 ## What this does not settle
 
-The exact wording and ordering of the capability list is open; this record
-settles that one is sent and what it is assembled from, not its prose.
+The exact wording and ordering of the capability list was open as of this
+record's writing. `ad87a83` ("Implement adr-0000042's capability message")
+has since settled it in `cmd/orcli/ask.go`'s `capabilities()`:
+`staged/design-minimal-capability-message.txt` has the floor argument and
+its own note on what the implementation chose.
 
 Whether `internal/tools` is wired into the request as actual tool-call
 schemas, and what that costs in the response shape, is a separate decision
@@ -97,3 +100,7 @@ rather than discover by asking.
 
 Nothing in the tree has been changed in writing this. `ask.go`'s doc comment
 is quoted above as it exists, not as amended.
+
+## See also
+
+Supersedes nothing; not superseded. See also adr-0000044, which corrects the introduction file this record's implementation used, and adr-0000043, the companion record about reporting a change's size.

@@ -69,3 +69,7 @@ Not asked by question 18 and not answered here.
 
 Nothing in the tree has changed. There is no permissions database in the
 tree.
+
+## See also
+
+Supersedes nothing; not superseded. See also adr-0000031, which deduplicates the ledger this record settles, and adr-0000033, which uses this ledger's defaults.

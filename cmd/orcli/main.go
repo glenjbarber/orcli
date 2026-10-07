@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/openrouter"
@@ -65,13 +66,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fs.Usage = func() {}
 
 	var (
-		showVersion = fs.Bool("version", false, "print the version and stop")
-		showHelp    = fs.Bool("help", false, "print the usage and stop")
-		bootstrap   = fs.String("bootstrap", "", "read a document from this path")
-		mouse       = fs.Bool("mouse", false, "report the mouse")
-		bell        = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
-		color       = fs.Bool("color", false, "write colour")
-		dir         = fs.String("dir", "", "run in this directory rather than the current directory")
+		showVersion     = fs.Bool("version", false, "print the version and stop")
+		showHelp        = fs.Bool("help", false, "print the usage and stop")
+		bootstrap       = fs.String("bootstrap", "", "read a document from this path")
+		mouse           = fs.Bool("mouse", false, "report the mouse")
+		bell            = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
+		breakInterval   = fs.Int("break-interval", 0, "minutes before a screen-break reminder (0 uses the configured default)")
+		breakBell       = fs.Bool("break-bell", false, "ring the terminal bell when a screen break starts")
+		color           = fs.Bool("color", false, "write colour")
+		paneActiveColor = fs.String("pane-active-color", "", "#rrggbb for a pane with a running worker (default "+config.DefaultPaneActiveColor+")")
+		paneDoneColor   = fs.String("pane-done-color", "", "#rrggbb for a pane whose worker just finished (default "+config.DefaultPaneDoneColor+")")
+		dir             = fs.String("dir", "", "run in this directory rather than the current directory")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -135,6 +140,29 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return err
 	}
 
+	// A negative figure has no reading as an interval, on the same grounds as
+	// the configuration file's own break_interval_minutes. Zero is not refused
+	// here: it means the flag was not given, and the configured figure, itself
+	// validated at Load, stands instead.
+	if *breakInterval < 0 {
+		return fmt.Errorf("--break-interval must be positive")
+	}
+
+	// A flag's colour is checked here, on the same grounds the configuration
+	// file's own PaneActiveColor/PaneDoneColor are checked at Load: a reader
+	// who mistyped one is told which flag and what shape it wanted, rather
+	// than finding the pane bar quietly uncoloured.
+	if err := checkPaneColorFlag("--pane-active-color", *paneActiveColor); err != nil {
+		return err
+	}
+	if err := checkPaneColorFlag("--pane-done-color", *paneDoneColor); err != nil {
+		return err
+	}
+	breakIntervalMinutes := cfg.BreakIntervalMinutes
+	if *breakInterval > 0 {
+		breakIntervalMinutes = *breakInterval
+	}
+
 	workDir := *dir
 	if workDir == "" {
 		if workDir, err = os.Getwd(); err != nil {
@@ -143,13 +171,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	s := session{
-		Config:     cfg,
-		Approval:   approval,
-		Bootstrap:  *bootstrap,
-		Mouse:      *mouse || cfg.Mouse,
-		Bell:       *bell || cfg.Bell,
-		Color:      *color || cfg.Color,
-		WorkingDir: workDir,
+		Config:               cfg,
+		Approval:             approval,
+		Bootstrap:            *bootstrap,
+		Mouse:                *mouse || cfg.Mouse,
+		Bell:                 *bell || cfg.Bell,
+		BreakIntervalMinutes: breakIntervalMinutes,
+		BreakBell:            *breakBell || cfg.BreakBell,
+		Color:                *color || cfg.Color,
+		PaneActiveColor:      firstNonEmpty(*paneActiveColor, cfg.PaneActiveColor),
+		PaneDoneColor:        firstNonEmpty(*paneDoneColor, cfg.PaneDoneColor),
+		WorkingDir:           workDir,
 	}
 
 	// A refusal is not a failure. A reader who does not want to approve a directory
@@ -181,14 +213,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 // It exists so the whole of startup is inspectable without a terminal, which is
 // what makes the wiring testable.
 type session struct {
-	Config     config.Config
-	Approval   config.Approval
-	HasTools   bool
-	Mouse      bool
-	Bell       bool
-	Color      bool
-	Bootstrap  string
-	WorkingDir string
+	Config               config.Config
+	Approval             config.Approval
+	HasTools             bool
+	Mouse                bool
+	Bell                 bool
+	BreakIntervalMinutes int
+	BreakBell            bool
+	Color                bool
+	PaneActiveColor      string
+	PaneDoneColor        string
+	Bootstrap            string
+	WorkingDir           string
 }
 
 // tuiSession builds the interface's own session from what startup resolved.
@@ -214,16 +250,56 @@ type session struct {
 // nothing with it.
 func (s session) tuiSession() *tui.Session {
 	opts := tui.Options{
-		APIKey:     s.Config.APIKey,
-		Model:      s.Config.Model,
-		Provider:   s.Config.Provider,
-		Approval:   tuiApproval(s.Approval),
-		WorkingDir: s.WorkingDir,
-		Color:      s.Color,
-		Bell:       s.Bell,
-		Mouse:      s.Mouse,
+		APIKey:        s.Config.APIKey,
+		Model:         s.Config.Model,
+		Provider:      s.Config.Provider,
+		Approval:      tuiApproval(s.Approval),
+		WorkingDir:    s.WorkingDir,
+		Color:         s.Color,
+		Bell:          s.Bell,
+		BreakInterval: time.Duration(s.BreakIntervalMinutes) * time.Minute,
+		BreakBell:     s.BreakBell,
+		Mouse:         s.Mouse,
+	}
+
+	// Each colour is parsed only if it is present and well-formed, which run
+	// has already checked for the flag and Load has already checked for the
+	// file. A colour that somehow still fails to parse is left nil rather than
+	// substituted for, which is the same "a pane with no opinion draws in
+	// chrome" fallback a session built with neither field set gets.
+	if rgb, ok := tui.RGBFromHex(s.PaneActiveColor); ok {
+		opts.PaneActiveColor = &rgb
+	}
+	if rgb, ok := tui.RGBFromHex(s.PaneDoneColor); ok {
+		opts.PaneDoneColor = &rgb
 	}
 	return tui.New(opts)
+}
+
+// firstNonEmpty returns a if it is not empty, and b otherwise.
+//
+// It is how a flag overrides the configuration file for a string setting: a
+// flag the reader did not pass parses to its zero value, which is the one
+// value that has to mean "nothing was said" rather than "the empty string was
+// chosen", since every setting this file reads named this way is a thing a
+// reader opts into rather than explicitly turns off with an empty value.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// checkPaneColorFlag refuses a flag value that is present but not `#rrggbb`,
+// naming the flag so a reader who mistyped one is told which.
+func checkPaneColorFlag(flag, value string) error {
+	if value == "" {
+		return nil
+	}
+	if _, ok := tui.RGBFromHex(value); !ok {
+		return fmt.Errorf("%s must be #rrggbb", flag)
+	}
+	return nil
 }
 
 // tuiApproval converts one approval mode to the other.
@@ -271,9 +347,19 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// The confirmation is wired here rather than in ask, since the writer belongs to
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
+	//
+	// The hello is only sent when canAsk(s) agrees a turn can be sent at all: a
+	// session with no model configured has nothing to greet with, and Begin would
+	// only refuse it and leave a failure notice as the first thing the reader sees.
+	hello := ""
+	if canAsk(s) {
+		hello = helloQuestion
+	}
+
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
+		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
+		hello,
 	)
 }
 
@@ -288,7 +374,10 @@ func printSession(w io.Writer, s session) {
 	fmt.Fprintf(w, "  tools          %s\n", enabled(s.HasTools))
 	fmt.Fprintf(w, "  mouse          %s\n", enabled(s.Mouse))
 	fmt.Fprintf(w, "  bell           %s\n", enabled(s.Bell))
+	fmt.Fprintf(w, "  break          every %dm, bell %s\n", s.BreakIntervalMinutes, enabled(s.BreakBell))
 	fmt.Fprintf(w, "  colour         %s\n", enabled(s.Color))
+	fmt.Fprintf(w, "  pane active    %s\n", orNone(s.PaneActiveColor))
+	fmt.Fprintf(w, "  pane done      %s\n", orNone(s.PaneDoneColor))
 	fmt.Fprintf(w, "  directory      %s\n", orNone(s.WorkingDir))
 	fmt.Fprintf(w, "  bootstrap      %s\n", orNone(s.Bootstrap))
 }
@@ -401,7 +490,11 @@ flags:
   --bootstrap PATH       read a document from PATH
   --mouse                report the mouse
   --bell                 ring the terminal bell when a reply arrives
+  --break-interval MIN   minutes before a screen-break reminder (default 22)
+  --break-bell           ring the terminal bell when a screen break starts
   --color                write colour
+  --pane-active-color #rrggbb   colour for a pane with a running worker
+  --pane-done-color #rrggbb     colour for a pane whose worker just finished
   --dir DIR              run in DIR rather than the current directory
 
 configuration:

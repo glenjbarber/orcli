@@ -83,3 +83,7 @@ not where it is written.
 
 Nothing in the tree has been changed in writing this. `writeFileTool.Run`'s
 byte-count message is quoted above as it exists today, not as amended.
+
+## See also
+
+Supersedes nothing; not superseded. See also adr-0000042, the companion record this one was written alongside.

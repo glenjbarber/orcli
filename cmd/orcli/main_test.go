@@ -374,6 +374,117 @@ func TestTheFileDecidesWhatTheFlagsDoNot(t *testing.T) {
 	})
 }
 
+// TestSessionReportsTheConfiguredBreakInterval covers the default, read from the
+// configuration file's own default rather than from a flag.
+func TestSessionReportsTheConfiguredBreakInterval(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "break          every 22m, bell off") {
+			t.Errorf("the report does not carry the default break interval:\n%s", stdout)
+		}
+	})
+}
+
+// TestBreakIntervalFlagOverridesTheFile covers the one exception to
+// TestTheFileDecidesWhatTheFlagsDoNot: --break-interval is a figure, not a
+// toggle, and a reader who passes one means it literally rather than meaning
+// "at least as much as the file already says."
+func TestBreakIntervalFlagOverridesTheFile(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k","break_interval_minutes":10}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir(), "--break-interval", "5", "--break-bell")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "break          every 5m, bell on") {
+			t.Errorf("the report does not show the flag's figure:\n%s", stdout)
+		}
+	})
+}
+
+// TestANegativeBreakIntervalIsRefusedByName covers the same rule the
+// configuration file's own break_interval_minutes is held to: a negative
+// figure is reported rather than silently floored.
+func TestANegativeBreakIntervalIsRefusedByName(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		_, _, err := runIn(t, false, "--dir", t.TempDir(), "--break-interval", "-5")
+		if err == nil {
+			t.Fatal("run returned nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "break-interval") {
+			t.Errorf("the refusal is %q, want it to name --break-interval", err)
+		}
+	})
+}
+
+// TestSessionReportsTheConfiguredPaneColors covers the defaults, read from the
+// configuration file's own defaults rather than from a flag: the pane-state
+// colours are a second, distinct pair from the plain Color toggle, and the
+// report carries both.
+func TestSessionReportsTheConfiguredPaneColors(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "pane active    "+config.DefaultPaneActiveColor) {
+			t.Errorf("the report does not carry the default active colour:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "pane done      "+config.DefaultPaneDoneColor) {
+			t.Errorf("the report does not carry the default done colour:\n%s", stdout)
+		}
+	})
+}
+
+// TestPaneColorFlagsOverrideTheFile covers the same override rule the other
+// flags follow: a reader who passes --pane-active-color or --pane-done-color
+// gets that colour instead of whatever the file named.
+func TestPaneColorFlagsOverrideTheFile(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k","pane_active_color":"#000000","pane_done_color":"#000000"}`)
+
+		stdout, _, err := runIn(t, false, "--dir", t.TempDir(),
+			"--pane-active-color", "#112233", "--pane-done-color", "#445566")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(stdout, "pane active    #112233") {
+			t.Errorf("the report does not show the flag's active colour:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "pane done      #445566") {
+			t.Errorf("the report does not show the flag's done colour:\n%s", stdout)
+		}
+	})
+}
+
+// TestAMalformedPaneColorFlagIsRefusedByName covers the same rule the
+// configuration file's own pane_active_color and pane_done_color are held to:
+// a value that is not #rrggbb is reported by name rather than silently
+// dropped.
+func TestAMalformedPaneColorFlagIsRefusedByName(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k"}`)
+
+		_, _, err := runIn(t, false, "--dir", t.TempDir(), "--pane-active-color", "blue")
+		if err == nil {
+			t.Fatal("run returned nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "--pane-active-color") {
+			t.Errorf("the refusal is %q, want it to name --pane-active-color", err)
+		}
+	})
+}
+
 // TestAFieldWithNoValueIsADashNotNothing covers the reporting rule. A report whose
 // shape shifts as values arrive is harder to read than one that holds its shape and
 // says dash.

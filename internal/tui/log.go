@@ -231,6 +231,26 @@ func (l *Log) Truncate() {
 	l.rows = nil
 }
 
+// Restore replaces the rows held with rows, discarding whatever was there before
+// and resetting the folded count to zero.
+//
+// It is what `/load` uses rather than Truncate followed by a run of Append calls,
+// since those two steps would let a painter racing the input goroutine draw a log
+// that is briefly empty between them. One lock held for the whole replacement is
+// what keeps a restore atomic from every other reader's point of view.
+//
+// The folded count goes back to zero rather than carrying forward whatever this
+// log had already dropped, because a restored log is reporting a different
+// conversation's history now, and the rows the reader is looking at are exactly
+// the rows the save held: nothing has been folded from the front of this one yet.
+func (l *Log) Restore(rows []Row) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.rows = append([]Row(nil), rows...)
+	l.folded = 0
+}
+
 // plainRow removes what a terminal would act on, keeping the tab.
 //
 // The whole sequence is removed, not only the control byte. Dropping the ESC and

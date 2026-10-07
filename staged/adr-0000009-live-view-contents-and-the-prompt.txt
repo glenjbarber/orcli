@@ -100,3 +100,7 @@ this record settles.
 0000010 replaced the prompt with `root@lolhost @ ` and the reader marked the second
 as deliberate. The input-error timeout and the tool icon are still open and are
 question 15 and question 16 in `QUESTIONS.md`.
+
+## See also
+
+Superseded by `UI-redesign.md` (not by adr-0000010 alone, which is itself superseded).

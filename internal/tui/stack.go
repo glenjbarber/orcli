@@ -50,13 +50,23 @@ import (
 // `root@lolhost @ ` instead, deliberately; that disagreement is recorded in
 // staged/adr-index.txt rather than resolved there, and is resolved here in the string's
 // favour because the mockup built from this string is the one that was confirmed.
-const Prompt = "root@lolhost $ "
+//
+// Glen confirmed a further adjustment to this same string in this session
+// (2026-10-07): a leading space before the host name, so the prompt row's own text does
+// not start flush against the terminal's left edge. The space on each side of the dollar
+// sign from the 2026-10-06 mockup is unchanged; this only adds the one before "root".
+const Prompt = " root@lolhost $ "
 
 // barRows is how many fixed rows sit below the scrollback: the prompt, one blank
 // separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
 // bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
 // (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
 // cutting it, dropping it into bar two, or leaving it homeless.
+//
+// The separator line stays one row. Glen confirmed in this session (2026-10-07) that it
+// should carry two leading spaces rather than being left to the frame's own blank fill
+// (see Draw's separatorRow write); that is a change to what the row draws, not to how
+// many rows the stack has, so barRows is still five.
 const barRows = 5
 
 // barOneFields and barTwoFields choose which Status fields render on each status bar.
@@ -68,15 +78,19 @@ const barRows = 5
 // above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
-// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
-// The fifth, scrollback-on, is Session.AtLiveEdge - see renderBarTwo.
-var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
+// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two,
+// plus fieldPreset. The fifth of the original five, scrollback-on, is
+// Session.AtLiveEdge - see renderBarTwo. fieldPreset is added rather than fitted into
+// the original five, since /level's active preset is the one thing today's build
+// already shows for a mode the reader set (mouse, bell) and the mockup predates
+// /level, so it was never going to name a field that was not built yet.
+var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldPreset, fieldMouse}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 20
+const StatusFields = 22
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -149,6 +163,14 @@ const (
 	// fieldPane is which pane is shown.
 	fieldPane
 
+	// fieldPaneState is whether a worker is running or has just finished at the
+	// shown pane: "running", "done", or "" for neither. It is not printed on any
+	// bar - fieldName gives it no text - and exists only to tell the pane bar
+	// which colour to draw in, which is a second configurable pair of colours
+	// kept apart from the plain on/off Color toggle (see config.PaneActiveColor
+	// and config.PaneDoneColor).
+	fieldPaneState
+
 	// fieldWorkers is how many workers are running.
 	fieldWorkers
 
@@ -163,6 +185,14 @@ const (
 
 	// fieldLevels is how many conversation levels exist.
 	fieldLevels
+
+	// fieldPreset is the /level preset in force, "-" when none is.
+	//
+	// Named fieldPreset rather than fieldLevel so it cannot be mistaken, reading
+	// this file, for fieldLevels just above it: that one counts conversation
+	// levels, and this one names a /level reply-style preset. See preset.go's
+	// doc comment for the same distinction from the command's side.
+	fieldPreset
 
 	// fieldPrompt is the prompt row, and it is the row the caret is on.
 	fieldPrompt
@@ -216,6 +246,8 @@ func fieldName(k int) string {
 		return "bell"
 	case fieldPane:
 		return "pane"
+	case fieldPaneState:
+		return ""
 	case fieldWorkers:
 		return "workers"
 	case fieldQueue:
@@ -226,6 +258,8 @@ func fieldName(k int) string {
 		return "folded"
 	case fieldLevels:
 		return "levels"
+	case fieldPreset:
+		return "level"
 	case fieldPrompt:
 		return ""
 	default:
@@ -365,7 +399,8 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 4 {
-			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width), chrome)
+			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width),
+				paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
 		}
 		return
 	}
@@ -395,6 +430,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	promptRow := backlog
+	separatorRow := backlog + 1
 	barOneRow := backlog + 2
 	barTwoRow := backlog + 3
 	paneBarRow := backlog + 4
@@ -402,10 +438,34 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
 	f.showCaret(screen, x, y+promptRow, width)
 
+	// The separator row between the prompt and bar one. It was left to the base clear
+	// above (every cell already a space) rather than drawn; Glen asked, in this session
+	// (2026-10-07), that it carry two spaces explicitly, matching the indent he asked for
+	// on the prompt row above it, rather than being blank only because nothing writes to
+	// it. Two spaces at a width of two or more look identical to the blank fill they
+	// replace - the row was already all spaces - so this is a deliberate row of content
+	// rather than a visible change.
+	drawCellText(screen, x, y+separatorRow, width, "  ", chrome)
+
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
 	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
-	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
+	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
+		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+// paneBarStyle picks the style the pane bar draws in: a configured colour for
+// "running" or "done" when the palette has one, chrome otherwise - which is
+// how the bar drew before Status carried colour when the pane is active.
+// This is the renderPaneBar sibling adr-0000020's comment promised and the
+// stack.go history above never built; it is built here, as a configurable
+// pair of colours apart from the plain Color on/off toggle rather than as the
+// fixed colour the ADR assumed.
+func paneBarStyle(p Palette, chrome tcell.Style, state string) tcell.Style {
+	if style, ok := p.PaneStyle(state); ok {
+		return style
+	}
+	return chrome
 }
 
 // renderPaneBar builds the pane bar's text, truncated to width with an ellipsis rather

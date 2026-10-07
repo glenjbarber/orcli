@@ -1,0 +1,110 @@
+# 0000047 /begin's handoff note travels through save and load, not a pipe
+
+- Status: accepted
+- Date: 2026-10-07
+- Supersedes: nothing. 0000032 designed `/begin` but named no delivery
+  mechanism for the handoff note and was never implemented (its own Notes
+  section says so); this record is the first one to implement `/begin`, and
+  it extends 0000032's design rather than replacing any part of it
+
+## Context
+
+A Notion task asked for `/begin`'s handoff note to move to the save/load
+file mechanism, framed as superseding an existing piped-handoff ADR,
+"ADR-0000015, Minimal handoff with crunch and begin." No such record exists
+in this repository. `staged/adr-0000015-the-history-is-one-hundred-exact-entries.txt`
+is the only 0000015 here, and it is about input-history length, unrelated.
+A full-repository search for "crunch" or "minimal handoff" turns up nothing.
+
+The only record in this tree that designed `/begin` at all is
+`staged/adr-0000032-begin-forks-a-pane-with-a-handoff-note-and-copied-permissions.txt`.
+It settled that `/begin` forks rather than hands off and closes, that the new
+pane gets a handoff note rather than the full transcript, and that the new
+pane's permissions ledger is seeded from a copy of the caller's. It
+deliberately left open "what exactly is in the note, and who writes it" and,
+separately, how the note is delivered. Its own closing note says plainly:
+"Nothing in the tree has changed. There is no `/begin` command and no pane
+set in the tree." There is therefore no piped implementation anywhere in this
+repository for this record to supersede. The Notion task's "supersedes
+ADR-0000015" framing is mistaken and is not carried into this record.
+
+Separately, `/save` and `/load` are listed in `internal/tui/command.go`'s
+command table but, as of this record, neither has a dispatcher handler
+wired in `cmd/orcli/dispatch.go`; a line typed against either currently
+returns dispatch.go's "is in the table but this build does not run it yet."
+The save/load engine itself is real and already built, in `internal/saved`
+(`Store.Save`, `Store.Load`, one SQLite file per save), independent of
+whether a `/save` or `/load` command line currently reaches it.
+
+## Decision
+
+**`/begin`'s handoff note is delivered by the same save-then-load mechanism
+`/save` and `/load` are built on, not a pipe.** `/begin` writes the note
+through `internal/saved.Store.Save`, the identical call `/save` would make
+with the note as the saved conversation's one turn, then reads it back with
+the identical `Store.Load` call `/load` makes. No second save routine is
+written for this; `cmd/orcli/begin.go`'s `handoff` function opens one
+`internal/saved.Store` and calls the package's own `Save` and `Load`.
+
+**The store `/begin` opens for this is rooted at a dedicated temp directory
+under orcli's own configuration directory, never the OS default temp path
+and never the sessions directory `/save` and `/load` use for a session a
+reader asked to keep.** The directory is `~/.orcli/temp`, derived from the
+same home directory `internal/config` already resolves `~/.orcli.json` and
+`~/.orcli/<cognito marker>` against (see `internal/config/temp.go`'s
+`TempDir`, and `internal/config/cognito.go`'s existing `~/.orcli/...` use for
+precedent), rather than a path hardcoded independently of it.
+
+**The temp file is removed the moment the load that reads it back returns,
+on every path out, including a failed load.** Nothing from a `/begin` is
+left on disk once the handoff completes. A second `/begin` running
+concurrently writes a second, randomly named file rather than racing the
+first for one name.
+
+This record does not resolve what 0000032 left open about who writes the
+note or what else it contains; `/begin`'s argument is taken as the note
+verbatim. It also does not build the pane set 0000032's design calls for:
+nothing in this tree opens one yet, so the "new pane" this implementation
+produces is one `*tui.Session` held on the dispatcher, forked from the
+calling session's options, with the calling session itself left completely
+untouched. A pane set, when one exists, replaces that one field with
+whatever bookkeeping it needs; this record only settles how the note
+travels, not how the pane that receives it is kept.
+
+## Consequences
+
+A reader who types `/begin some task` gets a line reporting the note was
+delivered, and a second session exists holding only that note, independent
+of the session the reader is still looking at. Closing or restarting orcli
+with a `/begin` in flight leaves no stray file: the temp file's lifetime is
+exactly one call's.
+
+0000032's open questions about the note's authorship and content, and about
+where the new pane's number comes from, remain open. They are not settled by
+this record and are not claimed to be.
+
+## Alternatives considered
+
+Writing a second save/load routine specific to `/begin`'s note, so the
+engine used for a reader's own saved conversations is never touched by a
+background handoff. Rejected: it is exactly the duplication the task this
+record answers was raised to avoid, and `internal/saved`'s format already
+fits a one-turn note as well as it fits a full conversation.
+
+Using the OS default temporary directory (`os.TempDir`) for the handoff
+file. Rejected: it is shared with every other program on the machine, and
+orcli already keeps its own files, credential and otherwise, under
+`~/.orcli`; a handoff note is no different.
+
+Leaving the temp file in place after the load and relying on the next
+`/begin` or a future cleanup pass to remove it. Rejected: the task asks for
+nothing to persist once the handoff completes, and a file that outlives its
+one use is a second thing to account for when nothing requires it.
+
+## Notes
+
+`cmd/orcli/begin.go` implements this. `internal/config/temp.go` adds
+`TempDir`. Neither `/save` nor `/load` gained a dispatcher handler as part
+of this record; that gap predates this task and is unchanged by it. The
+pane set 0000032 describes and this record's "Decision" section notes as
+still absent is also unchanged by this record.

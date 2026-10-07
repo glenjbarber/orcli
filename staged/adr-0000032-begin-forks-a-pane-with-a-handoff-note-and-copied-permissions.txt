@@ -1,6 +1,6 @@
 # 0000032 /begin forks a pane, with a handoff note rather than full history, and copied permissions
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It introduces `/begin`, not asked by any numbered
   question in `QUESTIONS.md`
@@ -92,3 +92,7 @@ rule question 25's open contradiction eventually settles.
 
 Nothing in the tree has changed. There is no `/begin` command and no pane
 set in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000033, which uses this record's inheritance for a pane's default permission.

@@ -382,3 +382,84 @@ func TestSpawnRefusesTheRootLevelClosing(t *testing.T) {
 		t.Errorf("CloseLevel(0) returned %v, want ErrRootLevel", err)
 	}
 }
+
+// TestPaneStateIsEmptyBeforeAnyWorker covers the one state the pane bar colours
+// neither colour for: a session that has never spawned a worker has nothing
+// running and nothing finished to report.
+func TestPaneStateIsEmptyBeforeAnyWorker(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	if got := s.PaneState(); got != "" {
+		t.Errorf("PaneState on a fresh session is %q, want empty", got)
+	}
+}
+
+// TestPaneStateIsRunningWhileAWorkerIs covers the colour a reader watches for:
+// the pane bar reports "running" for as long as a worker is in flight there.
+func TestPaneStateIsRunningWhileAWorkerIs(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	if _, err := s.Spawn(0, "a question"); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if got := s.PaneState(); got != "running" {
+		t.Errorf("PaneState with a worker in flight is %q, want running", got)
+	}
+}
+
+// TestPaneStateIsDoneAfterAWorkerFinishes covers the sticky indicator: once a
+// worker finishes on its own and none is running, the pane stays "done" rather
+// than reverting to empty, since a reader who has not looked back since should
+// still find the pane coloured the way the worker left it.
+func TestPaneStateIsDoneAfterAWorkerFinishes(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	w, err := s.Spawn(0, "a question")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	s.Finish(w, WorkerDone, "finished")
+
+	if got := s.PaneState(); got != "done" {
+		t.Errorf("PaneState after a worker finishes is %q, want done", got)
+	}
+}
+
+// TestPaneStateIsNotDoneAfterAWorkerStops covers the one state Finish can record
+// that is not "done": a worker the reader stopped, or one that failed, is not the
+// signal a reader asked the done colour for.
+func TestPaneStateIsNotDoneAfterAWorkerStops(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	w, err := s.Spawn(0, "a question")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	s.Stop(w, "stopped")
+
+	if got := s.PaneState(); got != "" {
+		t.Errorf("PaneState after a worker is stopped is %q, want empty", got)
+	}
+}
+
+// TestPaneStateReturnsToRunningAfterAnotherSpawn covers the sticky "done" clearing
+// the way it was designed to: a new worker starting is what moves the pane back to
+// "running", not a timer.
+func TestPaneStateReturnsToRunningAfterAnotherSpawn(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	first, err := s.Spawn(0, "a question")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	s.Finish(first, WorkerDone, "finished")
+
+	if _, err := s.Spawn(0, "a second question"); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if got := s.PaneState(); got != "running" {
+		t.Errorf("PaneState with a second worker running is %q, want running", got)
+	}
+}

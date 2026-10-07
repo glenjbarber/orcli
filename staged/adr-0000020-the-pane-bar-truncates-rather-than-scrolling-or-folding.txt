@@ -1,6 +1,6 @@
 # 0000020 The pane bar truncates rather than scrolling or folding
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 7 in `QUESTIONS.md`
 
@@ -64,3 +64,7 @@ by question 7 and not answered here.
 ## Notes
 
 Nothing in the tree has changed. There is no pane bar in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`, per Glen's 2026-10-07 resolution (see adr-index.txt). See also adr-0000019, the companion record about the pane bar's return.

@@ -49,7 +49,7 @@ mouse indicator
 status bar 1   Provider | Model | Status | Bell | Verbosity
 status bar 2   Hostname | Credits | Cost | Context | In | Out | Autosave | Stealth | Approval
 
-root@lolhost @ <input>
+root@lolhost $ <input>
 
 pane bar       0 | 1 | 2
 ```
@@ -117,15 +117,17 @@ that one place.
 
 ## 4. The prompt
 
-`root@lolhost @ ` and a space before the caret.
+`root@lolhost $ ` and a space before the caret.
 
 It is not computed. It is not the reader's user, their host or their
 directory, and a reader on a machine whose host is `lolhost` still gets
-`lolhost`. The reader wrote `root@localhost $ ` first and then this, and marked
-the second as deliberate rather than a typo.
+`lolhost`. The reader wrote `root@localhost $ ` first, then `root@lolhost @ `,
+and this is the third and ratified form: Glen confirmed it (2026-10-06) against
+a rendered loreloom/UI-redesign.md mockup, and `internal/tui/stack.go` carries
+it as the `Prompt` constant.
 
 The prompt belongs to the focused session, which follows from a pane being a
-viewport. It is not ratified and is open.
+viewport. That part remains open.
 
 ## 5. Scrolling and scrollback
 
@@ -390,3 +392,31 @@ Everything below is a decision that has not been taken.
 to a buffer, and a buffer is not a terminal. Whether the regions feel right,
 whether the prefix is reachable, whether scrolling and copying work together,
 and whether a mouse wheel behaves on the target machine, are all unverified.
+
+## 20. The screen-break reminder
+
+**A session runs for a configurable interval, 22 minutes by default, before a
+screen-break reminder interrupts it.** `break_interval_minutes` in
+`.orcli.json` and `--break-interval` at startup both name it, in minutes, and
+either must be positive: zero or less is refused by name rather than
+substituted for.
+
+**The break itself is a fixed two minutes,** not configurable. The interval
+before a break is the reader's choice; the length of it is not, since two
+minutes is what the design took as long enough for an eye to recover.
+
+**The reminder waits for idle.** A turn in flight is not interrupted; the
+reminder fires once the session next has nothing running.
+
+**The prompt is cleared when the reminder appears, and stays usable through
+the break.** Nothing about the break locks the input, matching the working
+interaction assumption this was built against: a reader can keep typing
+through a break and the countdown does not stop them.
+
+**The countdown is shown in the state field**, the same field that shows
+`idle`, `thinking` and the rest, rather than in a bar field of its own.
+
+**The screen-break bell is a separate toggle from the reply-completion
+bell,** `break_bell` and `--break-bell`. A reader who wants to know a reply
+arrived without being startled by a break reminder, or the other way around,
+is choosing between two different events.

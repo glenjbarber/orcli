@@ -1,6 +1,6 @@
 # 0000004 A choice records the model it replaced
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: a writer that set the current model and recorded nothing about the
   one before it
@@ -72,3 +72,7 @@ Both members are read back out of the file rather than out of the running sessio
 before a decision is made, so a reader who edited their own configuration by hand
 is answered from what their file says rather than from what was loaded at
 startup.
+
+## See also
+
+Supersedes nothing; describes behaviour still in the tree. Superseded by `UI-redesign.md`. See also adr-0000003, the probe record this one refers back to.

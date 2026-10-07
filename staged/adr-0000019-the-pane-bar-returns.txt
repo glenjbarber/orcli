@@ -1,6 +1,6 @@
 # 0000019 The pane bar returns, and the gap it leaves in the shed ladder is reopened
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: the withdrawal recorded in `WORKER.txt` and in the note on 0000016
   in `ANSWERS.md`. It does not supersede 0000016 itself, which stands as a record
@@ -57,3 +57,7 @@ about the bar's return, not its place in a ladder built without it.
 ## Notes
 
 Nothing in the tree has changed. There is no pane bar in the tree to add back.
+
+## See also
+
+Supersedes the withdrawal in `WORKER.txt` and the note on adr-0000016 in `ANSWERS.md` (not adr-0000016 itself). Superseded by `UI-redesign.md`, per Glen's 2026-10-07 resolution (see adr-index.txt). See also adr-0000020, the companion record about how the pane bar truncates.

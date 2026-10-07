@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -49,7 +49,16 @@ type LineRunner func(ctx context.Context, line string) (Result, error)
 // It is passed in rather than reached for, so this package keeps no credential and no
 // client. The transport is in internal/openrouter and the session is here, and something
 // has to hold the two together; naming the seam keeps this a leaf.
-type AskFunc func(ctx context.Context, question string, level int) error
+//
+// silent tells the implementation not to write the question itself into the log as a
+// row, while still sending it to the model and still delivering whatever comes back
+// through the normal reply path. The startup hello is the one caller that passes
+// true: its text is an instruction aimed at the model ("greet the reader, using the
+// capability message above"), not something the reader typed, and showing it as a
+// row would read as a second voice in the transcript that nobody wrote. A reader's
+// own line, and a command's Result.Ask, both pass false - what they type is exactly
+// what should appear.
+type AskFunc func(ctx context.Context, question string, level int, silent bool) error
 
 // Key is the editing action selected from a tcell event.
 type Key int
@@ -73,6 +82,10 @@ const (
 	KeyMouse
 	KeyScrollUp
 	KeyScrollDown
+	KeyCtrlA
+	KeyCtrlW
+	KeyCtrlU
+	KeyCtrlT
 )
 
 // Start runs the interface until the reader leaves.
@@ -81,7 +94,14 @@ const (
 // puts everything back on the way out, including on the paths where the program did not
 // choose to leave. Every path out restores the terminal, since a reader handed a shell with
 // echo cleared has to fix it by hand and did not cause it.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
+//
+// hello, when not empty, is sent through ask once, automatically, before the reader has
+// pressed a key - the same path a typed question takes, run on the same goroutine
+// mechanics as any other turn. It is a caller's choice, not this package's: a caller with
+// no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
+// passes an empty string and nothing is sent. Start does not decide whether to greet, only
+// how, once asked to.
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello string) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -99,25 +119,21 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		frame:   frame,
 		group:   newGroup(),
 	}
+	// Pasted text is always literal content and never a submit trigger,
+	// however many lines it contains: embedded '\r'/'\n' bytes used to be
+	// turned into KeyEnter calls here, which is the bug that let a
+	// multi-line paste send partway through itself. InsertPastedText is the
+	// one place that decides what a paste becomes (plain insert, or a
+	// collapsed summary over the real text), so the newline-to-Enter
+	// conversion that used to live in this handler is gone for good.
 	frame.SetPasteHandler(func(text string) {
-		runes := []rune(text)
-		for i := 0; i < len(runes); i++ {
-			r := runes[i]
-			if r == '\r' || r == '\n' {
-				if l.act(ctx, KeyEnter, 0) {
-					app.Stop()
-					return
-				}
-				if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
-					i++
-				}
-				continue
-			}
-			if !unicode.IsControl(r) {
-				l.act(ctx, KeyRune, r)
-			}
-		}
+		l.session.Editor().InsertPastedText(text)
 		l.paint()
+	})
+	app.SetAfterDrawFunc(func(screen tcell.Screen) {
+		if l.consumeBell() {
+			screen.Beep()
+		}
 	})
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		key, r := keyEvent(event)
@@ -139,6 +155,15 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		l.group.Close()
 	}()
 	l.paint()
+
+	// The hello is sent here, after the frame is first painted and before the
+	// reader's keys are read, so it is in flight from the moment the screen is up
+	// rather than waiting on the first line they submit. It runs through the same
+	// l.start as any other turn, so a reader who presses escape while it is still
+	// running stops it the same way, and leaving while it is in flight waits for it
+	// through the same l.group.Close() every other turn is waited for by.
+	maybeSendHello(ctx, l, hello)
+
 	finished := make(chan struct{})
 	defer close(finished)
 	go func() {
@@ -151,7 +176,19 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 			case <-finished:
 				return
 			case <-ticker.C:
-				app.QueueUpdateDraw(func() { l.paint() })
+				now := time.Now()
+				due := l.session.BreakDue(now)
+				if due {
+					l.session.StartBreak(now)
+				} else {
+					l.session.TickBreak(now)
+				}
+				app.QueueUpdateDraw(func() {
+					if due && l.session.Options().BreakBell {
+						l.bellPending = true
+					}
+					l.paint()
+				})
 			}
 		}
 	}()
@@ -167,6 +204,24 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		return ErrNoTerminal
 	}
 	return err
+}
+
+// maybeSendHello starts the one turn Start sends on its own, with no key pressed
+// and no line runner consulted: the capability and introduction message a reader
+// would otherwise only see once they had typed something.
+//
+// An empty hello, or a loop built with no ask at all, sends nothing - a caller's
+// choice not to greet, read here rather than decided here.
+//
+// It starts the turn silent: the hello's own text is an instruction to the model,
+// not a line the reader typed, so it is sent but never written into the log as a
+// question row. Only the model's reply - the actual greeting - lands in the log, the
+// same way any other turn's reply does.
+func maybeSendHello(ctx context.Context, l *interfaceLoop, hello string) {
+	if hello == "" || l.ask == nil {
+		return
+	}
+	l.start(ctx, hello, true)
 }
 
 // interfaceLoop is the state one run of the interface carries.
@@ -186,6 +241,21 @@ type interfaceLoop struct {
 
 	// step is the sweep's position, advanced on each paint while a turn runs.
 	step int
+
+	// bellPending reports that a screen break just started with its bell on,
+	// and the next draw owes a ring. It is touched only from the application's
+	// own event-loop goroutine, by the QueueUpdateDraw callback that sets it
+	// and the AfterDrawFunc that reads and clears it, so it carries no lock of
+	// its own.
+	bellPending bool
+}
+
+// consumeBell reports whether a bell is owed for the draw about to happen,
+// and clears the request so the same break does not ring it twice.
+func (l *interfaceLoop) consumeBell() bool {
+	pending := l.bellPending
+	l.bellPending = false
+	return pending
 }
 
 // paint draws what has changed since the last one.
@@ -269,6 +339,14 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 		return KeyCtrlC, 0
 	case tcell.KeyCtrlD:
 		return KeyEOF, 0
+	case tcell.KeyCtrlA:
+		return KeyCtrlA, 0
+	case tcell.KeyCtrlW:
+		return KeyCtrlW, 0
+	case tcell.KeyCtrlU:
+		return KeyCtrlU, 0
+	case tcell.KeyCtrlT:
+		return KeyCtrlT, 0
 	default:
 		return KeyNone, 0
 	}
@@ -298,15 +376,17 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldState] = string(state) + detailSuffix(detail)
 	s[fieldFigure] = figure
 	s[fieldApproval] = orNone(string(opts.Approval))
-	s[fieldVerbosity] = "0"
+	s[fieldVerbosity] = strconv.Itoa(opts.Verbosity)
+	s[fieldPreset] = orNone(l.session.Preset())
 	s[fieldCognito] = onOff(opts.Cognito, "on", "off")
 	s[fieldColor] = onOff(opts.Color, "on", "off")
 	s[fieldMouse] = onOff(opts.Mouse, "on", "off")
 	s[fieldCopy] = onOff(false, "available", "none")
 	s[fieldBell] = onOff(opts.Bell, "on", "off")
-	s[fieldPane] = "main"
+	s[fieldPane] = l.session.Pane()
+	s[fieldPaneState] = l.session.PaneState()
 	s[fieldWorkers] = plural(len(l.session.Workers()), "worker", "workers")
-	s[fieldQueue] = plural(0, "prompt", "prompts")
+	s[fieldQueue] = plural(l.session.QueueLen(), "prompt", "prompts")
 	s[fieldHeld] = plural(log.Len(), "row", "rows")
 	s[fieldFolded] = plural(log.Folded(), "row", "rows")
 	s[fieldLevels] = plural(len(l.session.Levels()), "level", "levels")
@@ -438,9 +518,36 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 		// arrives only from a terminal that was asked for it by something else, and
 		// consuming it is what keeps its bytes out of the field.
 
-	case KeyUp, KeyDown:
-		// Read so a reader pressing one is not left pressing. This unit has no history, and
-		// one would need a conversation this interface does not carry.
+	case KeyUp:
+		// adr-0000011's history walk: one entry per press, stopping rather than wrapping
+		// at the oldest end. The current field is handed in so the first press of a walk
+		// can remember it as the draft Down eventually returns to.
+		if text, moved := l.session.History().Up(l.session.Editor().Text()); moved {
+			l.session.Editor().SetText(text)
+		}
+
+	case KeyDown:
+		if text, moved := l.session.History().Down(l.session.Editor().Text()); moved {
+			l.session.Editor().SetText(text)
+		}
+
+	case KeyCtrlA:
+		l.session.Editor().Home()
+
+	case KeyCtrlW:
+		l.session.Editor().EraseWordBefore()
+
+	case KeyCtrlU:
+		l.session.Editor().ClearLeft()
+
+	case KeyCtrlT:
+		// PLACEHOLDER BINDING: Ctrl+T is a tentative choice for
+		// expand/collapse of a pasted block, picked only because it did
+		// not collide with Ctrl+A/Ctrl+W/Ctrl+U or anything else keyEvent
+		// already mapped. Glen has not confirmed this key; it is wired
+		// here so the mechanism (Editor.ToggleExpandPastedBlock) has
+		// somewhere to be reached from while the real binding is decided.
+		l.session.Editor().ToggleExpandPastedBlock()
 
 	case KeyScrollUp:
 		l.session.ScrollUp(1)
@@ -453,12 +560,48 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 }
 
 // submit acts on a line the reader finished typing.
+//
+// A line is one of two things, and they are told apart before either is run. A
+// command (IsCommand says so) goes to l.runner, which is cmd/orcli/dispatch.go's
+// Run: it resolves the name against the command table and reports a Result, never
+// a question for the model on its own. Everything else is a plain question, and
+// this is the one place that sends it to the model - not the dispatcher, whose own
+// doc comment on Run says plainly that a line which is not a command is not its
+// business. A result's own Result.Ask field is still honored afterward, since a
+// command can itself decide to ask the model something (the Cloudflare-not-set-up
+// guidance in cmd/orcli/dispatch.go is one such case); that is a second, narrower
+// reason to ask and does not make the dispatcher the place a reader's own typed
+// question goes.
 func (l *interfaceLoop) submit(ctx context.Context) bool {
-	line := strings.TrimSpace(l.session.Editor().Text())
+	// SubmitText rather than Text: a still-collapsed pasted block is
+	// substituted back to its real, raw text here, so the runner and the
+	// history both get what the reader actually pasted, never the
+	// "```pasted, N lines```" placeholder the field was showing.
+	line := strings.TrimSpace(l.session.Editor().SubmitText())
 	if line == "" {
 		return false
 	}
 	l.session.Editor().Reset()
+
+	// Recorded here, where a line is actually sent, rather than where it was typed.
+	// There is no message-queue mechanism in this tree yet, so this is the only
+	// moment that exists: a future queue would still record at the point it drains
+	// into a send, not at the point a reader queued it (adr-0000011). A plain
+	// question is recorded exactly as a command is: Up/Down walks a reader's own
+	// typed lines regardless of which kind each one was.
+	l.session.History().Record(line)
+
+	if _, _, ok := IsCommand(line); !ok {
+		if l.ask == nil {
+			// The same situation Session.Ready reports for a turn with no model:
+			// there is nothing to send this to, and the reader is told so as a
+			// notice rather than having the line discarded with no trace of it.
+			l.session.Notice(ErrNoModel.Error(), 0, RoleFailure)
+			return false
+		}
+		l.start(ctx, line, false)
+		return false
+	}
 
 	result, err := l.runner(ctx, line)
 	if err != nil {
@@ -473,7 +616,7 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 	}
 	l.writeResult(result.Text)
 	if result.Ask != "" && l.ask != nil {
-		l.start(ctx, result.Ask)
+		l.start(ctx, result.Ask, false)
 	}
 	return false
 }
@@ -563,7 +706,7 @@ func splitRows(text string) []string {
 // drawn, so a reader who leaves while a turn is in flight waits for it rather than handing
 // the terminal back with a request still writing to it. A turn refused by the count never
 // started, which is why it is a refusal rather than a silent skip.
-func (l *interfaceLoop) start(ctx context.Context, question string) {
+func (l *interfaceLoop) start(ctx context.Context, question string, silent bool) {
 	if err := l.group.Add(); err != nil {
 		l.session.Notice(err.Error(), 0, RoleFailure)
 		return
@@ -579,13 +722,25 @@ func (l *interfaceLoop) start(ctx context.Context, question string) {
 		// waited for it for ever.
 		defer l.group.Done()
 
-		err := l.ask(turnCtx, question, 0)
+		err := l.ask(turnCtx, question, 0, silent)
 
 		l.session.ClearCancel()
 		cancel()
 
 		if err != nil {
 			l.session.Notice(err.Error(), 0, RoleFailure)
+			return
+		}
+
+		// A queued prompt is sent only once the turn ahead of it has finished with
+		// no error, never after one that failed or was stopped. `/queue` is a
+		// follow-up on work that went well; chaining it onto a turn the reader
+		// just watched fail would send a second request behind a first one they
+		// may want to look at or retype first, which is a judgment call this
+		// comment flags rather than one settled by a design record: there is no
+		// existing precedent in this tree for when a queued message should fire.
+		if next, ok := l.session.Drain(); ok {
+			l.start(ctx, next, false)
 		}
 	}()
 }
@@ -611,5 +766,7 @@ func (l *interfaceLoop) stop() {
 // session. A session with colour off writes no palette sequence at all, which falls out of
 // Palette.Sequence returning nothing rather than out of a check here.
 func paletteOf(s *Session) Palette {
-	return NewPalette(s.Options().Color, GroundAuto, nil)
+	opts := s.Options()
+	p := NewPalette(opts.Color, GroundAuto, nil)
+	return p.WithPaneColors(opts.PaneActiveColor, opts.PaneDoneColor)
 }

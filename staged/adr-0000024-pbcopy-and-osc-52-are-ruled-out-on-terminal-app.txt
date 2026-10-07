@@ -1,6 +1,6 @@
 # 0000024 pbcopy and OSC 52 are ruled out on Terminal.app; the clipboard path itself is not decided
 
-- Status: UNCONFIRMED
+- Status: UNCONFIRMED, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It narrows question 12 in `QUESTIONS.md` without
   closing it
@@ -84,3 +84,7 @@ but whether that is the reader's intent is not confirmed either.
 
 Nothing in the tree has changed. The existing clipboard code in
 `internal/clipboard` is read here, not edited.
+
+## See also
+
+Narrows a question without closing it. Superseded by `UI-redesign.md`. See also adr-0000025, which settles the question this record left open.

@@ -79,3 +79,7 @@ neither is answered here.
 Nothing in the tree has changed. Autosave in the tree writes to the SQLite
 store already; the plain per-session log this record describes does not
 exist there.
+
+## See also
+
+Supersedes nothing; not superseded.

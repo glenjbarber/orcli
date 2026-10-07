@@ -124,8 +124,12 @@ func init() {
 			Hidden:  []string{"colour"},
 		},
 		{
-			Name:    "cognito",
+			// Renamed from /cognito, confirmed by Glen on 2026-10-07; /cognito is
+			// kept as a hidden alias on the same grounds /colour is kept for
+			// /color, above.
+			Name:    "stealth",
 			Summary: "record nothing, on or off",
+			Hidden:  []string{"cognito"},
 		},
 		{
 			Name:    "verbosity",
@@ -135,6 +139,11 @@ func init() {
 		{
 			Name:    "verbose",
 			Summary: "report the shape of each streamed turn, on or off",
+		},
+		{
+			Name:    "level",
+			Args:    "NAME",
+			Summary: "set a bundled reply style (direct, concise, thorough, casual), without an argument to report",
 		},
 		{
 			Name:    "delegate",
@@ -189,6 +198,11 @@ func init() {
 			Name:    "load",
 			Args:    "NAME",
 			Summary: "resume a conversation saved with /name",
+		},
+		{
+			Name:    "begin",
+			Args:    "NOTE",
+			Summary: "fork a pane and hand the new one a note describing a task",
 		},
 		{
 			Name:    "mouse",

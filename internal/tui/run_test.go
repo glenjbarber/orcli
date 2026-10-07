@@ -1,9 +1,245 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+// errFailedTurn is a stand-in failure for TestStartDoesNotDrainTheQueueAfterAFailedTurn.
+var errFailedTurn = errors.New("the turn failed")
+
+// TestStartSendsHelloAutomatically covers the startup hello at the level Start's
+// own event loop runs it at, without opening a real terminal screen: a test binary
+// has none, and driving tview's own Application through a fake screen is more than
+// this hook needs proving. interfaceLoop.start is the exact call Start makes for a
+// non-empty hello, on the same group a reader's own line would be started on, so
+// calling it directly here exercises the real mechanism - the goroutine, the
+// group accounting, and the session writes - with no key pressed and no line
+// runner consulted at all.
+func TestStartSendsHelloAutomatically(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	var asked string
+	var gotSilent bool
+	ask := func(_ context.Context, question string, level int, silent bool) error {
+		asked = question
+		gotSilent = silent
+		s.Deliver("hello back", level)
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	maybeSendHello(context.Background(), l, "introduce yourself")
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if asked != "introduce yourself" {
+		t.Errorf("ask was called with %q, want the hello text", asked)
+	}
+	if !gotSilent {
+		t.Error("ask was called with silent = false, want the hello sent silent so its own text never becomes a log row")
+	}
+
+	rows := s.Log().Rows()
+	if got := rows[len(rows)-1].Text; got != "hello back" {
+		t.Errorf("last log row = %q, want the hello's own reply, written with no line submitted", got)
+	}
+	for _, row := range rows {
+		if row.Text == "introduce yourself" {
+			t.Errorf("the hello's own question text appeared as a log row: %+v, want only its reply visible", row)
+		}
+	}
+}
+
+// TestStartSendsNoHelloWhenEmpty covers the other side: an empty hello is a
+// caller's choice not to greet, and maybeSendHello - the exact call Start makes -
+// starts no turn at all when it is given one.
+func TestStartSendsNoHelloWhenEmpty(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	called := false
+	ask := func(context.Context, string, int, bool) error {
+		called = true
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	maybeSendHello(context.Background(), l, "")
+	_ = l.group.Close()
+
+	if called {
+		t.Error("ask was called despite an empty hello")
+	}
+}
+
+// TestMaybeSendHelloSkipsWithNoAsk covers a loop built with no ask at all - a
+// session with no model configured, say - sending nothing rather than calling a
+// nil function.
+func TestMaybeSendHelloSkipsWithNoAsk(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	l := &interfaceLoop{session: s, group: newGroup()}
+
+	maybeSendHello(context.Background(), l, "introduce yourself")
+	_ = l.group.Close()
+}
+
+// TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean covers the chain /queue is
+// built on: l.start's own goroutine, after a turn returns with no error, drains the
+// session's queue and starts whatever it finds next on the same group, the way the
+// hello above is started - with no key pressed, and no second call this test has to
+// make itself.
+func TestStartDrainsAQueuedPromptOnceTheTurnFinishesClean(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.Enqueue("the queued follow-up")
+
+	// done is signalled once the second, chained turn has run, so the test waits
+	// for the chain to actually happen rather than for group.Close - which would
+	// itself mark the group closing and refuse the chained start's own Add before
+	// it ever runs, racing ahead of the very thing this test means to observe.
+	done := make(chan struct{})
+
+	var asked []string
+	ask := func(_ context.Context, question string, level int, _ bool) error {
+		asked = append(asked, question)
+		s.Deliver("ok", level)
+		if len(asked) == 2 {
+			close(done)
+		}
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	l.start(context.Background(), "the first question", false)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the queued follow-up was never sent")
+	}
+
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if len(asked) != 2 || asked[0] != "the first question" || asked[1] != "the queued follow-up" {
+		t.Errorf("asked = %v, want the first question followed by the queued one", asked)
+	}
+	if got := s.QueueLen(); got != 0 {
+		t.Errorf("QueueLen() after the chain = %d, want 0", got)
+	}
+}
+
+// TestStartDoesNotDrainTheQueueAfterAFailedTurn covers the other side of that same
+// judgment call, named in start's own doc comment: a turn that came back with an
+// error leaves the queue alone, so a reader who watched one fail is not surprised
+// by a second request starting on top of it.
+func TestStartDoesNotDrainTheQueueAfterAFailedTurn(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.Enqueue("should not be sent")
+
+	calls := 0
+	ask := func(_ context.Context, _ string, _ int, _ bool) error {
+		calls++
+		return errFailedTurn
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	l.start(context.Background(), "the first question", false)
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if calls != 1 {
+		t.Errorf("ask was called %d times, want exactly 1", calls)
+	}
+	if got := s.QueueLen(); got != 1 {
+		t.Errorf("QueueLen() after a failed turn = %d, want the queued prompt left alone", got)
+	}
+}
+
+// TestSubmitSendsAPlainQuestionToTheModel covers the bug a reader hit from the very
+// first version of this file: a line that is not a /command used to go through
+// l.runner (cmd/orcli/dispatch.go's Run), which has always answered any non-command
+// line with an empty Result and no error, so the line was discarded with nothing
+// written and nothing sent. submit now tells the two apart itself and sends a
+// plain question straight to l.ask, the way the hello already does.
+func TestSubmitSendsAPlainQuestionToTheModel(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	var asked string
+	var gotSilent bool
+	ran := false
+	ask := func(_ context.Context, question string, level int, silent bool) error {
+		asked = question
+		gotSilent = silent
+		s.Deliver("an answer", level)
+		return nil
+	}
+	runner := func(context.Context, string) (Result, error) {
+		ran = true
+		return Result{}, nil
+	}
+
+	l := &interfaceLoop{session: s, runner: runner, ask: ask, group: newGroup()}
+	s.Editor().SetText("what is the weather doing")
+	l.submit(context.Background())
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if ran {
+		t.Error("a plain question went through l.runner, want it sent directly to ask")
+	}
+	if asked != "what is the weather doing" {
+		t.Errorf("ask was called with %q, want the typed line", asked)
+	}
+	if gotSilent {
+		t.Error("ask was called with silent = true, want false: a reader's own typed line is shown")
+	}
+	if last, ok := s.History().Up(""); !ok || last != "what is the weather doing" {
+		t.Errorf("History().Up() = %q, %v, want the plain question recorded", last, ok)
+	}
+}
+
+// TestSubmitSendsACommandLineThroughTheRunner covers the other side: a line
+// IsCommand recognizes still goes through l.runner exactly as before, and is never
+// sent to ask on its own (a command's own Result.Ask, when it sets one, still
+// reaches ask through the existing path below, which this test does not exercise).
+func TestSubmitSendsACommandLineThroughTheRunner(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	ranWith := ""
+	runner := func(_ context.Context, line string) (Result, error) {
+		ranWith = line
+		return Result{Text: "ok"}, nil
+	}
+	asked := false
+	ask := func(context.Context, string, int, bool) error {
+		asked = true
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, runner: runner, ask: ask, group: newGroup()}
+	s.Editor().SetText("/model some/model")
+	l.submit(context.Background())
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if ranWith != "/model some/model" {
+		t.Errorf("runner was called with %q, want the typed command line", ranWith)
+	}
+	if asked {
+		t.Error("ask was called for a command line, want it left to the runner alone")
+	}
+	if last, ok := s.History().Up(""); !ok || last != "/model some/model" {
+		t.Errorf("History().Up() = %q, %v, want the command line recorded", last, ok)
+	}
+}
 
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
 
