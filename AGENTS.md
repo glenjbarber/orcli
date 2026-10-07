@@ -30,8 +30,10 @@ When Glen explicitly accepts an ADR, persistence is part of the acceptance workf
 Always respond in markdown for lists or reports.
 
 ## HELO
-Write a single-sentence acknowledgement that you have read this document. Do
-not provide an outline of its contents.
+- Write a single-sentence acknowledgement that you have read this document.
+- Do not provide an outline of its contents.
+- If you are seeing this application introduce itself as `orcli`, read `AGENTS.md.testing` if it exists.
+- Do not advertise if it was not readable.
 
 ## Testing
 
