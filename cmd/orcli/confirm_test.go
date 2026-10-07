@@ -24,12 +24,13 @@ func overConfig(t *testing.T, body string) (*tui.Session, string) {
 		t.Fatalf("write the configuration: %v", err)
 	}
 
-	oldPath, oldWrite := configPath, writeModel
+	oldPath, oldRead, oldWrite := configPath, readModelPair, writeModel
 	configPath = func() (string, error) { return path, nil }
+	readModelPair = config.ReadModelPair
 	writeModel = config.WriteModel
 
 	t.Cleanup(func() {
-		configPath, writeModel = oldPath, oldWrite
+		configPath, readModelPair, writeModel = oldPath, oldRead, oldWrite
 	})
 
 	return tui.New(tui.Options{Model: "some/model", APIKey: "k"}), path
@@ -135,6 +136,84 @@ func TestTheModelIsWrittenOnce(t *testing.T) {
 	}
 	if got := readModel(t, path); !strings.Contains(got, `"model": "some/model"`) {
 		t.Errorf("the model was not written:\n%s", got)
+	}
+}
+
+// TestAConfirmedModelAlreadyOnDiskIsNotWritten covers the common case this fix is
+// for: a reader who already set up orcli and is simply using it again. The model
+// that answers the first turn is already in the file, so there is nothing to write
+// and nothing to tell the reader about.
+func TestAConfirmedModelAlreadyOnDiskIsNotWritten(t *testing.T) {
+	s, path := overConfig(t, "{\n  \"api_key\": \"k\",\n  \"model\": \"some/model\"\n}\n")
+	before := readModel(t, path)
+
+	var writes int
+	oldWrite := writeModel
+	writeModel = func(p, model string) error {
+		writes++
+		return oldWrite(p, model)
+	}
+	t.Cleanup(func() { writeModel = oldWrite })
+
+	confirmModel(s)("some/model")
+
+	if writes != 0 {
+		t.Errorf("the model was written %d times, want zero", writes)
+	}
+	if got := readModel(t, path); got != before {
+		t.Errorf("the file changed even though nothing did:\n%s", got)
+	}
+	for _, row := range s.Log().Rows() {
+		if strings.Contains(row.Text, "is written to") {
+			t.Errorf("a notice was shown for a write that did not happen: %q", row.Text)
+		}
+	}
+}
+
+// TestAConfirmedDifferentModelIsStillWritten covers the other half of the same
+// check: a session confirming a model that differs from the one on disk still
+// writes it and still tells the reader, exactly as before this check existed.
+func TestAConfirmedDifferentModelIsStillWritten(t *testing.T) {
+	s, path := overConfig(t, "{\n  \"api_key\": \"k\",\n  \"model\": \"old/model\"\n}\n")
+
+	confirmModel(s)("new/model")
+
+	got := readModel(t, path)
+	if !strings.Contains(got, `"model": "new/model"`) {
+		t.Errorf("the changed model was not written:\n%s", got)
+	}
+
+	rows := s.Log().Rows()
+	if len(rows) == 0 {
+		t.Fatalf("nothing was reported to the reader")
+	}
+	last := rows[len(rows)-1]
+	if !strings.Contains(last.Text, "is written to") {
+		t.Errorf("the reader was not told about the write: %q", last.Text)
+	}
+}
+
+// TestTheOnceGuardStillAppliesWhenNothingWasWritten covers the interaction between
+// the two checks: a session that already found the model unchanged on its first
+// turn is not asked again on a later turn, even though it never wrote anything.
+func TestTheOnceGuardStillAppliesWhenNothingWasWritten(t *testing.T) {
+	s, _ := overConfig(t, "{\n  \"api_key\": \"k\",\n  \"model\": \"some/model\"\n}\n")
+
+	var reads int
+	oldRead := readModelPair
+	readModelPair = func(p string) (string, string, error) {
+		reads++
+		return oldRead(p)
+	}
+	t.Cleanup(func() { readModelPair = oldRead })
+
+	confirm := confirmModel(s)
+	confirm("some/model")
+	confirm("some/model")
+	confirm("some/model")
+
+	if reads != 1 {
+		t.Errorf("the configuration was read %d times, want once", reads)
 	}
 }
 

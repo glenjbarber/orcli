@@ -36,6 +36,19 @@ import (
 // It writes once per session rather than once per turn. The reader's first question
 // is the probe, and after that the model is already in the file, so every later turn
 // writing it again is a write the reader did not ask for.
+//
+// # It does not write when nothing changed
+//
+// Before writing, it reads the model already on disk with config.ReadModelPair and
+// compares it to the one that just answered. A reader who already set up orcli and
+// is simply using it again has the right model in the file before the first question
+// is ever asked, and that first question answering is not that reader choosing
+// anything: it is the common case, not the one this function exists for. A model
+// written when nothing changed is a write the reader did not ask for and a file
+// touched for no reason, so the notice that explains the write is skipped along with
+// it. The once-per-session guard still sits on top of this check, so a session that
+// has already written, or already found nothing to do, is not asked again on a later
+// turn.
 func confirmModel(s *tui.Session) func(string) {
 	written := false
 
@@ -49,6 +62,10 @@ func confirmModel(s *tui.Session) func(string) {
 		if err != nil {
 			s.Notice(fmt.Sprintf("the model is %s, and the configuration file could not be found: %v",
 				model, err), 0, tui.RoleFailure)
+			return
+		}
+
+		if current, _, err := readModelPair(path); err == nil && current == model {
 			return
 		}
 
@@ -164,6 +181,13 @@ func orNoneModel(model string) string {
 // turn writes to the reader's own configuration, which is the one side effect in this
 // program a test must never have.
 var configPath = config.DefaultPath
+
+// readModelPair is the configuration reader, as a variable rather than a call.
+//
+// It is the seam confirmModel uses to find out what is already on disk before
+// deciding whether a write is needed, and it is what lets a test prove that a
+// confirmed turn matching the file on disk writes nothing.
+var readModelPair = config.ReadModelPair
 
 // writeModel is the configuration writer, as a variable rather than a call.
 //
