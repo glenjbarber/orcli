@@ -93,6 +93,30 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"begin": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.begin(args)
 		},
+		"pane": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.pane(args)
+		},
+		"spawn": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.spawn(args)
+		},
+		"btw": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.btw(args)
+		},
+		"delegate": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.delegate(args)
+		},
+		"close": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.close(args)
+		},
+		"copy": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.copyCmd(args)
+		},
+		"queue": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.queue(args)
+		},
+		"redirect": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.redirect(args)
+		},
 	}
 	return d
 }
@@ -159,10 +183,11 @@ func reportLevel(name string) string {
 // Run executes a typed line.
 //
 // A command the dispatcher does not have is reported by name, and the two cases are
-// told apart. The table in internal/tui lists thirty-nine names and this build
-// implements four, so a reader who typed /copy is told the name is in the table and
-// this build does not run it, rather than being told there is no such command: those
-// are different faults and a reader told the second goes looking for a typo.
+// told apart. The table in internal/tui lists more names than this build implements,
+// so a reader who typed a name that is in the table but not yet in d.commands is told
+// the name is in the table and this build does not run it, rather than being told
+// there is no such command: those are different faults and a reader told the second
+// goes looking for a typo.
 //
 // A line that is not a command is not this function's business. The loop sends a
 // question to the model and a command here, and a dispatcher that also answered
