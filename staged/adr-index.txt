@@ -1,6 +1,6 @@
 # Decision records
 
-Forty records, one file each. Five were written at the reader's instruction
+Forty-six records, one file each. Five were written at the reader's instruction
 on 2026-10-05 after the work that carried them were merged. Six were written on
 2026-10-05 for the interface being designed, and all six describe something not
 in the tree. Four more were written on 2026-10-05 from answers in `ANSWERS.md`,
@@ -78,6 +78,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000042](adr-0000042-orcli-introduces-itself-and-its-capabilities.txt) | orcli introduces itself to the model, and names its real capabilities | accepted | nothing. It closes a gap no earlier record settled |
 | [0000043](adr-0000043-a-change-reports-its-own-line-count.txt) | a change reports the lines it added and removed from the tree | accepted | nothing. It names a unit no earlier record used |
 | [0000044](adr-0000044-the-introduction-file-is-agents-md-not-context-md.txt) | the introduction file is AGENTS.md, not CONTEXT.md | accepted | `46a6320`'s choice of CONTEXT.md as the introduction file |
+| [0000046](adr-0000046-status-bar-collisions-with-faded-left-text.txt) | status-bar items overlap when the halves collide, and left-most text fades in font color | proposed | nothing. It supersedes nothing |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
