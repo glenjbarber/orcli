@@ -29,7 +29,9 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 )
 
 // Options is what a session is built from.
@@ -71,6 +73,17 @@ type Options struct {
 	// Bell reports whether the terminal bell is rung when a reply finishes
 	// arriving.
 	Bell bool
+
+	// BreakInterval is how long the session runs before a screen-break
+	// reminder interrupts it. Zero turns the reminder off: a caller that wants
+	// no reminder at all says so with the zero value rather than with a
+	// sentinel duration that reads as a figure somebody chose.
+	BreakInterval time.Duration
+
+	// BreakBell reports whether the terminal bell is rung when a screen break
+	// starts. It is independent of Bell above, which is about a reply arriving
+	// rather than about a break starting.
+	BreakBell bool
 
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
@@ -157,6 +170,17 @@ type Session struct {
 	// is: Shift+Up/Shift+Down move it from the input goroutine while paint reads it
 	// from the same or a timer goroutine.
 	scroll int
+
+	// lastBreak is when the last screen break ended, or when the session
+	// started if none has yet. BreakDue measures from it rather than from a
+	// ticking countdown of its own, so the figure survives whatever paused or
+	// resumed the repaint tick without drifting.
+	lastBreak time.Time
+
+	// breakEnd is when the break in progress is due to end. It is the zero
+	// time while no break is running, which TickBreak never mistakes for a due
+	// time because it only reads this field while state is StateBreak.
+	breakEnd time.Time
 }
 
 // State is what the client is doing, and it is one of four.
@@ -177,7 +201,17 @@ const (
 	StateWorking State = "working"
 	// StatePaused is the reader holding the log still while a turn continues.
 	StatePaused State = "paused"
+	// StateBreak is a screen-break reminder showing, counting down to when the
+	// reader may resume.
+	StateBreak State = "break"
 )
+
+// breakDuration is how long a screen break lasts once it starts.
+//
+// It is fixed rather than configurable: the approved design makes the
+// interval before a break the configurable figure and the break itself a
+// fixed two minutes, the length an eye needs to recover from near focus.
+const breakDuration = 2 * time.Minute
 
 // New returns a session holding the log and nothing else.
 //
@@ -185,7 +219,7 @@ const (
 // gives a reader nothing to tell it has started, and a row that names the program is
 // the one line of state a reader wants before typing anything.
 func New(opts Options) *Session {
-	s := &Session{opts: opts, state: StateIdle, levels: newLevels()}
+	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now()}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
@@ -454,6 +488,90 @@ func (s *Session) Finished(reason string) {
 		Spans: []Span{{Start: 0, End: len(reason), Role: RoleDim}},
 	})
 	s.SetState(StateIdle, "")
+}
+
+// BreakDue reports whether a screen-break reminder is due at now.
+//
+// It is due only while the session is idle. A turn in flight is not
+// interrupted by a reminder unrelated to it, and a break already showing is
+// not due a second time, so a caller can poll this on every tick without
+// guarding it itself.
+func (s *Session) BreakDue(now time.Time) bool {
+	if s.opts.BreakInterval <= 0 {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state != StateIdle {
+		return false
+	}
+	return now.Sub(s.lastBreak) >= s.opts.BreakInterval
+}
+
+// StartBreak begins a screen-break reminder at now, lasting breakDuration.
+//
+// The prompt is cleared, matching the approved interaction: the break shows a
+// blank input box rather than one still holding what the reader had typed,
+// and that input box stays usable through the break rather than being locked.
+func (s *Session) StartBreak(now time.Time) {
+	s.mu.Lock()
+	s.state = StateBreak
+	s.detail = formatRemaining(breakDuration)
+	s.breakEnd = now.Add(breakDuration)
+	s.mu.Unlock()
+
+	s.editor.Reset()
+	text := "screen break: look away from the screen for two minutes"
+	s.log.Append(Row{
+		Kind:  KindNotice,
+		Level: 0,
+		Text:  text,
+		Spans: []Span{{Start: 0, End: len("screen break"), Role: RoleEmphasis}},
+	})
+}
+
+// TickBreak advances a running break's countdown, or ends it once breakEnd
+// has passed.
+//
+// It is driven by the repaint tick rather than by a timer of its own, since
+// the frame already wakes on an interval and a second clock could disagree
+// with the first about when the break is over.
+func (s *Session) TickBreak(now time.Time) {
+	s.mu.Lock()
+	if s.state != StateBreak {
+		s.mu.Unlock()
+		return
+	}
+
+	remaining := s.breakEnd.Sub(now)
+	if remaining > 0 {
+		s.detail = formatRemaining(remaining)
+		s.mu.Unlock()
+		return
+	}
+
+	s.state = StateIdle
+	s.detail = ""
+	s.lastBreak = now
+	s.mu.Unlock()
+
+	s.log.Append(Row{
+		Kind:  KindNotice,
+		Level: 0,
+		Text:  "screen break ended",
+		Spans: []Span{{Start: 0, End: len("screen break ended"), Role: RoleDim}},
+	})
+}
+
+// formatRemaining renders a duration as the countdown the state field shows,
+// rounded to the nearest second so the figure does not flicker between two
+// seconds a tick apart.
+func formatRemaining(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second) / time.Second)
+	return fmt.Sprintf("%dm%02ds remaining", total/60, total%60)
 }
 
 // RowsAt returns the rows at a level, which is what `/copy N` copies.

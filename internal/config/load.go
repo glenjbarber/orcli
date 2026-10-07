@@ -67,6 +67,18 @@ type Config struct {
 	// Bell reports whether the terminal bell is rung when a reply arrives.
 	Bell bool `json:"bell,omitempty"`
 
+	// BreakIntervalMinutes is how long a session runs before a screen-break
+	// reminder interrupts it, in minutes. It is validated in decode rather than
+	// at every use, on the same grounds as Approval: a file naming zero or a
+	// negative figure is reported by name rather than substituted for.
+	BreakIntervalMinutes int `json:"break_interval_minutes,omitempty"`
+
+	// BreakBell reports whether the terminal bell is rung when a screen break
+	// starts. It is separate from Bell above: a reader who wants to know a
+	// reply arrived but not be startled by a break reminder, or the reverse,
+	// is choosing between two different events and needs two different knobs.
+	BreakBell bool `json:"break_bell,omitempty"`
+
 	// Color reports whether colour output is on. Off is the default, and is
 	// decided by this file and by /color alone: NO_COLOR and every other
 	// environment variable are ignored, on the same terms as the API key.
@@ -117,14 +129,16 @@ type Config struct {
 // design names as the default.
 func Default() Config {
 	return Config{
-		Model:         "",
-		Provider:      "openrouter.ai",
-		AttributionID: "",
-		Mouse:         false,
-		Bell:          false,
-		Color:         false,
-		Verbosity:     0,
-		Approval:      string(ApprovalAsk),
+		Model:                "",
+		Provider:             "openrouter.ai",
+		AttributionID:        "",
+		Mouse:                false,
+		Bell:                 false,
+		BreakIntervalMinutes: 22,
+		BreakBell:            false,
+		Color:                false,
+		Verbosity:            0,
+		Approval:             string(ApprovalAsk),
 	}
 }
 
@@ -237,6 +251,10 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readBool(value, &c.Mouse)
 		case "bell":
 			err = readBool(value, &c.Bell)
+		case "break_interval_minutes":
+			err = readInt(value, &c.BreakIntervalMinutes)
+		case "break_bell":
+			err = readBool(value, &c.BreakBell)
 		case "color":
 			err = readBool(value, &c.Color)
 		case "verbosity":
@@ -261,6 +279,12 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 	// a reason that points nowhere near the file.
 	if _, err := parseApproval(c.Approval); err != nil {
 		return err
+	}
+
+	// A figure of zero or less has no reading as an interval, and substituting
+	// the default for it would do something other than what the reader wrote.
+	if c.BreakIntervalMinutes <= 0 {
+		return fmt.Errorf("break_interval_minutes: must be positive, got %d", c.BreakIntervalMinutes)
 	}
 	return nil
 }

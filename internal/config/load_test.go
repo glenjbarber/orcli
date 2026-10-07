@@ -376,4 +376,44 @@ func TestDefaultIsUsableWithoutAFile(t *testing.T) {
 	if cfg.APIKey != "" {
 		t.Errorf("APIKey is %q, want it empty", cfg.APIKey)
 	}
+	if cfg.BreakIntervalMinutes != 22 {
+		t.Errorf("BreakIntervalMinutes is %d, want 22", cfg.BreakIntervalMinutes)
+	}
+	if cfg.BreakBell {
+		t.Error("BreakBell is true, want it off by default")
+	}
+}
+
+// TestParseReadsBreakFields checks that the screen-break preferences are read
+// the way every other preference is.
+func TestParseReadsBreakFields(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json",
+		`{"api_key":"k","break_interval_minutes":10,"break_bell":true}`, FileMode)
+
+	cfg, err := Parse([]byte(
+		`{"api_key":"k","break_interval_minutes":10,"break_bell":true}`), path)
+	if err != nil {
+		t.Fatalf("Parse returned %v, want nil", err)
+	}
+	if cfg.BreakIntervalMinutes != 10 {
+		t.Errorf("BreakIntervalMinutes is %d, want 10", cfg.BreakIntervalMinutes)
+	}
+	if !cfg.BreakBell {
+		t.Error("BreakBell is false, want true")
+	}
+}
+
+// TestParseRejectsNonPositiveBreakInterval checks that a file naming a
+// break_interval_minutes of zero or less is reported by name rather than
+// silently given the default instead.
+func TestParseRejectsNonPositiveBreakInterval(t *testing.T) {
+	for _, minutes := range []string{"0", "-5"} {
+		body := `{"api_key":"k","break_interval_minutes":` + minutes + `}`
+		path := write(t, t.TempDir(), "orcli.json", body, FileMode)
+
+		_, err := Parse([]byte(body), path)
+		if err == nil {
+			t.Errorf("Parse with break_interval_minutes %s returned nil, want an error", minutes)
+		}
+	}
 }

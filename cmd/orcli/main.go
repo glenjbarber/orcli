@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/openrouter"
@@ -65,13 +66,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fs.Usage = func() {}
 
 	var (
-		showVersion = fs.Bool("version", false, "print the version and stop")
-		showHelp    = fs.Bool("help", false, "print the usage and stop")
-		bootstrap   = fs.String("bootstrap", "", "read a document from this path")
-		mouse       = fs.Bool("mouse", false, "report the mouse")
-		bell        = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
-		color       = fs.Bool("color", false, "write colour")
-		dir         = fs.String("dir", "", "run in this directory rather than the current directory")
+		showVersion   = fs.Bool("version", false, "print the version and stop")
+		showHelp      = fs.Bool("help", false, "print the usage and stop")
+		bootstrap     = fs.String("bootstrap", "", "read a document from this path")
+		mouse         = fs.Bool("mouse", false, "report the mouse")
+		bell          = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
+		breakInterval = fs.Int("break-interval", 0, "minutes before a screen-break reminder (0 uses the configured default)")
+		breakBell     = fs.Bool("break-bell", false, "ring the terminal bell when a screen break starts")
+		color         = fs.Bool("color", false, "write colour")
+		dir           = fs.String("dir", "", "run in this directory rather than the current directory")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -135,6 +138,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return err
 	}
 
+	// A negative figure has no reading as an interval, on the same grounds as
+	// the configuration file's own break_interval_minutes. Zero is not refused
+	// here: it means the flag was not given, and the configured figure, itself
+	// validated at Load, stands instead.
+	if *breakInterval < 0 {
+		return fmt.Errorf("--break-interval must be positive")
+	}
+	breakIntervalMinutes := cfg.BreakIntervalMinutes
+	if *breakInterval > 0 {
+		breakIntervalMinutes = *breakInterval
+	}
+
 	workDir := *dir
 	if workDir == "" {
 		if workDir, err = os.Getwd(); err != nil {
@@ -143,13 +158,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	s := session{
-		Config:     cfg,
-		Approval:   approval,
-		Bootstrap:  *bootstrap,
-		Mouse:      *mouse || cfg.Mouse,
-		Bell:       *bell || cfg.Bell,
-		Color:      *color || cfg.Color,
-		WorkingDir: workDir,
+		Config:               cfg,
+		Approval:             approval,
+		Bootstrap:            *bootstrap,
+		Mouse:                *mouse || cfg.Mouse,
+		Bell:                 *bell || cfg.Bell,
+		BreakIntervalMinutes: breakIntervalMinutes,
+		BreakBell:            *breakBell || cfg.BreakBell,
+		Color:                *color || cfg.Color,
+		WorkingDir:           workDir,
 	}
 
 	// A refusal is not a failure. A reader who does not want to approve a directory
@@ -181,14 +198,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 // It exists so the whole of startup is inspectable without a terminal, which is
 // what makes the wiring testable.
 type session struct {
-	Config     config.Config
-	Approval   config.Approval
-	HasTools   bool
-	Mouse      bool
-	Bell       bool
-	Color      bool
-	Bootstrap  string
-	WorkingDir string
+	Config               config.Config
+	Approval             config.Approval
+	HasTools             bool
+	Mouse                bool
+	Bell                 bool
+	BreakIntervalMinutes int
+	BreakBell            bool
+	Color                bool
+	Bootstrap            string
+	WorkingDir           string
 }
 
 // tuiSession builds the interface's own session from what startup resolved.
@@ -214,14 +233,16 @@ type session struct {
 // nothing with it.
 func (s session) tuiSession() *tui.Session {
 	opts := tui.Options{
-		APIKey:     s.Config.APIKey,
-		Model:      s.Config.Model,
-		Provider:   s.Config.Provider,
-		Approval:   tuiApproval(s.Approval),
-		WorkingDir: s.WorkingDir,
-		Color:      s.Color,
-		Bell:       s.Bell,
-		Mouse:      s.Mouse,
+		APIKey:        s.Config.APIKey,
+		Model:         s.Config.Model,
+		Provider:      s.Config.Provider,
+		Approval:      tuiApproval(s.Approval),
+		WorkingDir:    s.WorkingDir,
+		Color:         s.Color,
+		Bell:          s.Bell,
+		BreakInterval: time.Duration(s.BreakIntervalMinutes) * time.Minute,
+		BreakBell:     s.BreakBell,
+		Mouse:         s.Mouse,
 	}
 	return tui.New(opts)
 }
@@ -288,6 +309,7 @@ func printSession(w io.Writer, s session) {
 	fmt.Fprintf(w, "  tools          %s\n", enabled(s.HasTools))
 	fmt.Fprintf(w, "  mouse          %s\n", enabled(s.Mouse))
 	fmt.Fprintf(w, "  bell           %s\n", enabled(s.Bell))
+	fmt.Fprintf(w, "  break          every %dm, bell %s\n", s.BreakIntervalMinutes, enabled(s.BreakBell))
 	fmt.Fprintf(w, "  colour         %s\n", enabled(s.Color))
 	fmt.Fprintf(w, "  directory      %s\n", orNone(s.WorkingDir))
 	fmt.Fprintf(w, "  bootstrap      %s\n", orNone(s.Bootstrap))
@@ -401,6 +423,8 @@ flags:
   --bootstrap PATH       read a document from PATH
   --mouse                report the mouse
   --bell                 ring the terminal bell when a reply arrives
+  --break-interval MIN   minutes before a screen-break reminder (default 22)
+  --break-bell           ring the terminal bell when a screen break starts
   --color                write colour
   --dir DIR              run in DIR rather than the current directory
 

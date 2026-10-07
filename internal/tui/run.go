@@ -119,6 +119,11 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		}
 		l.paint()
 	})
+	app.SetAfterDrawFunc(func(screen tcell.Screen) {
+		if l.consumeBell() {
+			screen.Beep()
+		}
+	})
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		key, r := keyEvent(event)
 		if key == KeyNone {
@@ -151,7 +156,19 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 			case <-finished:
 				return
 			case <-ticker.C:
-				app.QueueUpdateDraw(func() { l.paint() })
+				now := time.Now()
+				due := l.session.BreakDue(now)
+				if due {
+					l.session.StartBreak(now)
+				} else {
+					l.session.TickBreak(now)
+				}
+				app.QueueUpdateDraw(func() {
+					if due && l.session.Options().BreakBell {
+						l.bellPending = true
+					}
+					l.paint()
+				})
 			}
 		}
 	}()
@@ -186,6 +203,21 @@ type interfaceLoop struct {
 
 	// step is the sweep's position, advanced on each paint while a turn runs.
 	step int
+
+	// bellPending reports that a screen break just started with its bell on,
+	// and the next draw owes a ring. It is touched only from the application's
+	// own event-loop goroutine, by the QueueUpdateDraw callback that sets it
+	// and the AfterDrawFunc that reads and clears it, so it carries no lock of
+	// its own.
+	bellPending bool
+}
+
+// consumeBell reports whether a bell is owed for the draw about to happen,
+// and clears the request so the same break does not ring it twice.
+func (l *interfaceLoop) consumeBell() bool {
+	pending := l.bellPending
+	l.bellPending = false
+	return pending
 }
 
 // paint draws what has changed since the last one.
