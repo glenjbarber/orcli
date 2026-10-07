@@ -15,12 +15,9 @@ import (
 
 // maxToolRounds bounds how many times one turn can call a tool before this gives up
 // and reports the turn stopped rather than looping forever against a model that keeps
-// asking for more.
-//
-// Eight is a judgment, not a derivation: enough for a real multi-step task (read a
-// file, edit it, run a test, check the result) without being indistinguishable from a
-// hang.
-const maxToolRounds = 8
+// asking for more. The large ceiling permits long agent workflows while still making
+// a runaway turn finite.
+const maxToolRounds = 4096
 
 // chatClient is the one method ask needs from *openrouter.Client.
 //
