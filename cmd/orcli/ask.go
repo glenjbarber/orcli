@@ -339,11 +339,14 @@ func introduction(dir string) string {
 // what lets it see the same capability message, the same AGENTS.md introduction,
 // and the same documentation listing every other turn sees - a second path that
 // built its own greeting would be a second thing to keep in step with those three.
+// The documentation listing reaching the model this way, unchanged, is what lets the
+// greeting stay silent about doc/ and staged/ below: the names are already in its
+// context the moment the reader does ask, so the hello does not need to recite them
+// first to make that true later.
 const helloQuestion = "This is the start of the session, before the reader has " +
-	"typed anything. Greet them briefly: say you are orcli, summarize in a " +
+	"typed anything. Greet them briefly: say you are orcli and summarize in a " +
 	"sentence or two what this session has configured from the capability " +
-	"message above, and name doc/ and staged/ as where the detail behind any " +
-	"of it lives if they ask for more."
+	"message above."
 
 // documentation lists the names of orcli's own documentation under dir, so the
 // capability message can point the model at doc/ and staged/ by name rather than
