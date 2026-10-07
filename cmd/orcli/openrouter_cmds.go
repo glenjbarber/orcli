@@ -11,37 +11,56 @@ import (
 )
 
 // catalogClient is the two methods /key, /models, /freemodels and /attribute need
-// from *openrouter.Client.
+// from the configured provider's own client - *openrouter.Client when the session
+// is configured for OpenRouter, *groq.Client when it is configured for Groq (see
+// isGroqProvider in provider.go and newDispatcherFor's own construction of
+// newORClient in dispatch.go).
 //
 // It exists for the reason chatClient does: a test can hand the dispatcher a fake
-// that answers in memory, since openrouter.Client's base URL is fixed by New and
-// cannot be pointed at a test server from outside the package (see chatClient's own
-// doc comment). *openrouter.Client already satisfies this with no change to it.
+// that answers in memory, since neither client's base URL can be pointed at a test
+// server from outside its own package (see chatClient's own doc comment).
+// *openrouter.Client and *groq.Client both already satisfy this with no change to
+// either: internal/groq.Client.Models returns the same openrouter.ModelInfo
+// openrouter.Client.Models does, for the reason internal/groq's own package doc
+// gives, and internal/groq.Client.KeyUsage returns the same openrouter.KeyInfo
+// alongside a fixed error, since Groq publishes no usage-accounting endpoint for
+// this method to read (see internal/groq/key.go).
 type catalogClient interface {
 	Models(ctx context.Context) ([]openrouter.ModelInfo, error)
 	KeyUsage(ctx context.Context) (openrouter.KeyInfo, error)
 }
 
-// openrouterReady reports whether an OpenRouter call could be made right now,
-// without building the client.
+// openrouterReady reports whether a catalog or chat call could be made right now,
+// without building the client - against whichever provider the configuration
+// names, OpenRouter or Groq alike, since this build holds exactly one credential
+// per session either way (see internal/config.Config.APIKey's own doc comment).
 //
 // It mirrors cloudflareReady for the credential this program runs on rather than
 // the optional Cloudflare one: the key is read fresh from the block rather than
 // cached as a bool, so nothing here has to remember to invalidate a cache the
 // reader's configuration was never written to change in the first place.
+//
+// The name is kept as it was before Groq support existed, for the reason the
+// orClient field's own comment in dispatch.go gives: it reads correctly for every
+// session configured for OpenRouter, which remains the default and the common
+// case, and a provider-neutral rename here would touch nothing a caller outside
+// this file can observe.
 func (d *dispatcher) openrouterReady() bool {
 	return d.cfg.APIKey != ""
 }
 
-// catalogClient builds the OpenRouter catalog client, caching it the way
-// cloudflareClient caches the Cloudflare one.
+// catalogClient builds the configured provider's own catalog client, caching it
+// the way cloudflareClient caches the Cloudflare one.
 //
 // The client is built rather than handed in for the same reason: a handler that
 // took one would have every caller construct it, and a caller that forgot the
 // credential filter would be a caller whose diagnostics carry the key. An empty
 // key is refused here, before anything is built, so the refusal is openrouter's
-// own ErrNoAPIKey rather than a request the endpoint answers the same way it
-// answers an invalid one.
+// own ErrNoAPIKey - reused rather than duplicated for a Groq-configured session
+// too, since the two providers fail this one local check for the identical reason
+// and a second, Groq-spelled error for the same fact would be a second message a
+// reader has to learn means the same thing - rather than a request the endpoint
+// answers the same way it answers an invalid one.
 func (d *dispatcher) catalogClient() (catalogClient, error) {
 	if d.cfg.APIKey == "" {
 		return nil, openrouter.ErrNoAPIKey
