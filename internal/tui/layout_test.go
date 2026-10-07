@@ -355,6 +355,49 @@ func TestThePaneBarIsItsOwnRowBelowBarTwo(t *testing.T) {
 	}
 }
 
+// TestThePaneBarDrawsTheConfiguredPaneColour covers the wiring from a configured
+// colour through to the cell the reader actually sees: fieldPaneState set to
+// "running" draws the pane bar row in the palette's configured active colour
+// rather than in chrome.
+func TestThePaneBarDrawsTheConfiguredPaneColour(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, nil)
+
+	var s Status
+	s[fieldPane] = "main"
+	s[fieldPaneState] = "running"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
+	promptRow := scrollbackRows(20)
+
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	gotFG, _, _ := gotStyle.Decompose()
+	if gotFG != active.TCellColor() {
+		t.Errorf("the pane bar's foreground is %v, want the configured active colour %v",
+			gotFG, active.TCellColor())
+	}
+}
+
+// TestThePaneBarDrawsChromeWithNoWorkerState covers the pane bar's default: with
+// fieldPaneState empty, the bar draws in chrome even though a pane colour is
+// configured, since neither state applies.
+func TestThePaneBarDrawsChromeWithNoWorkerState(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, nil)
+
+	var s Status
+	s[fieldPane] = "main"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
+	promptRow := scrollbackRows(20)
+
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	gotFG, _, _ := gotStyle.Decompose()
+	wantFG, _, _ := frameStyle(p, RoleChrome).Decompose()
+	if gotFG != wantFG {
+		t.Errorf("the pane bar's foreground with no worker state is %v, want chrome %v",
+			gotFG, wantFG)
+	}
+}
+
 // TestThePaneBarTruncatesWithAnEllipsis covers Glen's confirmed departure from
 // adr-0000020's literal "no ellipsis": this bar truncates the same way every other row
 // in this file does, with cutTail's ellipsis, rather than clipping silently.

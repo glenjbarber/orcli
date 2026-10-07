@@ -442,3 +442,56 @@ func TestThemeNamesSaysWhatWasAskedFor(t *testing.T) {
 		}
 	}
 }
+
+// TestPaneStyleFallsBackWithNoColoursConfigured covers the default a session built
+// with neither PaneActiveColor nor PaneDoneColor gets: the pane bar colours exactly
+// as it did before this existed, which is not at all.
+func TestPaneStyleFallsBackWithNoColoursConfigured(t *testing.T) {
+	p := NewPalette(true, GroundDark, nil)
+
+	for _, state := range []string{"running", "done", "", "something else"} {
+		if _, ok := p.PaneStyle(state); ok {
+			t.Errorf("PaneStyle(%q) with no pane colours configured reports ok, want false", state)
+		}
+	}
+}
+
+// TestPaneStyleUsesTheConfiguredColours covers the two states a reader can configure,
+// and that they are not the same colour as each other or as no colour at all.
+func TestPaneStyleUsesTheConfiguredColours(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	done := RGB{R: 0x44, G: 0x55, B: 0x66}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, &done)
+
+	runningStyle, ok := p.PaneStyle("running")
+	if !ok {
+		t.Fatal(`PaneStyle("running") reports ok = false, want true`)
+	}
+	if fg, _, _ := runningStyle.Decompose(); fg != active.TCellColor() {
+		t.Errorf("running foreground = %v, want %v", fg, active.TCellColor())
+	}
+
+	doneStyle, ok := p.PaneStyle("done")
+	if !ok {
+		t.Fatal(`PaneStyle("done") reports ok = false, want true`)
+	}
+	if fg, _, _ := doneStyle.Decompose(); fg != done.TCellColor() {
+		t.Errorf("done foreground = %v, want %v", fg, done.TCellColor())
+	}
+
+	if _, ok := p.PaneStyle(""); ok {
+		t.Error(`PaneStyle("") reports ok = true, want false: neither state applies`)
+	}
+}
+
+// TestPaneStyleIsOffWithColourOff covers the rule every other role already follows:
+// a palette with colour off writes no colour, and the pane bar is not an exception
+// carved out of it.
+func TestPaneStyleIsOffWithColourOff(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(false, GroundDark, nil).WithPaneColors(&active, &active)
+
+	if _, ok := p.PaneStyle("running"); ok {
+		t.Error("PaneStyle reports ok = true with colour off, want false")
+	}
+}

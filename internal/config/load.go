@@ -84,6 +84,21 @@ type Config struct {
 	// environment variable are ignored, on the same terms as the API key.
 	Color bool `json:"color,omitempty"`
 
+	// PaneActiveColor is the colour (`#rrggbb`) the pane bar is drawn in while a
+	// worker is running at the shown pane. It is a second, distinct toggle from
+	// Color above: Color decides whether colour is written at all, and this and
+	// PaneDoneColor below decide which colour a pane's own state is shown in
+	// once it is. It only has an effect while Color is on.
+	PaneActiveColor string `json:"pane_active_color,omitempty"`
+
+	// PaneDoneColor is the colour (`#rrggbb`) the pane bar is drawn in once a
+	// worker at the shown pane has finished on its own, and stays in until
+	// another worker starts there (see tui.Session.PaneState). It is separate
+	// from PaneActiveColor for the reason the running and finished states are
+	// separate at all: a reader who glances at the bar has to tell "still
+	// working" from "done, come read it" apart without switching to the pane.
+	PaneDoneColor string `json:"pane_done_color,omitempty"`
+
 	// Verbosity is how much the model is asked to answer with, 0 to 6.
 	Verbosity int `json:"verbosity,omitempty"`
 
@@ -137,10 +152,24 @@ func Default() Config {
 		BreakIntervalMinutes: 22,
 		BreakBell:            false,
 		Color:                false,
+		PaneActiveColor:      DefaultPaneActiveColor,
+		PaneDoneColor:        DefaultPaneDoneColor,
 		Verbosity:            0,
 		Approval:             string(ApprovalAsk),
 	}
 }
+
+// DefaultPaneActiveColor and DefaultPaneDoneColor are the colours a reader
+// gets who has set neither. They are the same values internal/tui's own role
+// table already uses - RoleList's blue for a worker running, RoleSuccess's
+// green for one that finished - so a reader who has learned what those colours
+// mean elsewhere in this program is not handed two new ones to learn here.
+// Exported so cmd/orcli can name them in its own usage text, rather than
+// repeating the hex by hand in a second file.
+const (
+	DefaultPaneActiveColor = "#89b4fa"
+	DefaultPaneDoneColor   = "#a6e3a1"
+)
 
 // ApprovalMode is the parsed approval mode.
 //
@@ -257,6 +286,10 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readBool(value, &c.BreakBell)
 		case "color":
 			err = readBool(value, &c.Color)
+		case "pane_active_color":
+			err = readString(value, &c.PaneActiveColor)
+		case "pane_done_color":
+			err = readString(value, &c.PaneDoneColor)
 		case "verbosity":
 			err = readInt(value, &c.Verbosity)
 		case "approval":
@@ -286,7 +319,40 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 	if c.BreakIntervalMinutes <= 0 {
 		return fmt.Errorf("break_interval_minutes: must be positive, got %d", c.BreakIntervalMinutes)
 	}
+
+	// A pane colour that is present but not `#rrggbb` is reported by name, on
+	// the same grounds as the approval mode above: a reader who mistyped one
+	// deserves to be told which field and what shape it wanted, not to have it
+	// silently dropped and find the pane bar uncoloured.
+	if c.PaneActiveColor != "" && !isHexColor(c.PaneActiveColor) {
+		return fmt.Errorf("pane_active_color: %q is not #rrggbb", c.PaneActiveColor)
+	}
+	if c.PaneDoneColor != "" && !isHexColor(c.PaneDoneColor) {
+		return fmt.Errorf("pane_done_color: %q is not #rrggbb", c.PaneDoneColor)
+	}
 	return nil
+}
+
+// isHexColor reports whether s is a `#rrggbb` value.
+//
+// It is written out here rather than taken from internal/tui, which has its
+// own RGBFromHex for the same shape: this package holds no dependency on the
+// interface package today, and a single string check is a smaller price than
+// the first import between them.
+func isHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, r := range s[1:] {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // checkMode refuses a file that is readable by anyone but its owner.

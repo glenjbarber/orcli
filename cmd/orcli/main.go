@@ -66,15 +66,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fs.Usage = func() {}
 
 	var (
-		showVersion   = fs.Bool("version", false, "print the version and stop")
-		showHelp      = fs.Bool("help", false, "print the usage and stop")
-		bootstrap     = fs.String("bootstrap", "", "read a document from this path")
-		mouse         = fs.Bool("mouse", false, "report the mouse")
-		bell          = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
-		breakInterval = fs.Int("break-interval", 0, "minutes before a screen-break reminder (0 uses the configured default)")
-		breakBell     = fs.Bool("break-bell", false, "ring the terminal bell when a screen break starts")
-		color         = fs.Bool("color", false, "write colour")
-		dir           = fs.String("dir", "", "run in this directory rather than the current directory")
+		showVersion     = fs.Bool("version", false, "print the version and stop")
+		showHelp        = fs.Bool("help", false, "print the usage and stop")
+		bootstrap       = fs.String("bootstrap", "", "read a document from this path")
+		mouse           = fs.Bool("mouse", false, "report the mouse")
+		bell            = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
+		breakInterval   = fs.Int("break-interval", 0, "minutes before a screen-break reminder (0 uses the configured default)")
+		breakBell       = fs.Bool("break-bell", false, "ring the terminal bell when a screen break starts")
+		color           = fs.Bool("color", false, "write colour")
+		paneActiveColor = fs.String("pane-active-color", "", "#rrggbb for a pane with a running worker (default "+config.DefaultPaneActiveColor+")")
+		paneDoneColor   = fs.String("pane-done-color", "", "#rrggbb for a pane whose worker just finished (default "+config.DefaultPaneDoneColor+")")
+		dir             = fs.String("dir", "", "run in this directory rather than the current directory")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -145,6 +147,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if *breakInterval < 0 {
 		return fmt.Errorf("--break-interval must be positive")
 	}
+
+	// A flag's colour is checked here, on the same grounds the configuration
+	// file's own PaneActiveColor/PaneDoneColor are checked at Load: a reader
+	// who mistyped one is told which flag and what shape it wanted, rather
+	// than finding the pane bar quietly uncoloured.
+	if err := checkPaneColorFlag("--pane-active-color", *paneActiveColor); err != nil {
+		return err
+	}
+	if err := checkPaneColorFlag("--pane-done-color", *paneDoneColor); err != nil {
+		return err
+	}
 	breakIntervalMinutes := cfg.BreakIntervalMinutes
 	if *breakInterval > 0 {
 		breakIntervalMinutes = *breakInterval
@@ -166,6 +179,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		BreakIntervalMinutes: breakIntervalMinutes,
 		BreakBell:            *breakBell || cfg.BreakBell,
 		Color:                *color || cfg.Color,
+		PaneActiveColor:      firstNonEmpty(*paneActiveColor, cfg.PaneActiveColor),
+		PaneDoneColor:        firstNonEmpty(*paneDoneColor, cfg.PaneDoneColor),
 		WorkingDir:           workDir,
 	}
 
@@ -206,6 +221,8 @@ type session struct {
 	BreakIntervalMinutes int
 	BreakBell            bool
 	Color                bool
+	PaneActiveColor      string
+	PaneDoneColor        string
 	Bootstrap            string
 	WorkingDir           string
 }
@@ -244,7 +261,45 @@ func (s session) tuiSession() *tui.Session {
 		BreakBell:     s.BreakBell,
 		Mouse:         s.Mouse,
 	}
+
+	// Each colour is parsed only if it is present and well-formed, which run
+	// has already checked for the flag and Load has already checked for the
+	// file. A colour that somehow still fails to parse is left nil rather than
+	// substituted for, which is the same "a pane with no opinion draws in
+	// chrome" fallback a session built with neither field set gets.
+	if rgb, ok := tui.RGBFromHex(s.PaneActiveColor); ok {
+		opts.PaneActiveColor = &rgb
+	}
+	if rgb, ok := tui.RGBFromHex(s.PaneDoneColor); ok {
+		opts.PaneDoneColor = &rgb
+	}
 	return tui.New(opts)
+}
+
+// firstNonEmpty returns a if it is not empty, and b otherwise.
+//
+// It is how a flag overrides the configuration file for a string setting: a
+// flag the reader did not pass parses to its zero value, which is the one
+// value that has to mean "nothing was said" rather than "the empty string was
+// chosen", since every setting this file reads named this way is a thing a
+// reader opts into rather than explicitly turns off with an empty value.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// checkPaneColorFlag refuses a flag value that is present but not `#rrggbb`,
+// naming the flag so a reader who mistyped one is told which.
+func checkPaneColorFlag(flag, value string) error {
+	if value == "" {
+		return nil
+	}
+	if _, ok := tui.RGBFromHex(value); !ok {
+		return fmt.Errorf("%s must be #rrggbb", flag)
+	}
+	return nil
 }
 
 // tuiApproval converts one approval mode to the other.
@@ -311,6 +366,8 @@ func printSession(w io.Writer, s session) {
 	fmt.Fprintf(w, "  bell           %s\n", enabled(s.Bell))
 	fmt.Fprintf(w, "  break          every %dm, bell %s\n", s.BreakIntervalMinutes, enabled(s.BreakBell))
 	fmt.Fprintf(w, "  colour         %s\n", enabled(s.Color))
+	fmt.Fprintf(w, "  pane active    %s\n", orNone(s.PaneActiveColor))
+	fmt.Fprintf(w, "  pane done      %s\n", orNone(s.PaneDoneColor))
 	fmt.Fprintf(w, "  directory      %s\n", orNone(s.WorkingDir))
 	fmt.Fprintf(w, "  bootstrap      %s\n", orNone(s.Bootstrap))
 }
@@ -426,6 +483,8 @@ flags:
   --break-interval MIN   minutes before a screen-break reminder (default 22)
   --break-bell           ring the terminal bell when a screen break starts
   --color                write colour
+  --pane-active-color #rrggbb   colour for a pane with a running worker
+  --pane-done-color #rrggbb     colour for a pane whose worker just finished
   --dir DIR              run in DIR rather than the current directory
 
 configuration:

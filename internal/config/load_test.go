@@ -78,6 +78,68 @@ func TestParseReadsEveryNamedField(t *testing.T) {
 	}
 }
 
+// TestDefaultSetsThePaneColors covers the defaults a reader who has set neither
+// pane colour gets: the same blue and green internal/tui's own role table
+// already uses, rather than two unfamiliar colours.
+func TestDefaultSetsThePaneColors(t *testing.T) {
+	cfg := Default()
+
+	if cfg.PaneActiveColor != DefaultPaneActiveColor {
+		t.Errorf("PaneActiveColor is %q, want %q", cfg.PaneActiveColor, DefaultPaneActiveColor)
+	}
+	if cfg.PaneDoneColor != DefaultPaneDoneColor {
+		t.Errorf("PaneDoneColor is %q, want %q", cfg.PaneDoneColor, DefaultPaneDoneColor)
+	}
+}
+
+// TestParseReadsThePaneColors covers the two pane colours as a reader's own file
+// would carry them, apart from the plain Color on/off toggle.
+func TestParseReadsThePaneColors(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json", `{
+		"api_key": "sk-or-v1-a-key",
+		"color": true,
+		"pane_active_color": "#112233",
+		"pane_done_color": "#445566"
+	}`, FileMode)
+
+	cfg, err := Parse([]byte(`{
+		"api_key": "sk-or-v1-a-key",
+		"color": true,
+		"pane_active_color": "#112233",
+		"pane_done_color": "#445566"
+	}`), path)
+	if err != nil {
+		t.Fatalf("Parse returned %v, want nil", err)
+	}
+
+	if cfg.PaneActiveColor != "#112233" {
+		t.Errorf("PaneActiveColor is %q, want #112233", cfg.PaneActiveColor)
+	}
+	if cfg.PaneDoneColor != "#445566" {
+		t.Errorf("PaneDoneColor is %q, want #445566", cfg.PaneDoneColor)
+	}
+}
+
+// TestParseRefusesAMalformedPaneColor covers the report a reader who mistyped
+// one gets: the field named, rather than the colour silently dropped.
+func TestParseRefusesAMalformedPaneColor(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json", `{
+		"api_key": "sk-or-v1-a-key",
+		"pane_active_color": "blue"
+	}`, FileMode)
+
+	_, err := Parse([]byte(`{
+		"api_key": "sk-or-v1-a-key",
+		"pane_active_color": "blue"
+	}`), path)
+	if err == nil {
+		t.Fatal("Parse returned nil, want a refusal naming pane_active_color")
+	}
+	if !strings.Contains(err.Error(), "pane_active_color") {
+		t.Errorf("Parse error is %q, want it to name pane_active_color", err)
+	}
+}
+
 // TestParseIgnoresUnknownKeys covers a file written by a newer version.
 //
 // A reader whose configuration gained a key they do not understand must not be

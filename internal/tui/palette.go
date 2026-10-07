@@ -42,6 +42,55 @@ type Palette struct {
 	// colour. Whether a terminal draws it is unverified, so it is offered rather
 	// than defaulted to.
 	faint bool
+
+	// paneActive and paneDone are the pane bar's own colours, apart from fg/bg
+	// above and from every Role: a pane's state is not a role a row carries, it
+	// is a fact about a worker that this palette is told about once per draw.
+	// The two hasPaneXxx flags are what let a palette built with neither (every
+	// existing caller, and every caller in a test) keep drawing the pane bar in
+	// chrome exactly as it did before this existed.
+	paneActive, paneDone       RGB
+	hasPaneActive, hasPaneDone bool
+}
+
+// WithPaneColors returns a palette that colours the pane bar while a worker
+// is running, or has just finished, at the pane shown. Either argument may be
+// nil, which leaves that one state drawn in chrome.
+//
+// It is a second method beside NewPalette rather than a parameter on it,
+// for the reason WithFaintDim is: these are configured apart from the ground
+// and the theme, and a caller that wants the ordinary palette untouched by
+// them keeps calling NewPalette alone.
+func (p Palette) WithPaneColors(active, done *RGB) Palette {
+	if active != nil {
+		p.paneActive, p.hasPaneActive = *active, true
+	}
+	if done != nil {
+		p.paneDone, p.hasPaneDone = *done, true
+	}
+	return p
+}
+
+// PaneStyle returns the style the pane bar draws a pane's state in, and
+// whether a configured colour applies. state is "running", "done", or
+// anything else for neither; the caller falls back to its own chrome style
+// when ok is false, which covers colour being off, the state being neither,
+// and no colour configured for the state that applies.
+func (p Palette) PaneStyle(state string) (style tcell.Style, ok bool) {
+	if !p.on {
+		return tcell.StyleDefault, false
+	}
+	switch state {
+	case "running":
+		if p.hasPaneActive {
+			return tcell.StyleDefault.Foreground(p.paneActive.TCellColor()), true
+		}
+	case "done":
+		if p.hasPaneDone {
+			return tcell.StyleDefault.Foreground(p.paneDone.TCellColor()), true
+		}
+	}
+	return tcell.StyleDefault, false
 }
 
 // NewPalette builds a palette for a ground, a theme and whether colour is on.
