@@ -19,7 +19,10 @@ already uses. 0000044 corrects a choice `46a6320` made, separate from
 was `CONTEXT.md`, a name already claimed elsewhere for a different purpose
 with its own instruction to fetch an external policy, and 0000044 points
 the mechanism at `AGENTS.md` instead, the file this project's own
-convention already calls read by default.)
+convention already calls read by default. 0000045 corrects 0000006's own
+escape clause: `loreloom/AGENTS.md`, written later, says escape sends the
+newest queued message, not the head 0000006 named; Glen accepted the newer
+source and every other part of 0000006 stands.)
 
 A record carries its own status in its header. `SUPERCEDED` goes on the record
 that was replaced, beside the number that replaced it, and the replacing record
@@ -35,7 +38,8 @@ on the record is the place, and this table is the view across all of them.
 | [0000003](adr-0000003-first-request-is-the-probe.txt) | the first request is the connection test | accepted | a command that tested the connection, with no handler |
 | [0000004](adr-0000004-model-choice-records-replaced.txt) | a choice records the model it replaced | accepted | a writer that set the model and recorded nothing about the previous one |
 | [0000005](adr-0000005-consider-tview.txt) | consider tview for the interface | accepted | nothing. It supersedes nothing |
-| [0000006](adr-0000006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | accepted | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
+| [0000006](adr-0000006-queue-one-per-turn-and-escape-sends.txt) | a queued message is sent one per turn, and escape sends the next one now | accepted, in part SUPERCEDED by 0000045 | the escape rule in `staged/status-interrupt.txt`, which sends nothing |
+| [0000045](adr-0000045-escape-sends-the-newest-queued-message.txt) | escape sends the newest queued message, not the head | accepted | 0000006's escape clause only |
 | [0000007](adr-0000007-the-interface-is-a-multiplexer.txt) | the interface is a multiplexer of sessions | accepted, in part SUPERCEDED by 0000008 and 0000010, and SUPERCEDED by `UI-redesign.md` | 0000001, where one program drew one screen for one conversation |
 | [0000008](adr-0000008-live-view-status-pane-view.txt) | the screen is a live view, a status window and a pane view | SUPERCEDED by 0000010, and SUPERCEDED by `UI-redesign.md` | 0000001 and the pane arrangement of 0000007 |
 | [0000009](adr-0000009-live-view-contents-and-the-prompt.txt) | what the live view shows, and the prompt is a joke | SUPERCEDED by 0000010, and SUPERCEDED by `UI-redesign.md` | nothing |

@@ -1,7 +1,9 @@
 # 0000006 A queued message is sent one per turn, and escape sends the next one now
 
 - Status: accepted. The storage for the queue is open and is written below as
-  the question it is rather than as a decision
+  the question it is rather than as a decision, and SUPERCEDED by
+  `adr-0000045-escape-sends-the-newest-queued-message.txt` in the one clause
+  naming escape as sending the head; every other decision here stands
 - Date: 2026-10-05
 - Supersedes: the escape rule in `staged/status-interrupt.txt`, which made
   escape an unqualified interrupt that sends nothing
