@@ -153,9 +153,15 @@ mentions a pane bar. The implementation (`30624f3`) explicitly carried both
 forward rather than treating them as superseded, giving the pane bar its own
 fifth row: "Glen chose not to drop the pane bar (adr-0000019/0000020) or fold
 it into bar two... adr-0000019/0000020 are carried forward, not superseded."
-That implementation note and this table's status now disagree, recorded here
-rather than resolved, since Notion's blanket scope was confirmed after that
-commit and neither side has revisited the other.
+Glen resolved this 2026-10-07: Notion's scope stands, so 0000019 and 0000020
+are SUPERCEDED here like the rest of the thirty-five, despite `30624f3`'s
+commit message asserting the opposite. That commit's own claim ("carried
+forward, not superseded") is now stale prose in a commit message, not a
+correction to this table. Unresolved consequence this does not settle: the
+pane bar's fifth row exists in `internal/tui/stack.go` today, built under a
+design (0000019/0000020) that is now superseded, and `UI-redesign.md` itself
+never mentions a pane bar at all - so the shipped pane bar currently has no
+authoritative design document behind it. That gap is not closed here.
 
 It gives the prompt as `root@lolhost $ `, with a space on each side of the
 dollar sign. This is not the string 0000010 settled on (`root@lolhost @ `, an
