@@ -229,6 +229,32 @@ type Session struct {
 	// bundle of reply characteristics. The two share an English word and nothing
 	// else - see preset.go's doc comment for the same note from the other side.
 	preset string
+
+	// pane is the name of the pane `/pane` last asked for: "main", "delegate" or
+	// "spawn". It starts at "main" rather than "", because run.go's status
+	// builder wrote the literal "main" into fieldPane before this field existed
+	// (adr-0000007's multiplexer was never built, so there was only ever one
+	// pane to name), and a session that started with no name there would show a
+	// blank pane bar until the reader typed `/pane` once.
+	//
+	// There is still only one scrollback today: every level's rows are drawn in
+	// the same log regardless of what this says. What `/pane` changes is which
+	// name the bar reports and, through fieldPaneState, which colour it draws
+	// in - the one piece of the three-pane design (adr-0000020) this build can
+	// honor without the multiplexer stack.go's own comment says was never
+	// built. A reader who wants to see a worker's or a delegate's own rows
+	// still reaches them with `/copy N`, not by switching panes.
+	pane string
+
+	// queue holds the follow-up prompts `/queue` has added, oldest first.
+	//
+	// It is guarded by mu for the same reason preset is: `/queue` appends from
+	// the input goroutine and the turn-finish path in run.go drains it from the
+	// goroutine a turn runs on. A slice rather than a channel, because the
+	// length has to be read for fieldQueue's count without taking anything out
+	// of it, and a channel read for that would either block or require a
+	// select with a default on every repaint.
+	queue []string
 }
 
 // State is what the client is doing, and it is one of four.
@@ -353,6 +379,81 @@ func (s *Session) PresetStyle() string {
 		return ""
 	}
 	return p.Style
+}
+
+// defaultPane is what `/pane` reports before the reader has ever typed it, and
+// the pane the bar showed, by the literal string in run.go's status builder,
+// before this field existed.
+const defaultPane = "main"
+
+// panes are the names `/pane` accepts, matching the Args the command table
+// documents for it ("main|delegate|spawn") exactly. It is a map rather than a
+// switch at the call site, so a dispatcher building the "the panes are ..."
+// refusal and the completer that will eventually offer these names read the
+// same list.
+var panes = map[string]bool{"main": true, "delegate": true, "spawn": true}
+
+// SetPane makes name the pane `/pane` reports, once name is one of the three
+// this build knows. An unknown name is refused rather than stored, since a
+// pane the bar then reports but nothing ever named again is a typo the reader
+// has no way to notice.
+func (s *Session) SetPane(name string) error {
+	if !panes[name] {
+		return fmt.Errorf("%q is not a pane: the panes are main, delegate, spawn", name)
+	}
+
+	s.mu.Lock()
+	s.pane = name
+	s.mu.Unlock()
+	return nil
+}
+
+// Pane reports the pane `/pane` last asked for, defaultPane until it has ever
+// been called.
+func (s *Session) Pane() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.pane == "" {
+		return defaultPane
+	}
+	return s.pane
+}
+
+// Enqueue adds text to the end of the follow-up queue `/queue` builds.
+//
+// Nothing here decides when it is sent; that is Drain's caller's decision
+// (see run.go's turn-finish path), and keeping the two separate is what lets
+// this stay the one-line append it is.
+func (s *Session) Enqueue(text string) {
+	s.mu.Lock()
+	s.queue = append(s.queue, text)
+	s.mu.Unlock()
+}
+
+// Drain removes and returns the oldest queued prompt, and reports whether
+// there was one.
+//
+// FIFO rather than a stack: a reader who queued three follow-ups in order
+// typed them in the order they want them sent, and a last-in-first-out queue
+// would answer the most recent one first, which is not the order they were
+// written down in.
+func (s *Session) Drain() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.queue) == 0 {
+		return "", false
+	}
+	text := s.queue[0]
+	s.queue = s.queue[1:]
+	return text, true
+}
+
+// QueueLen reports how many prompts are waiting, for fieldQueue's count.
+func (s *Session) QueueLen() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.queue)
 }
 
 // State reports what the client is doing, and any detail worth showing beside it.
