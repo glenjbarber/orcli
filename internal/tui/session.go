@@ -340,6 +340,18 @@ func (s *Session) SetModel(model string) error {
 	return nil
 }
 
+// SetApproval changes the mode a tool call is settled under.
+//
+// It is a method for the same reason SetModel is: `/approve` is read by a turn in
+// flight on the request goroutine (see ask.go's `approval := string(s.Options().Approval)`),
+// so the write and every read of it have to go through the one lock rather than
+// through a field a command reaches into directly.
+func (s *Session) SetApproval(mode Approval) {
+	s.mu.Lock()
+	s.opts.Approval = mode
+	s.mu.Unlock()
+}
+
 // SetPreset makes a /level preset the active one, moving Verbosity to what it
 // defines.
 //

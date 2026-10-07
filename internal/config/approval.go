@@ -94,3 +94,28 @@ func (a Approval) Records() bool {
 
 // String renders the mode as it is written in the file.
 func (a Approval) String() string { return string(a) }
+
+// approvalKey is the member the approval mode lives under.
+//
+// Named once, the way modelKey is, so a writer here and ApprovalMode's own reader
+// of Config.Approval cannot drift apart on the spelling.
+const approvalKey = "approval"
+
+// WriteApproval sets the top-level approval member.
+//
+// It is the writer `/approve` calls once a mode is typed, and it shares
+// setTopLevel's byte-level edit with WriteColor and WriteModel rather than
+// re-encoding the file, for the reason every writer in this package gives: the
+// file holds a credential, and a rewrite that reordered keys or reindented would
+// lose whatever the reader wrote by hand around it.
+//
+// The mode is validated before anything is written. A caller that typed
+// something ParseApproval does not know is told so by name rather than having it
+// written to the file and discovered as ErrBadApproval on the next load.
+func WriteApproval(path string, mode Approval) error {
+	parsed, err := ParseApproval(string(mode))
+	if err != nil {
+		return err
+	}
+	return setTopLevel(path, approvalKey, quoteJSONString(string(parsed)))
+}
