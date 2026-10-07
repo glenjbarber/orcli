@@ -85,7 +85,14 @@ const (
 // puts everything back on the way out, including on the paths where the program did not
 // choose to leave. Every path out restores the terminal, since a reader handed a shell with
 // echo cleared has to fix it by hand and did not cause it.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
+//
+// hello, when not empty, is sent through ask once, automatically, before the reader has
+// pressed a key - the same path a typed question takes, run on the same goroutine
+// mechanics as any other turn. It is a caller's choice, not this package's: a caller with
+// no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
+// passes an empty string and nothing is sent. Start does not decide whether to greet, only
+// how, once asked to.
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello string) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -148,6 +155,15 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		l.group.Close()
 	}()
 	l.paint()
+
+	// The hello is sent here, after the frame is first painted and before the
+	// reader's keys are read, so it is in flight from the moment the screen is up
+	// rather than waiting on the first line they submit. It runs through the same
+	// l.start as any other turn, so a reader who presses escape while it is still
+	// running stops it the same way, and leaving while it is in flight waits for it
+	// through the same l.group.Close() every other turn is waited for by.
+	maybeSendHello(ctx, l, hello)
+
 	finished := make(chan struct{})
 	defer close(finished)
 	go func() {
@@ -188,6 +204,19 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc) error {
 		return ErrNoTerminal
 	}
 	return err
+}
+
+// maybeSendHello starts the one turn Start sends on its own, with no key pressed
+// and no line runner consulted: the capability and introduction message a reader
+// would otherwise only see once they had typed something.
+//
+// An empty hello, or a loop built with no ask at all, sends nothing - a caller's
+// choice not to greet, read here rather than decided here.
+func maybeSendHello(ctx context.Context, l *interfaceLoop, hello string) {
+	if hello == "" || l.ask == nil {
+		return
+	}
+	l.start(ctx, hello)
 }
 
 // interfaceLoop is the state one run of the interface carries.
