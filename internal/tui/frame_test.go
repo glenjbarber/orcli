@@ -160,3 +160,82 @@ func TestFrameDrawsAnIdleFigureInChromeNotSwept(t *testing.T) {
 		t.Error("adjacent idle figure cells use different hues, want the same flat chrome")
 	}
 }
+
+// screenRowText reads width cells back from the screen starting at (x, y) and
+// trims the trailing spaces the base fill leaves behind, so a test can compare
+// what a row drew against a plain string.
+func screenRowText(screen tcell.SimulationScreen, x, y, width int) string {
+	var b strings.Builder
+	for col := 0; col < width; col++ {
+		r, _, _, _ := screen.GetContent(x+col, y)
+		b.WriteRune(r)
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// TestFrameFoldsAMultiLineRowAcrossRows covers the bug a reply's own line
+// breaks used to hit: a row carrying "\n" is no longer collapsed onto one
+// screen line and cut with an ellipsis, it is folded into one physical line
+// per line break, each shown in the order the model wrote them.
+func TestFrameFoldsAMultiLineRowAcrossRows(t *testing.T) {
+	height := barRows + 3
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(40, height)
+
+	frame := NewFrame()
+	frame.SetRect(0, 0, 40, height)
+	frame.SetContent(Bar{}, []Row{{Text: "first line\nsecond line\nthird line"}}, Palette{})
+	frame.Draw(screen)
+
+	backlog := scrollbackRows(height)
+	if backlog != 3 {
+		t.Fatalf("scrollbackRows(%d) = %d, want 3: the test assumes one row per line", height, backlog)
+	}
+
+	want := []string{"first line", "second line", "third line"}
+	for i, line := range want {
+		if got := screenRowText(screen, 0, i, 40); got != line {
+			t.Errorf("scrollback row %d = %q, want %q", i, got, line)
+		}
+	}
+}
+
+// TestFrameFoldsSpansWithTheirOwnLine covers a span that falls entirely
+// within one line of a folded row: the fold rebases it rather than losing it
+// or leaving it pointing at another line's text.
+func TestFrameFoldsSpansWithTheirOwnLine(t *testing.T) {
+	text := "plain\nBOLD\nplain"
+	start := strings.Index(text, "BOLD")
+	row := Row{Text: text, Spans: []Span{{Start: start, End: start + len("BOLD"), Role: RoleEmphasis}}}
+
+	lines := foldRowLines(row)
+	if len(lines) != 3 {
+		t.Fatalf("foldRowLines returned %d lines, want 3", len(lines))
+	}
+	if len(lines[0].Spans) != 0 {
+		t.Errorf("line 0 (%q) carries a span, want none", lines[0].Text)
+	}
+	if len(lines[2].Spans) != 0 {
+		t.Errorf("line 2 (%q) carries a span, want none", lines[2].Text)
+	}
+	if got := lines[1].Spans; len(got) != 1 || got[0].Start != 0 || got[0].End != len("BOLD") {
+		t.Errorf("line 1's span = %v, want one span covering the whole of %q", got, lines[1].Text)
+	}
+}
+
+// TestFoldRowLinesLeavesASingleLineRowUnchanged covers the common case: a
+// row with no line break of its own costs nothing extra and is not copied
+// into a new slice just to hold the same row.
+func TestFoldRowLinesLeavesASingleLineRowUnchanged(t *testing.T) {
+	row := Row{Text: "no line break here", Spans: []Span{{Start: 0, End: 2, Role: RoleCode}}}
+	lines := foldRowLines(row)
+	if len(lines) != 1 {
+		t.Fatalf("foldRowLines returned %d lines, want 1", len(lines))
+	}
+	if lines[0].Text != row.Text {
+		t.Errorf("text = %q, want %q", lines[0].Text, row.Text)
+	}
+}

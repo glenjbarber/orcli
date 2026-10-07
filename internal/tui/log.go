@@ -251,7 +251,7 @@ func (l *Log) Restore(rows []Row) {
 	l.folded = 0
 }
 
-// plainRow removes what a terminal would act on, keeping the tab.
+// plainRow removes what a terminal would act on, keeping the tab and the newline.
 //
 // The whole sequence is removed, not only the control byte. Dropping the ESC and
 // keeping the rest is worse than keeping the sequence: a row carrying a
@@ -259,11 +259,14 @@ func (l *Log) Restore(rows []Row) {
 // rather than nothing at all.
 //
 // A tab is kept, since it is a column of space rather than a sequence and
-// dropping it would fold a table into a wall. The box-drawing and braille figures
-// the interface draws with are kept, since they are text and a reader selecting a
-// row out of the log gets the figure rather than a question mark.
-// The Unicode replacement character is kept too: it is valid text, and removing
-// it can change JSON or Markdown that the model returned.
+// dropping it would fold a table into a wall. A newline is kept for the same
+// reason stated the other way: it is where the model's own paragraphs and list
+// items break, and stripping it is what used to collapse a multi-line reply into
+// one unbroken line the draw path then cut rather than wrapped. The box-drawing
+// and braille figures the interface draws with are kept, since they are text and
+// a reader selecting a row out of the log gets the figure rather than a question
+// mark. The Unicode replacement character is kept too: it is valid text, and
+// removing it can change JSON or Markdown that the model returned.
 func plainRow(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -281,7 +284,7 @@ func plainRow(s string) string {
 		}
 
 		switch {
-		case r == '\t':
+		case r == '\t', r == '\n':
 			b.WriteRune(r)
 		case r < 0x20, r == 0x7f:
 		case r >= 0x80 && r <= 0x9f:

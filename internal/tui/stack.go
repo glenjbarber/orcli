@@ -413,9 +413,21 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	if end > len(f.log) {
 		end = len(f.log)
 	}
+	// shown is newest first, in physical lines rather than log rows: a row with a
+	// line break of its own folds into more than one entry here, each still
+	// counted against backlog the way a single-line row always was. f.scroll
+	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
+	// untouched) - only how many physical lines one row costs changes.
 	shown := make([]Row, 0, backlog)
-	for i := end - 1; i >= 0 && len(shown) < backlog; i-- {
-		shown = append(shown, PlainRow(f.log[i]))
+fill:
+	for i := end - 1; i >= 0; i-- {
+		lines := foldRowLines(PlainRow(f.log[i]))
+		for j := len(lines) - 1; j >= 0; j-- {
+			shown = append(shown, lines[j])
+			if len(shown) >= backlog {
+				break fill
+			}
+		}
 	}
 	// shown is newest first; it fills the scrollback upward from just above the prompt.
 	for i, row := range shown {
@@ -567,6 +579,44 @@ func renderBarTwo(status Status, atLiveEdge bool) string {
 	}
 	parts = append(parts, "scroll:"+onOff(atLiveEdge, "live", "back"))
 	return strings.Join(parts, " · ")
+}
+
+// foldRowLines splits row into the physical lines a draw turns it into, one
+// per line break row.Text itself carries. This is the "folded when they are
+// drawn" promise [Row]'s own doc comment makes: a row is held and copied
+// whole, with every line break the model wrote intact, and is only turned
+// into more than one screen line here, at the one place that already knows
+// how tall the terminal's scrollback is.
+//
+// A row with no line break returns a single-element slice holding row
+// unchanged, so every existing caller's single-line case costs nothing extra
+// and behaves exactly as it did before this existed.
+//
+// Spans are byte ranges into the whole of row.Text, so each line's own spans
+// are cut to that line's range and rebased to start at zero, the same rule
+// cutTail's own callers already apply when a line is cut rather than folded.
+func foldRowLines(row Row) []Row {
+	if !strings.Contains(row.Text, "\n") {
+		return []Row{row}
+	}
+
+	lines := strings.Split(row.Text, "\n")
+	out := make([]Row, len(lines))
+	offset := 0
+	for i, text := range lines {
+		start, end := offset, offset+len(text)
+		var spans []Span
+		for _, sp := range row.Spans {
+			if sp.End <= start || sp.Start >= end {
+				continue
+			}
+			s, e := max(sp.Start, start), min(sp.End, end)
+			spans = append(spans, Span{Start: s - start, End: e - start, Role: sp.Role})
+		}
+		out[i] = Row{Text: text, Spans: spans, Kind: row.Kind, Level: row.Level}
+		offset = end + 1 // +1 skips the '\n' this line was split on.
+	}
+	return out
 }
 
 // drawSweepText draws the twiddle, each column coloured from sweepColors for the
