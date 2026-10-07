@@ -62,3 +62,7 @@ Nothing from question 13. Whether there is also an OS-clipboard path remains
 
 Nothing in the tree has changed. There is no session-owned copy buffer in
 the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000024, the unconfirmed record this one settles, and adr-0000026, the companion record about copy's spelling and block numbering.

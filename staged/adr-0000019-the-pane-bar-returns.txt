@@ -57,3 +57,7 @@ about the bar's return, not its place in a ladder built without it.
 ## Notes
 
 Nothing in the tree has changed. There is no pane bar in the tree to add back.
+
+## See also
+
+Supersedes the withdrawal in `WORKER.txt` and the note on adr-0000016 in `ANSWERS.md` (not adr-0000016 itself). Superseded by `UI-redesign.md`, per Glen's 2026-10-07 resolution (see adr-index.txt). See also adr-0000020, the companion record about how the pane bar truncates.

@@ -29,3 +29,7 @@ Status-bar items remain present in a narrow layout. The fading treatment indicat
 ## Notes
 
 This proposal records the design decision only. It does not claim implementation.
+
+## See also
+
+Supersedes nothing. See also adr-0000016, the current, unsuperseded record for the shed order this collision/fade treatment bears on, and adr-0000021 and adr-0000041, both superseded by `UI-redesign.md`, for the fields this record does not reinstate.

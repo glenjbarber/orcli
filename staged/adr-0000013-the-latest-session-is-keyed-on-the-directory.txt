@@ -83,3 +83,7 @@ as a filename is rejected: it cannot be written, and this is one of the cases
 
 Nothing in the tree has changed. `internal/saved` has autosave naming, which
 this follows rather than replaces, and no `/restore` exists.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000014, the companion record about what a restore carries.

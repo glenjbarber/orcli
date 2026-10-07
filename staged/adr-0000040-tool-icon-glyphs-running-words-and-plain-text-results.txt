@@ -61,3 +61,7 @@ Nothing from backlog items 27, 28, or 29.
 ## Notes
 
 Nothing in the tree has changed. There is no tool line drawn in the tree.
+
+## See also
+
+Supersedes adr-0000028's icon scheme. Superseded by `UI-redesign.md`.

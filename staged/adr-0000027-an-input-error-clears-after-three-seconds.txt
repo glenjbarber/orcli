@@ -51,3 +51,7 @@ watched and found wrong, not because this one was incomplete.
 
 Nothing in the tree has changed. There is no input field in the tree built
 against this timeout.
+
+## See also
+
+Superseded by `UI-redesign.md`.

@@ -79,3 +79,7 @@ Nothing from question 21.
 
 Nothing in the tree has changed. There is no shell-looking check and no
 one-shot flag in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

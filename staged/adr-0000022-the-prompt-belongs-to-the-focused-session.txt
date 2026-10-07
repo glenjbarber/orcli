@@ -52,3 +52,7 @@ Nothing from question 9.
 
 Nothing in the tree has changed. There is no pane set and no per-session
 prompt in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

@@ -69,3 +69,7 @@ Neither is asked by backlog item 24 and neither is answered here.
 
 Nothing in the tree has changed. There is no `/model` completion of either
 kind in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

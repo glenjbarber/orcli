@@ -78,3 +78,7 @@ were renamed and rewritten to match. `go build ./...`, `go vet ./...`, and
 `go test ./...` pass (`GOWORK=off`, this worktree's `go.work` is the
 parent checkout's and not this module's own). Diff for this change:
 22 lines added, 18 removed.
+
+## See also
+
+Supersedes `46a6320`'s choice of CONTEXT.md as the introduction file. See also adr-0000042, whose implementation this record corrects.

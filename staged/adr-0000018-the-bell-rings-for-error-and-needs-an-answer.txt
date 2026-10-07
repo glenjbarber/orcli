@@ -66,3 +66,7 @@ character, and whether the two are the same signal, is not asked by question
 
 Nothing in the tree has changed. There is no bell in the tree and no pane set
 for it to ring in.
+
+## See also
+
+Superseded by `UI-redesign.md`.

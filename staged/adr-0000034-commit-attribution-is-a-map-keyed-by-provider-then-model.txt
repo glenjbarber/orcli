@@ -82,3 +82,7 @@ Nothing in the tree has changed. `.orcli.json`'s current fields, read from
 `attribution_id`, `mouse`, `bell`, `color`, `verbosity`, `approval`,
 `ORCLI_TRUSTED`, `ORCLI_READABLE`, and `cloudflare`. `commit_attribution` is
 not among them; this record describes it, it does not add it.
+
+## See also
+
+Supersedes nothing; not superseded.
