@@ -309,8 +309,13 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
 	}
 
+	// 56 rather than 40: bar two now carries fieldPreset (/level's active preset)
+	// alongside the fields the figure of 40 was sized for, and the assertions
+	// below are against text past the point 40 columns used to cut.
+	const width = 56
+
 	frame := NewFrame()
-	frame.SetRect(0, 0, 40, 20)
+	frame.SetRect(0, 0, width, 20)
 	frame.SetContent(Bar{}, log, plainPalette())
 	promptRow := scrollbackRows(20)
 
@@ -318,7 +323,7 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if err := live.Init(); err != nil {
 		t.Fatal(err)
 	}
-	live.SetSize(40, 20)
+	live.SetSize(width, 20)
 	frame.Draw(live)
 	if got := rowAt(live, promptRow-1); got != "row 9" {
 		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
@@ -332,7 +337,7 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if err := back.Init(); err != nil {
 		t.Fatal(err)
 	}
-	back.SetSize(40, 20)
+	back.SetSize(width, 20)
 	frame.Draw(back)
 	if got := rowAt(back, promptRow-1); got != "row 6" {
 		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)

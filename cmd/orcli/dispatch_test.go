@@ -13,6 +13,7 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/tui"
 )
 
 // zoneBody is a zone holding one record, which is the shape a list call decodes.
@@ -513,6 +514,89 @@ func TestAnUnbuiltSubcommandIsRefusedByName(t *testing.T) {
 		if !strings.Contains(err.Error(), sub) {
 			t.Errorf("the refusal for %s is %q, want it to name it", sub, err)
 		}
+	}
+}
+
+// TestLevelWithNoArgumentReportsNoPreset covers the reader who has never typed
+// /level, the way /model with no argument reports before any model is chosen.
+func TestLevelWithNoArgumentReportsNoPreset(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.withSession(tui.New(tui.Options{}))
+
+	out, err := d.Run(context.Background(), "/level")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "no level preset is set") {
+		t.Errorf("the report is %q, want it to say none is set", out.Text)
+	}
+	for _, want := range tui.PresetNames() {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("the report does not list the preset %q:\n%s", want, out.Text)
+		}
+	}
+}
+
+// TestLevelSetsThePresetAndIsReported covers the write and the read-back, since a
+// preset that could not be reported would be one the reader cannot confirm took.
+func TestLevelSetsThePresetAndIsReported(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	s := tui.New(tui.Options{})
+	d.withSession(s)
+
+	out, err := d.Run(context.Background(), "/level direct")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct") {
+		t.Errorf("the reply is %q, want it to name the preset", out.Text)
+	}
+	if got := s.Preset(); got != "direct" {
+		t.Errorf("s.Preset() is %q, want %q", got, "direct")
+	}
+	if got := s.Options().Verbosity; got != 1 {
+		t.Errorf("Verbosity is %d, want the direct preset's 1", got)
+	}
+
+	out, err = d.Run(context.Background(), "/level")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct") {
+		t.Errorf("/level with no argument did not report the preset: %q", out.Text)
+	}
+}
+
+// TestLevelWithAnUnknownNameIsRefusedByName covers the typo, since a reader who
+// mistyped a preset should be told what exists rather than left to guess.
+func TestLevelWithAnUnknownNameIsRefusedByName(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.withSession(tui.New(tui.Options{}))
+
+	_, err := d.Run(context.Background(), "/level nosuch")
+	if err == nil {
+		t.Fatal("an unknown preset was accepted")
+	}
+	if !strings.Contains(err.Error(), "nosuch") {
+		t.Errorf("the refusal is %q, want it to name what was typed", err)
+	}
+}
+
+// TestLevelStyleReachesTheSystemMessage covers the point of PresetStyle: the
+// instruction a preset carries has to be something a turn actually sends, not only
+// a label the status bar shows.
+func TestLevelStyleReachesTheSystemMessage(t *testing.T) {
+	s := tui.New(tui.Options{})
+	d := newDispatcherFor(config.Config{})
+	d.withSession(s)
+
+	if _, err := d.Run(context.Background(), "/level direct"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	msg := capabilities(s, nil, nil)
+	if !strings.Contains(msg, "Be direct") {
+		t.Errorf("the system message does not carry the preset's style:\n%s", msg)
 	}
 }
 
