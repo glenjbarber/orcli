@@ -122,6 +122,88 @@ func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 	}
 }
 
+// TestAnUnknownCommandCloseToARealOneGetsASuggestion covers the worked example this
+// feature was asked for: a typo that shares no prefix with the command it was meant
+// to be, so the Tab completer's prefix matching in internal/tui/command.go could
+// never have caught it, but is within tui.Suggest's edit-distance threshold of
+// exactly one real name.
+func TestAnUnknownCommandCloseToARealOneGetsASuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/qiot")
+	if err == nil {
+		t.Fatal("a typo was accepted as a command")
+	}
+
+	want := "unknown command /qiot (did you mean /quit?)"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q", err.Error(), want)
+	}
+}
+
+// TestAnUnknownCommandTooFarFromAnythingGetsNoSuggestion covers the other half of the
+// same feature: a name that is not close enough to any real one, by the threshold
+// internal/tui/suggest.go settles on, is reported exactly the way it always was, with
+// nothing appended. A suggestion offered on every unknown command, whether or not it
+// means anything, is noise dressed as help.
+func TestAnUnknownCommandTooFarFromAnythingGetsNoSuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/nonesuch")
+	if err == nil {
+		t.Fatal("an unknown command was accepted")
+	}
+
+	want := "unknown command /nonesuch"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q (no suggestion appended)", err.Error(), want)
+	}
+}
+
+// TestDidYouMeanJoinsATieWithOr checks the sentence didYouMean builds for a tie
+// directly, independent of whether any single typo in the current table happens to
+// produce one. This is the "list up to a few names rather than just the first found"
+// decision from the PR: when tui.Suggest ties, every tied name is shown, joined as a
+// reader would join a short list in a sentence, so the hint reads naturally rather
+// than as a bare comma-separated dump.
+func TestDidYouMeanJoinsATieWithOr(t *testing.T) {
+	cases := []struct {
+		guesses []string
+		want    string
+	}{
+		{nil, ""},
+		{[]string{"quit"}, " (did you mean /quit?)"},
+		{[]string{"color", "close"}, " (did you mean /color or /close?)"},
+		{[]string{"close", "color", "copy"}, " (did you mean /close, /color or /copy?)"},
+	}
+
+	for _, c := range cases {
+		got := joinDidYouMean(c.guesses)
+		if got != c.want {
+			t.Errorf("joinDidYouMean(%v) = %q, want %q", c.guesses, got, c.want)
+		}
+	}
+}
+
+// TestTheTableButUnbuiltMessageCarriesNoSuggestion covers the other refusal Run
+// gives, the one for a name that IS in internal/tui/command.go's table but has no
+// handler yet. That message is deliberately distinct from "unknown command" and
+// should stay untouched by this feature: a reader who typed a real, listed command
+// correctly does not need to be told to try something else.
+func TestTheTableButUnbuiltMessageCarriesNoSuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/compact")
+	if err == nil {
+		t.Fatal("a command this build does not run was accepted")
+	}
+
+	want := "/compact is in the table but this build does not run it yet"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q (no suggestion appended)", err.Error(), want)
+	}
+}
+
 // TestAWriteIsHeldAndNotApplied covers the rule the whole confirmation exists for:
 // fetching and showing is one call, and writing is a second one the reader asks for.
 func TestAWriteIsHeldAndNotApplied(t *testing.T) {

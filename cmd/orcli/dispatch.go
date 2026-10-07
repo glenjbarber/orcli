@@ -309,10 +309,56 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 		if _, listed := tui.Lookup(name); listed {
 			return tui.Result{}, fmt.Errorf("/%s is in the table but this build does not run it yet", name)
 		}
-		return tui.Result{}, fmt.Errorf("unknown command /%s", name)
+		return tui.Result{}, fmt.Errorf("unknown command /%s%s", name, didYouMean(name))
 	}
 
 	return h(ctx, d, args)
+}
+
+// didYouMean returns the text appended to "unknown command" for a typed name that is
+// not in the table at all, or "" when nothing typed is close enough to be worth
+// guessing at.
+//
+// It runs only in that one case, deliberately. The other refusal Run gives, /%s is in
+// the table but this build does not run it yet, is for a name that is already a real,
+// listed command; a reader who typed one of those spelled a real command correctly and
+// is not helped by being pointed at a different one, so that branch never reaches this
+// function and its message is untouched by anything here.
+//
+// tui.Suggest does the actual matching (the threshold, the hidden-alias handling and
+// the tie-breaking are its decisions, recorded on its own doc comment), and this
+// function's whole job is turning what it returns into the parenthetical a reader
+// sees: nothing for no match, "(did you mean /x?)" for one, and "(did you mean /x,
+// /y or /z?)" for the small handful of names Suggest ties on.
+func didYouMean(name string) string {
+	return joinDidYouMean(tui.Suggest(name))
+}
+
+// joinDidYouMean turns the names tui.Suggest returns into the parenthetical
+// didYouMean appends, and is kept separate from the Suggest call so the sentence it
+// builds - no text for no guesses, "(did you mean /x?)" for one, the "or"-joined
+// form for a tie - can be tested against a chosen list directly, without needing a
+// typo that happens to tie in the table as it stands today.
+func joinDidYouMean(guesses []string) string {
+	if len(guesses) == 0 {
+		return ""
+	}
+
+	slashed := make([]string, len(guesses))
+	for i, g := range guesses {
+		slashed[i] = "/" + g
+	}
+
+	if len(slashed) == 1 {
+		return fmt.Sprintf(" (did you mean %s?)", slashed[0])
+	}
+
+	// More than one name tied at the same distance. The last is joined with "or"
+	// rather than another comma, so the list reads as a sentence a reader scans
+	// once rather than a bare comma-separated dump that could as easily be a typo
+	// list of its own.
+	head := strings.Join(slashed[:len(slashed)-1], ", ")
+	return fmt.Sprintf(" (did you mean %s or %s?)", head, slashed[len(slashed)-1])
 }
 
 // test is the handler for /test.
