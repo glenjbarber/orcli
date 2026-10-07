@@ -68,6 +68,13 @@ type dispatcher struct {
 	// canAsk reports whether a model can be asked at all, which decides whether
 	// /cloudflare sends its guidance to the model or falls back to its own text.
 	canAsk func() bool
+
+	// autosave reports whether /autosave is on, which is the whole of what this
+	// build does about it: there is no timer here and nothing writes a session to
+	// disk on its own. The field exists so /autosave on and /autosave off have
+	// something to move and /autosave with no argument has something to report,
+	// ahead of the save/load mechanism this is meant to drive once it exists.
+	autosaveOn bool
 }
 
 // newDispatcherFor builds a dispatcher over a configuration.
@@ -90,8 +97,52 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"quit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return tui.Result{Quit: true}, nil
 		},
+		// /exit is a second name for the same thing /quit does. The table carries
+		// both because a reader coming from another program types whichever word
+		// that program used, and a client that only answered to one of them would
+		// send that reader looking for a third command that does nothing different.
+		"exit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return tui.Result{Quit: true}, nil
+		},
 		"begin": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.begin(args)
+		},
+		"help": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.help()
+		},
+		"version": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.version()
+		},
+		"clear": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.clear()
+		},
+		"bell": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.bell(args)
+		},
+		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.color(args)
+		},
+		// /stealth is the listed name; /cognito is kept as a hidden alias of it in
+		// internal/tui/command.go's table, and both keys here answer to the same
+		// handler since Run looks a typed name up in this map directly rather than
+		// through the table's own alias resolution.
+		"stealth": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.stealth(args)
+		},
+		"cognito": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.stealth(args)
+		},
+		"mouse": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.mouse(args)
+		},
+		"pause": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.pause()
+		},
+		"info": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.info()
+		},
+		"autosave": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.autosave(args)
 		},
 	}
 	return d
