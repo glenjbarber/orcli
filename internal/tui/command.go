@@ -137,6 +137,11 @@ func init() {
 			Summary: "report the shape of each streamed turn, on or off",
 		},
 		{
+			Name:    "level",
+			Args:    "NAME",
+			Summary: "set a bundled reply style (direct, concise, thorough, casual), without an argument to report",
+		},
+		{
 			Name:    "delegate",
 			Args:    "QUESTION",
 			Summary: "ask a question alongside, without recording it",
