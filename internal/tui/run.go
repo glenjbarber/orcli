@@ -73,6 +73,9 @@ const (
 	KeyMouse
 	KeyScrollUp
 	KeyScrollDown
+	KeyCtrlA
+	KeyCtrlW
+	KeyCtrlU
 )
 
 // Start runs the interface until the reader leaves.
@@ -301,6 +304,12 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 		return KeyCtrlC, 0
 	case tcell.KeyCtrlD:
 		return KeyEOF, 0
+	case tcell.KeyCtrlA:
+		return KeyCtrlA, 0
+	case tcell.KeyCtrlW:
+		return KeyCtrlW, 0
+	case tcell.KeyCtrlU:
+		return KeyCtrlU, 0
 	default:
 		return KeyNone, 0
 	}
@@ -470,9 +479,27 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 		// arrives only from a terminal that was asked for it by something else, and
 		// consuming it is what keeps its bytes out of the field.
 
-	case KeyUp, KeyDown:
-		// Read so a reader pressing one is not left pressing. This unit has no history, and
-		// one would need a conversation this interface does not carry.
+	case KeyUp:
+		// adr-0000011's history walk: one entry per press, stopping rather than wrapping
+		// at the oldest end. The current field is handed in so the first press of a walk
+		// can remember it as the draft Down eventually returns to.
+		if text, moved := l.session.History().Up(l.session.Editor().Text()); moved {
+			l.session.Editor().SetText(text)
+		}
+
+	case KeyDown:
+		if text, moved := l.session.History().Down(l.session.Editor().Text()); moved {
+			l.session.Editor().SetText(text)
+		}
+
+	case KeyCtrlA:
+		l.session.Editor().Home()
+
+	case KeyCtrlW:
+		l.session.Editor().EraseWordBefore()
+
+	case KeyCtrlU:
+		l.session.Editor().ClearLeft()
 
 	case KeyScrollUp:
 		l.session.ScrollUp(1)
@@ -491,6 +518,12 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 		return false
 	}
 	l.session.Editor().Reset()
+
+	// Recorded here, where a line is actually sent, rather than where it was typed.
+	// There is no message-queue mechanism in this tree yet, so this is the only
+	// moment that exists: a future queue would still record at the point it drains
+	// into a send, not at the point a reader queued it (adr-0000011).
+	l.session.History().Record(line)
 
 	result, err := l.runner(ctx, line)
 	if err != nil {

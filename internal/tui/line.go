@@ -111,6 +111,50 @@ func (e *Editor) ClearRight() {
 	e.text = e.text[:e.caret]
 }
 
+// SetText replaces the whole field with text and puts the caret at its end.
+//
+// It is what walking history does to the field, and it is its own method
+// rather than a Reset followed by a loop of Inserts, because a caller
+// replacing the field is doing one thing rather than typing: there is no
+// caret position partway through the arriving text that the walk should
+// respect, and the only position worth naming afterwards is the end of it.
+// The caret goes there because a reader who walks back to an old line
+// resumes editing it from where they would have stopped typing it, not from
+// its start, so pressing End or Left after Up lands where it ordinarily
+// would.
+func (e *Editor) SetText(text string) {
+	e.text = []rune(text)
+	e.caret = len(e.text)
+}
+
+// EraseWordBefore removes the word before the caret, for the emacs Ctrl+W
+// spelling.
+//
+// The word is everything back from the caret to the previous run of
+// non-space runes, mirroring how wordBeforeCaret finds the word Tab
+// completes. The whitespace on both sides of that word, between it and
+// whatever the caret is sitting against, goes with it: a caret already
+// inside a run of spaces skips over them before finding a word to erase,
+// and once the word is found the gap before it is removed too, so repeated
+// presses walk back one word at a time with no stray double space left
+// between what remains and what follows the caret.
+func (e *Editor) EraseWordBefore() {
+	end := e.caret
+	start := end
+	for start > 0 && unicode.IsSpace(e.text[start-1]) {
+		start--
+	}
+	for start > 0 && !unicode.IsSpace(e.text[start-1]) {
+		start--
+	}
+	for start > 0 && unicode.IsSpace(e.text[start-1]) {
+		start--
+	}
+
+	e.text = append(e.text[:start], e.text[end:]...)
+	e.caret = start
+}
+
 // Complete runs the completer over the field and puts what it answers in.
 //
 // It is the only completion this unit has, and it is the one the command table

@@ -153,6 +153,18 @@ type Session struct {
 	// way it carried none when the loop held it.
 	editor Editor
 
+	// history is the record of lines this session has sent, and the walk Up
+	// and Down take through it.
+	//
+	// It lives here rather than on the editor for the same reason the editor
+	// itself lives here and not on the loop that draws it: DESIGN.md §3
+	// gives a session the input history as something it owns, alongside the
+	// messages and the transcript, so a second pane gets a history of its
+	// own rather than one shared with the pane it is not showing. Nothing
+	// else touches it concurrently, so, like the editor, it carries no lock
+	// of its own.
+	history History
+
 	mu     sync.RWMutex
 	state  State
 	detail string
@@ -219,7 +231,7 @@ const breakDuration = 2 * time.Minute
 // gives a reader nothing to tell it has started, and a row that names the program is
 // the one line of state a reader wants before typing anything.
 func New(opts Options) *Session {
-	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now()}
+	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now(), history: NewHistory()}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
@@ -301,6 +313,15 @@ func (s *Session) Editor() *Editor {
 	return &s.editor
 }
 
+// History returns the record of lines this session has sent.
+//
+// It returns a pointer for the same reason Editor does: a caller reaches
+// History's own Record, Up and Down directly, and there is one history per
+// session, matching the one input field a focused session shows.
+func (s *Session) History() *History {
+	return &s.history
+}
+
 // SetCancel records the cancel for the turn now starting.
 //
 // It is called once, from the goroutine that just started the turn, before that
@@ -341,7 +362,7 @@ func (s *Session) StopTurn() context.CancelFunc {
 // session does not know how tall the frame drawing it is; a frame asked to draw an
 // offset past what it can show clamps that itself at draw time. Shift+Up/Shift+Down
 // are the keys chosen for this (2026-10-06), distinct from the plain arrow keys, which
-// are reserved for history (adr-0000011/0000015, not yet built).
+// are reserved for history, which Up/Down now walk.
 func (s *Session) ScrollUp(n int) {
 	s.mu.Lock()
 	s.scroll += n

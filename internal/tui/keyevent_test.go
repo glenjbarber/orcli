@@ -28,6 +28,9 @@ func TestKeyEventMapsTCellInput(t *testing.T) {
 		{"escape", tcell.KeyEscape, 0, KeyEscape},
 		{"control-c", tcell.KeyCtrlC, 0, KeyCtrlC},
 		{"control-d", tcell.KeyCtrlD, 0, KeyEOF},
+		{"control-a", tcell.KeyCtrlA, 0, KeyCtrlA},
+		{"control-w", tcell.KeyCtrlW, 0, KeyCtrlW},
+		{"control-u", tcell.KeyCtrlU, 0, KeyCtrlU},
 		{"unknown", tcell.KeyF1, 0, KeyNone},
 	}
 	for _, tc := range cases {
