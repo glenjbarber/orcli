@@ -248,6 +248,17 @@ type interfaceLoop struct {
 	// and the AfterDrawFunc that reads and clears it, so it carries no lock of
 	// its own.
 	bellPending bool
+
+	// frozenStatus and haveFrozenStatus hold the last status() computed before
+	// copy mode turned on. While copy mode is on, status() returns this value
+	// unchanged instead of recomputing the stat fields, so the footer a reader
+	// is mid-selection over does not move under their drag. It is populated the
+	// first time status() runs with copy mode on, from whatever status() would
+	// have returned a moment before - in practice the previous paint's figure -
+	// and cleared the next time copy mode turns off, so the field resumes
+	// tracking live state the instant the reader turns it back off.
+	frozenStatus     Status
+	haveFrozenStatus bool
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
@@ -282,12 +293,19 @@ func (l *interfaceLoop) paint() {
 	// agree. The two states are the only ones a turn is in, so the word is the condition
 	// rather than a field the session has to keep up to date.
 	running := state == StateThinking || state == StateWorking
+	copyMode := l.session.Options().CopyMode
 
 	figure := "idle"
 	if running {
-		l.step++
+		if !copyMode {
+			// Copy mode freezes the sweep as well as the figure it turns on:
+			// l.step stops advancing, so SetSweepStep below keeps drawing the
+			// same frame of the sweep instead of recoloring it under a
+			// reader's terminal-native selection.
+			l.step++
+		}
 		figure = twiddleWord(state)
-	} else {
+	} else if !copyMode {
 		l.step = 0
 	}
 
@@ -365,6 +383,17 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 // so the two say the same thing twice and the sweep is the copy a reader watches move.
 func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	opts := l.session.Options()
+
+	if !opts.CopyMode {
+		l.haveFrozenStatus = false
+	} else if l.haveFrozenStatus {
+		// Copy mode is on and a status was already computed since it turned
+		// on: hand back that same value unchanged rather than recomputing any
+		// field, so the footer a reader is dragging a selection across does
+		// not move under them.
+		return l.frozenStatus
+	}
+
 	log := l.session.Log()
 	s := Status{}
 
@@ -390,6 +419,11 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldHeld] = plural(log.Len(), "row", "rows")
 	s[fieldFolded] = plural(log.Folded(), "row", "rows")
 	s[fieldLevels] = plural(len(l.session.Levels()), "level", "levels")
+
+	if opts.CopyMode {
+		l.frozenStatus = s
+		l.haveFrozenStatus = true
+	}
 
 	return s
 }

@@ -65,7 +65,7 @@ type chatClient interface {
 // The two are kept separate because they come from different places and change for
 // different reasons: one reflects this session's live configuration, the other is
 // whatever the reader put in a file.
-func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string), cloudflareReady func() bool) tui.AskFunc {
+func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool) tui.AskFunc {
 	toolset := newToolset(s.Options().WorkingDir)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
@@ -73,12 +73,23 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 
 	return func(ctx context.Context, question string, level int, silent bool) error {
 		begin := s.Begin
+		deliver := s.Deliver
+		notice := s.Notice
+		finishedFn := s.Finished
 		if silent {
 			// The hello is the only caller that passes silent: its text instructs the
 			// model, it is not something the reader typed, and BeginSilent is the
 			// primitive that sends it to the model without writing it into the log as
-			// a question row. See BeginSilent's own doc comment for why.
+			// a question row. See BeginSilent's own doc comment for why. The reply
+			// side has to be kept just as invisible, or the model's own answer to a
+			// question the reader never asked would still surface as a row a few
+			// seconds later - that was the bug this silences: Deliver, Notice and
+			// Finished all swap to their *Silent counterparts, which make the same
+			// state transitions without ever appending a row.
 			begin = s.BeginSilent
+			deliver = s.DeliverSilent
+			notice = s.NoticeSilent
+			finishedFn = s.FinishedSilent
 		}
 		turnCtx, err := begin(ctx, question, level)
 		if err != nil {
@@ -133,9 +144,9 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 					// failure is reported beside it, since the text is usually
 					// more useful than the error alone and a reader handed only
 					// an error has nothing to read.
-					s.Deliver(reply.String(), level)
+					deliver(reply.String(), level)
 					if e.Err != nil {
-						s.Notice(e.Err.Error(), level, tui.RoleFailure)
+						notice(e.Err.Error(), level, tui.RoleFailure)
 						failed = e.Err
 					}
 
@@ -145,8 +156,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				}
 			})
 			if err != nil {
-				s.Notice(err.Error(), level, tui.RoleFailure)
-				s.Finished("failed")
+				notice(err.Error(), level, tui.RoleFailure)
+				finishedFn("failed")
 				return nil
 			}
 			if failed != nil {
@@ -156,8 +167,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			if len(calls) == 0 {
 				// Deliver is a no-op for an empty reply, so a turn that failed
 				// before any text does not write a blank row.
-				s.Deliver(reply.String(), level)
-				s.Finished(reason)
+				deliver(reply.String(), level)
+				finishedFn(reason)
 
 				// A reply with text in it is the confirmation, and an empty one
 				// is a refusal even when the endpoint called the turn finished.
@@ -166,7 +177,7 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				// evidence would record a model nobody has reached the
 				// endpoint with.
 				if confirmed != nil && reply.Len() > 0 && finished {
-					confirmed(model)
+					confirmed(model, silent)
 				}
 				return nil
 			}
@@ -189,8 +200,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			}
 		}
 
-		s.Notice(fmt.Sprintf("stopped after %d rounds of tool calls", maxToolRounds), level, tui.RoleFailure)
-		s.Finished("stopped")
+		notice(fmt.Sprintf("stopped after %d rounds of tool calls", maxToolRounds), level, tui.RoleFailure)
+		finishedFn("stopped")
 		return nil
 	}
 }

@@ -53,7 +53,7 @@ func readModel(t *testing.T, path string) string {
 func TestAConfirmedModelIsWritten(t *testing.T) {
 	s, path := overConfig(t, "{\n  \"api_key\": \"k\"\n}\n")
 
-	confirmModel(s)("some/model")
+	confirmModel(s)("some/model", false)
 
 	if got := readModel(t, path); !strings.Contains(got, `"model": "some/model"`) {
 		t.Errorf("the model was not written:\n%s", got)
@@ -66,7 +66,7 @@ func TestAConfirmedModelIsWritten(t *testing.T) {
 func TestTheWriteKeepsTheCredentialAndTheKeyOrder(t *testing.T) {
 	s, path := overConfig(t, "{\n  \"api_key\": \"k\"\n}\n")
 
-	confirmModel(s)("some/model")
+	confirmModel(s)("some/model", false)
 
 	got := readModel(t, path)
 	if !strings.Contains(got, `"api_key": "k"`) {
@@ -86,7 +86,7 @@ func TestTheWriteKeepsTheCredentialAndTheKeyOrder(t *testing.T) {
 func TestTheWriteKeepsASingleLineFileOnOneLine(t *testing.T) {
 	s, path := overConfig(t, `{"api_key":"k"}`)
 
-	confirmModel(s)("some/model")
+	confirmModel(s)("some/model", false)
 
 	got := readModel(t, path)
 	if strings.Contains(got, "\n") {
@@ -105,7 +105,7 @@ func TestAnEmptyModelIsNotWritten(t *testing.T) {
 	s, path := overConfig(t, "{\n  \"api_key\": \"k\"\n}\n")
 	before := readModel(t, path)
 
-	confirmModel(s)("")
+	confirmModel(s)("", false)
 
 	if got := readModel(t, path); got != before {
 		t.Errorf("an empty model was written:\n%s", got)
@@ -127,9 +127,9 @@ func TestTheModelIsWrittenOnce(t *testing.T) {
 	t.Cleanup(func() { writeModel = oldWrite })
 
 	confirm := confirmModel(s)
-	confirm("some/model")
-	confirm("some/model")
-	confirm("some/model")
+	confirm("some/model", false)
+	confirm("some/model", false)
+	confirm("some/model", false)
 
 	if writes != 1 {
 		t.Errorf("the model was written %d times, want once", writes)
@@ -155,7 +155,7 @@ func TestAConfirmedModelAlreadyOnDiskIsNotWritten(t *testing.T) {
 	}
 	t.Cleanup(func() { writeModel = oldWrite })
 
-	confirmModel(s)("some/model")
+	confirmModel(s)("some/model", false)
 
 	if writes != 0 {
 		t.Errorf("the model was written %d times, want zero", writes)
@@ -176,7 +176,7 @@ func TestAConfirmedModelAlreadyOnDiskIsNotWritten(t *testing.T) {
 func TestAConfirmedDifferentModelIsStillWritten(t *testing.T) {
 	s, path := overConfig(t, "{\n  \"api_key\": \"k\",\n  \"model\": \"old/model\"\n}\n")
 
-	confirmModel(s)("new/model")
+	confirmModel(s)("new/model", false)
 
 	got := readModel(t, path)
 	if !strings.Contains(got, `"model": "new/model"`) {
@@ -208,9 +208,9 @@ func TestTheOnceGuardStillAppliesWhenNothingWasWritten(t *testing.T) {
 	t.Cleanup(func() { readModelPair = oldRead })
 
 	confirm := confirmModel(s)
-	confirm("some/model")
-	confirm("some/model")
-	confirm("some/model")
+	confirm("some/model", false)
+	confirm("some/model", false)
+	confirm("some/model", false)
 
 	if reads != 1 {
 		t.Errorf("the configuration was read %d times, want once", reads)
@@ -231,8 +231,8 @@ func TestAFailedWriteIsReportedAndNotRetried(t *testing.T) {
 	t.Cleanup(func() { writeModel = config.WriteModel })
 
 	confirm := confirmModel(s)
-	confirm("some/model")
-	confirm("some/model")
+	confirm("some/model", false)
+	confirm("some/model", false)
 
 	if writes != 1 {
 		t.Errorf("a failed write was attempted %d times, want once", writes)

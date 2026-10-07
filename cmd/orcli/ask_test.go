@@ -444,8 +444,10 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 //
 // It is sent silent, the same way main.go wires it through tui.Start, so this also
 // covers the reason that call exists: the hello's own instruction text must reach
-// the model but never appear as a row in the log, while the model's reply - the
-// actual greeting - lands in the log exactly as a normal turn's reply would.
+// the model but never appear as a row in the log, and - unlike an earlier version
+// of this behavior - neither may the model's reply. The whole exchange is a
+// connection probe the session runs on itself, not something the reader asked
+// about, so no row from it should ever be visible.
 func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	if strings.TrimSpace(helloQuestion) == "" {
 		t.Fatal("helloQuestion is empty")
@@ -472,12 +474,66 @@ func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
 	}
 
 	rows := s.Log().Rows()
-	if got := rows[len(rows)-2].Text; got != "Hi, I'm orcli." {
-		t.Errorf("the delivered reply is %q, want the hello's own reply", got)
-	}
 	for _, row := range rows {
 		if row.Text == helloQuestion {
-			t.Errorf("the hello's own instruction text appeared as a log row: %+v, want only its reply visible", row)
+			t.Errorf("the hello's own instruction text appeared as a log row: %+v, want no row at all", row)
 		}
+		if row.Text == "Hi, I'm orcli." {
+			t.Errorf("the hello's reply appeared as a log row: %+v, want no row at all", row)
+		}
+	}
+}
+
+// TestSilentTurnAppendsNoRowAtAll covers the general case behind the hello: any
+// turn asked with silent=true must leave nothing in the log, question or reply,
+// while a turn asked with silent=false behaves exactly as before.
+func TestSilentTurnAppendsNoRowAtAll(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestSession(dir)
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{
+			{Kind: openrouter.EventDelta, Text: "a quiet reply"},
+			{Kind: openrouter.EventFinish, Reason: "stop", Finished: true},
+		},
+	}}
+
+	before := len(s.Log().Rows())
+
+	a := ask(s, fake, "", nil, nil)
+	if err := a(context.Background(), "a quiet question", 0, true); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	if rows := s.Log().Rows(); len(rows) != before {
+		t.Errorf("a silent turn appended rows, want none beyond the %d already there: %+v", before, rows)
+	}
+}
+
+// TestSilentTurnStillConfirmsTheModel covers the one piece of session state a
+// silent turn must still seed even though it writes no row: a non-empty, finished
+// reply still counts as the connection probe, so confirmed is still called.
+func TestSilentTurnStillConfirmsTheModel(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestSession(dir)
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{
+			{Kind: openrouter.EventDelta, Text: "a quiet reply"},
+			{Kind: openrouter.EventFinish, Reason: "stop", Finished: true},
+		},
+	}}
+
+	var gotModel string
+	var gotSilent bool
+	confirmed := func(model string, silent bool) {
+		gotModel, gotSilent = model, silent
+	}
+
+	a := ask(s, fake, "", confirmed, nil)
+	if err := a(context.Background(), "a quiet question", 0, true); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	if gotModel != "some/model" || !gotSilent {
+		t.Errorf("confirmed(%q, %v), want (\"some/model\", true)", gotModel, gotSilent)
 	}
 }

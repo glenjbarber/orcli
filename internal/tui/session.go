@@ -88,6 +88,23 @@ type Options struct {
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
 
+	// CopyMode reports whether the screen is held still for a terminal-native
+	// copy.
+	//
+	// It is a field on Options rather than state kept privately in run.go, for
+	// the same reason Mouse and Color are: /copymode has to move the live
+	// session's own copy, not only whatever a redraw happens to read, and a
+	// status bar built from a stale Options would answer the reader's toggle
+	// with the mode they just left.
+	//
+	// While it is on, paint() does not advance the twiddle sweep or recolor it,
+	// and status() does not refresh the stat fields (held, folded, workers,
+	// queue, and the rest) - both freeze their last-computed values instead of
+	// recomputing them, so a reader's terminal-native click-drag selection is
+	// not fought by a screen repainting under it. The log itself still renders
+	// normally: only the footer's noise is held still.
+	CopyMode bool
+
 	// Cognito reports that nothing is to be recorded.
 	//
 	// It is a field rather than something the session infers, because the promise
@@ -300,7 +317,7 @@ func New(opts Options) *Session {
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
-		Text:  "orcli, a log with a frame around it",
+		Text:  "orcli",
 		Spans: []Span{{Start: 0, End: 5, Role: RoleEmphasis}},
 	})
 	return s
@@ -367,6 +384,17 @@ func (s *Session) SetBell(on bool) {
 func (s *Session) SetMouse(on bool) {
 	s.mu.Lock()
 	s.opts.Mouse = on
+	s.mu.Unlock()
+}
+
+// SetCopyMode changes whether the screen is held still for a terminal-native copy.
+//
+// It is a method for the same reason SetMouse is one: CopyMode is read off a copy
+// of the options paint() and status() take, and a write that bypassed this would
+// leave that copy answering a question /copymode already changed the answer to.
+func (s *Session) SetCopyMode(on bool) {
+	s.mu.Lock()
+	s.opts.CopyMode = on
 	s.mu.Unlock()
 }
 
@@ -774,6 +802,28 @@ func (s *Session) Deliver(text string, level int) {
 	s.log.Append(Row{Kind: KindReply, Level: level, Text: text})
 }
 
+// DeliverSilent is Deliver for a reply the reader must never see.
+//
+// The hello exchange is the one caller: BeginSilent already keeps the question off
+// the log, and a silent turn's reply has to be kept off it too, or the model's own
+// answer to a question the reader never asked would still surface as a row a few
+// seconds later. The state transition Deliver makes - thinking to working - still
+// happens, so the rest of the session sees the same shape of turn; only the row is
+// left out.
+func (s *Session) DeliverSilent(text string, level int) {
+	if text == "" {
+		return
+	}
+
+	s.mu.Lock()
+	thinking := s.state == StateThinking
+	s.mu.Unlock()
+
+	if thinking {
+		s.SetState(StateWorking, "")
+	}
+}
+
 // Notice records a message from the client: a refusal, a failure, a milestone.
 //
 // It is a method rather than a caller reaching for the log, so that a notice lands in
@@ -789,6 +839,11 @@ func (s *Session) Notice(text string, level int, role Role) {
 	})
 }
 
+// NoticeSilent is Notice for a silent turn: it reports nothing to the log, since a
+// notice about a question the reader never asked would be as misplaced as the
+// question or the reply would be. See DeliverSilent's own doc comment.
+func (s *Session) NoticeSilent(text string, level int, role Role) {}
+
 // Finished records that a turn ended and returns the session to idle.
 //
 // A turn that ended is idle whether it finished cleanly or was stopped, since a
@@ -802,6 +857,13 @@ func (s *Session) Finished(reason string) {
 		Text:  reason,
 		Spans: []Span{{Start: 0, End: len(reason), Role: RoleDim}},
 	})
+	s.SetState(StateIdle, "")
+}
+
+// FinishedSilent is Finished for a silent turn: the session still returns to idle,
+// but no row names why, since there is nothing the reader asked for it to explain.
+// See DeliverSilent's own doc comment.
+func (s *Session) FinishedSilent(reason string) {
 	s.SetState(StateIdle, "")
 }
 

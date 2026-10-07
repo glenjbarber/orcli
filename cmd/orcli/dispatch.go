@@ -195,6 +195,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"mouse": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.mouse(args)
 		},
+		"copymode": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.copymode(args)
+		},
 		"pause": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.pause()
 		},
