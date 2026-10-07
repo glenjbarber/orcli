@@ -1,6 +1,6 @@
 # 0000025 Copy is owned by the session, not the terminal
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 13 in `QUESTIONS.md`
 

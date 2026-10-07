@@ -1,6 +1,6 @@
 # 0000039 /model completion is an inline suggestion per keystroke, plus a live Tab list from the API
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles backlog item 24 in `QUESTIONS.md`
 

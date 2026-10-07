@@ -58,15 +58,17 @@ type chatClient interface {
 // was; this closes the separate, narrower gap ask.go's own doc comment used to name -
 // "no tools are offered" - without deciding the first.
 //
-// # The introduction
+// # Two system messages, not one
 //
-// If CONTEXT.md exists in the session's working directory, its contents are sent as
-// one system message ahead of the question, naming it as the reader's own
-// introduction rather than inventing one. This is narrower than adr-0000042's
-// capability message, which wants a list assembled from live session state
-// (Options, Ready, connector checks) rather than a static file's contents; the two
-// are not the same thing, and this does not implement that record.
-func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string)) tui.AskFunc {
+// adr-0000042's capability message - orcli naming itself and what this session
+// actually has, assembled from Session.Options()/Ready() and the Cloudflare check -
+// is sent first, built fresh every turn by capabilities. If AGENTS.md also exists in
+// the session's working directory, its contents follow as a second system message,
+// naming it as the reader's own introduction rather than folding it into the first.
+// The two are kept separate because they come from different places and change for
+// different reasons: one reflects this session's live configuration, the other is
+// whatever the reader put in a file.
+func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string), cloudflareReady func() bool) tui.AskFunc {
 	toolset := newToolset(s.Options().WorkingDir)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
@@ -84,7 +86,11 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 		model := s.Options().Model
 		approval := string(s.Options().Approval)
 
-		messages := make([]openrouter.Message, 0, 3)
+		messages := make([]openrouter.Message, 0, 4)
+		messages = append(messages, openrouter.Message{
+			Role:    "system",
+			Content: capabilities(s, toolset, cloudflareReady),
+		})
 		if intro != "" {
 			messages = append(messages, openrouter.Message{Role: "system", Content: intro})
 		}
@@ -240,12 +246,59 @@ func runTool(toolset []tools.Tool, approval string, call openrouter.ToolCall) st
 	return fmt.Sprintf("tools: no tool named %q", call.Function.Name)
 }
 
-// introduction reads CONTEXT.md from dir, for the one system message a turn sends
-// ahead of the question. A missing file is silence, not a failure: most working
-// directories have none, and a session without one sends no introduction at all
-// rather than an empty one.
+// capabilities builds adr-0000042's system message: orcli naming itself and what
+// this session actually has right now, assembled from the same state the reader's
+// own commands read rather than a second, hand-maintained list that could say
+// something `/model` or `/cloudflare` has already made false.
+//
+// Absence is written out, not omitted - a model told only what exists cannot tell
+// "not configured" from "not asked about yet," which is the position this record
+// exists to keep it out of.
+//
+// Each tool's own Describe().Function.Description is reused verbatim rather than
+// restated, for the same reason: a second copy of what a tool may do is a second
+// copy that goes stale the day the tool's own list changes and this one does not.
+func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() bool) string {
+	var b strings.Builder
+	b.WriteString("You are talking to orcli, a terminal interface that sends your replies " +
+		"straight to the reader's screen. This message names what this session actually " +
+		"has configured right now; anything not named here is not available this turn.\n\n")
+
+	if err := s.Ready(); err != nil {
+		b.WriteString("Model: none configured. " + err.Error() + "\n")
+	} else {
+		opts := s.Options()
+		fmt.Fprintf(&b, "Model: %s, via %s.\n", opts.Model, orNone(opts.Provider))
+	}
+
+	if len(toolset) == 0 {
+		b.WriteString("Tools: none available this session.\n")
+	} else {
+		b.WriteString("Tools:\n")
+		for _, t := range toolset {
+			fmt.Fprintf(&b, "- %s: %s\n", t.Name(), t.Describe().Function.Description)
+		}
+	}
+
+	if cloudflareReady != nil && cloudflareReady() {
+		b.WriteString("Cloudflare: a credential is configured; the connector is available.\n")
+	} else {
+		b.WriteString("Cloudflare: no credential is configured; the connector is not available.\n")
+	}
+
+	return b.String()
+}
+
+// introduction reads AGENTS.md from dir, for the one system message a turn sends
+// ahead of the question. AGENTS.md, not CONTEXT.md: it is the file a tree already
+// names as read by default (see this repository's own AGENTS.md, "This file is read
+// by default"), and the one goose and other tools already converge on, where
+// CONTEXT.md was a project-specific pointer file with no standing outside Loreloom's
+// own coordination documents and no claim on this role. A missing file is silence,
+// not a failure: most working directories have none, and a session without one
+// sends no introduction at all rather than an empty one.
 func introduction(dir string) string {
-	text, err := os.ReadFile(filepath.Join(dir, "CONTEXT.md"))
+	text, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
 		return ""
 	}

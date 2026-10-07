@@ -1,0 +1,52 @@
+# 0000045 Escape sends the newest queued message, not the head
+
+- Status: accepted
+- Date: 2026-10-06
+- Supersedes: `adr-0000006-queue-one-per-turn-and-escape-sends.txt`'s escape
+  clause only ("Escape sends the head of the queue immediately") - every
+  other decision in that record stands
+
+## Context
+
+`0000006` decided escape sends the head of the queue - the oldest message,
+the same message normal FIFO dispatch would send next, just immediately
+rather than after the turn settles. `loreloom/AGENTS.md`'s "orcli session
+workflow recorded with Glen" section, written later (`2c18c72`,
+2026-10-06 20:39:37, after `0000006`'s 2026-10-05 date), says the opposite:
+"Escape sends the newest queued message immediately."
+
+The two cannot both be right, and nothing in either document anticipated
+the other. Glen resolved it directly: accept the newer source.
+
+## Decision
+
+**Escape sends the newest queued message, immediately, bypassing the
+wait.** Not the head. A reader who queues three questions and then presses
+escape is asking about the thing they just typed, not the first thing they
+queued a while ago - that is the reading `loreloom/AGENTS.md` settles and
+`0000006`'s head-of-queue choice did not consider.
+
+**Everything else `0000006` decided is unchanged.** One queue per session,
+FIFO; a message sent by escape leaves the queue when processed, not when
+sent; normal settle-triggered dispatch still sends oldest-first, one
+message per turn. `loreloom/AGENTS.md` confirms this split explicitly:
+"Completion of an immediate request immediately starts the oldest waiting
+message, even if other work continues." Escape and ordinary dispatch read
+the queue from opposite ends; this record changes only which end escape
+reads from.
+
+## Consequences
+
+`0000006`'s own status line gets the `SUPERCEDED` note for this one clause,
+per this project's own convention that a record keeps its status line
+rather than being rewritten. Nothing in the tree implements the queue yet,
+so there is no code to change alongside this - the correction is to the
+decision record only, ahead of whenever the queue is actually built.
+
+A future implementation reads the queue from the tail for escape and from
+the head for ordinary dispatch - two different ends of the same structure,
+not two queues.
+
+## Notes
+
+Nothing in the tree has been changed in writing this.

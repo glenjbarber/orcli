@@ -3,7 +3,9 @@
 - Status: accepted on 2026-10-05. The reader was asked whether to drop the
   library for the reference tree's own terminal handling and said to keep it.
   Two questions answered, the two open checks measured with the limits stated
-  below, and no code in the tree has changed
+  below, and no code in the tree has changed, and SUPERCEDED by
+  `UI-redesign.md`, which Notion's record lists as superseding this record in
+  full
 - Date: 2026-10-05
 - Supersedes: nothing. If it is accepted it replaces part of what 0000001 settled,
   and that relationship is stated below rather than left implicit

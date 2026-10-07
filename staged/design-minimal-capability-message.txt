@@ -1,0 +1,86 @@
+Status: draft, and IMPLEMENTED. `ad87a83` ("Implement adr-0000042's
+capability message") builds `cmd/orcli/ask.go`'s `capabilities()` to this
+draft's floor: identity plus a closed list, each entry present-with-its-
+real-constraints or absent, assembled from `Session.Options()`/`Ready()`
+and a `cloudflareReady()` check rather than hand-written per capability,
+with each tool's line reusing its own `Describe().Function.Description`
+verbatim. This draft's open questions were resolved in the implementation,
+not here: the rendering is prose (not a structured block), ordering is
+model / tools / Cloudflare, and "no tools" renders as its own stated line
+rather than folded into a single sentence with "no connectors."
+
+# Design: the minimal capability message
+
+Answers the wording question `staged/adr-0000042-orcli-introduces-itself-and-its-capabilities.txt`
+left open under "What this does not settle": how small can the system
+message it requires be, while still removing every guess it exists to
+remove.
+
+## What it is for
+
+0000042 settled that a system message exists and what it is assembled from.
+It did not settle its size. This draft argues the floor and names what sits
+on it, so a later implementation has a concrete shape to start from rather
+than re-deriving the floor itself.
+
+## The floor
+
+Two things, and nothing a reader cannot act differently on belongs beside
+them:
+
+1. **Identity.** "You are `orcli`." One clause. Without it nothing that
+   follows has a referent.
+2. **A closed list of capability and connector availability**, each entry
+   present-with-its-real-constraints or absent, never omitted. 0000042's
+   "absence is a statement, not a gap" rules out a shorter list that drops
+   an entry silently - there is no such thing as fewer than every entry.
+
+UI layout, the prompt string, personality, status bar contents - none of it
+changes what a call to the model should attempt, so none of it belongs here
+on minimality grounds, independent of whatever `UI-redesign.md` or the status
+bar records settle on their own.
+
+## Against the tree as it stands today
+
+`internal/tools` is tested and never reached from `ask()`. The honest
+minimal message today, with nothing wired in, is one sentence:
+
+    You are orcli. This session has no tools and no connectors; answer
+    from the question alone.
+
+Once a capability exists, it costs one clause, not a paragraph - naming the
+verb and the real scope the way `gitPermitted`'s own allowlist already
+names subcommands, not a feature tour:
+
+    You are orcli. This session has:
+    - filesystem: read_file, write_file, list_dir, contained to the
+      working tree, no shell escape
+    - git: status, log, diff, show, blame, branch, tag, remote, commit,
+      push, worktree, merge; approval-gated
+    - shell: no pipes, no redirects
+    - cloudflare: not configured
+
+## What keeps it from growing back
+
+Every clause is read from state that already exists for another reason -
+`Session.Options()`, `Ready()`, whatever check `cloudflareClient` already
+makes - not hand-written per capability. A clause with no existing state
+behind it is a sign the capability was never finished being wired in, not a
+reason to write the clause by hand anyway.
+
+## Open questions
+
+- Whether the list is prose, as sketched above, or a structured block the
+  model can parse more cheaply. 0000042 left this open generally; this
+  draft does not narrow it, since nothing about minimality favors one
+  rendering over the other.
+- Ordering, if there is more than one capability: alphabetical, by the
+  order `Session.Options()` exposes fields, or something else. Not decided.
+- Whether "no tools and no connectors" is itself replaced by an empty list
+  rendered the same way every other state is (an explicit `none`), for
+  consistency with how an absent single capability is named, rather than as
+  a special-cased sentence as sketched above.
+
+## Notes
+
+Nothing in the tree has been changed in writing this.

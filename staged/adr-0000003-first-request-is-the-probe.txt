@@ -1,6 +1,6 @@
 # 0000003 The first request is the connection test
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: a command in the table that tested the connection and reported the
   key, with no handler behind it
