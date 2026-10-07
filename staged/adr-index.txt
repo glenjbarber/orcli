@@ -79,6 +79,7 @@ on the record is the place, and this table is the view across all of them.
 | [0000043](adr-0000043-a-change-reports-its-own-line-count.txt) | a change reports the lines it added and removed from the tree | accepted | nothing. It names a unit no earlier record used |
 | [0000044](adr-0000044-the-introduction-file-is-agents-md-not-context-md.txt) | the introduction file is AGENTS.md, not CONTEXT.md | accepted | `46a6320`'s choice of CONTEXT.md as the introduction file |
 | [0000046](adr-0000046-status-bar-collisions-with-faded-left-text.txt) | status-bar items overlap when the halves collide, and left-most text fades in font color | proposed | nothing. It supersedes nothing |
+| [0000047](adr-0000047-begins-handoff-note-travels-through-save-and-load.txt) | /begin's handoff note travels through save and load, not a pipe | accepted | nothing. It is the first implementation record for /begin, extending 0000032 |
 
 They are numbered so a later record can supersede an earlier one by name, and
 they cross-refer rather than repeat, so a reader who has read one does not read
