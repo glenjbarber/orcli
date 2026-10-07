@@ -191,6 +191,11 @@ func init() {
 			Summary: "resume a conversation saved with /name",
 		},
 		{
+			Name:    "begin",
+			Args:    "NOTE",
+			Summary: "fork a pane and hand the new one a note describing a task",
+		},
+		{
 			Name:    "mouse",
 			Summary: "turn mouse reporting on or off, for wheel scrolling",
 		},
