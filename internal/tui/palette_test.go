@@ -495,3 +495,58 @@ func TestPaneStyleIsOffWithColourOff(t *testing.T) {
 		t.Error("PaneStyle reports ok = true with colour off, want false")
 	}
 }
+
+// TestSweepColorsDropDarkBlueOnDarkGroundOnly covers the one difference between the
+// two grounds' twiddle lists: dark blue is too close to a dark terminal's own
+// background to read as a colour there, so a dark ground drops it, and a light
+// ground - where the same value reads fine - keeps every entry.
+func TestSweepColorsDropDarkBlueOnDarkGroundOnly(t *testing.T) {
+	darkBlue := RGB{R: 0x1a, G: 0x1a, B: 0x6e}
+
+	for _, c := range sweepColors(GroundDark) {
+		if c == darkBlue {
+			t.Fatal("dark blue is in the dark ground's sweep list, want it dropped")
+		}
+	}
+
+	found := false
+	for _, c := range sweepColors(GroundLight) {
+		if c == darkBlue {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("dark blue is missing from the light ground's sweep list, want it kept")
+	}
+
+	if got, want := len(sweepColors(GroundDark))+1, len(sweepColors(GroundLight)); got != want {
+		t.Fatalf("dark ground has %d colours, light has %d, want dark to have exactly one fewer",
+			len(sweepColors(GroundDark)), len(sweepColors(GroundLight)))
+	}
+}
+
+// TestDrawSweepTextScrollsLeftToRight covers the twiddle's own motion: the colour
+// at a column on one step is the colour that sat one column to its left on the
+// step before, so a colour travels rightward across the figure as steps advance
+// rather than every column turning in place together.
+func TestDrawSweepTextScrollsLeftToRight(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(20, 5)
+	p := NewPalette(true, GroundDark, nil)
+
+	drawSweepText(screen, 0, 0, 10, "working", 0, p)
+	_, _, before, _ := screen.GetContent(3, 0)
+	beforeFG, _, _ := before.Decompose()
+
+	drawSweepText(screen, 0, 0, 10, "working", 1, p)
+	_, _, after, _ := screen.GetContent(4, 0)
+	afterFG, _, _ := after.Decompose()
+
+	if beforeFG != afterFG {
+		t.Fatalf("colour at column 3, step 0 (%v) did not scroll to column 4, step 1 (%v)",
+			beforeFG, afterFG)
+	}
+}

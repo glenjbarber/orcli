@@ -384,6 +384,44 @@ func RoleName(role Role) string {
 	}
 }
 
+// sweepEntry is one colour the twiddle scrolls through, named so a ground can drop
+// an entry by name rather than by an index that would silently shift if the table
+// grew.
+type sweepEntry struct {
+	RGB
+	name string
+}
+
+// sweepTable is every colour the twiddle scrolls through, before any ground has
+// dropped one. The order is the order the pattern scrolls in.
+var sweepTable = []sweepEntry{
+	{RGB{R: 0xff, G: 0x55, B: 0x55}, "red"},
+	{RGB{R: 0xff, G: 0xaa, B: 0x00}, "orange"},
+	{RGB{R: 0xff, G: 0xee, B: 0x00}, "yellow"},
+	{RGB{R: 0x50, G: 0xfa, B: 0x7b}, "green"},
+	{RGB{R: 0x00, G: 0xd7, B: 0xd7}, "cyan"},
+	{RGB{R: 0x61, G: 0x9c, B: 0xff}, "blue"},
+	{RGB{R: 0x1a, G: 0x1a, B: 0x6e}, "dark blue"},
+	{RGB{R: 0xbd, G: 0x93, B: 0xf9}, "violet"},
+}
+
+// sweepColors returns the twiddle's colour list for a ground.
+//
+// Dark blue is dropped on a dark ground: it is the one entry in sweepTable close
+// enough to a dark terminal's own background to read as the twiddle going blank
+// rather than as a colour turning. A light ground keeps it, since the same value
+// reads as a colour against a light background.
+func sweepColors(ground Ground) []RGB {
+	out := make([]RGB, 0, len(sweepTable))
+	for _, e := range sweepTable {
+		if ground == GroundDark && e.name == "dark blue" {
+			continue
+		}
+		out = append(out, e.RGB)
+	}
+	return out
+}
+
 // GroundCandidates are the grounds offered by completion.
 //
 // It is a function rather than a variable so a caller cannot append to the slice and

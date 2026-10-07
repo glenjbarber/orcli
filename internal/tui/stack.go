@@ -557,7 +557,13 @@ func renderBarTwo(status Status, atLiveEdge bool) string {
 	return strings.Join(parts, " · ")
 }
 
+// drawSweepText draws the twiddle, each column coloured from sweepColors for the
+// palette's own ground, and scrolling left to right: the colour at column c on step
+// is the one that sat at column c-1 on step-1, so a colour travels rightward one
+// column per step rather than every column turning in place together.
 func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, p Palette) {
+	colors := sweepColors(p.Ground())
+	n := len(colors)
 	col := 0
 	for _, r := range text {
 		w := runewidth(r)
@@ -570,8 +576,8 @@ func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, 
 		if col+w > width {
 			break
 		}
-		red, green, blue := hueRGB(float64(sweepStepDegrees*step + col))
-		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(red), int32(green), int32(blue)))
+		c := colors[(((col-step)%n)+n)%n]
+		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(c.R), int32(c.G), int32(c.B)))
 		screen.SetContent(x+col, y, r, nil, style)
 		col += w
 	}
