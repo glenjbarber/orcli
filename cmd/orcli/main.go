@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/groq"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
@@ -39,12 +40,30 @@ var gate = ensureTrusted
 // See openInterface for how the terminal is handed to tview.
 var draw = openInterface
 
-// newTransport is the API client, as a variable rather than a call.
+// newTransport builds the chat transport a turn is sent through, choosing
+// OpenRouter or Groq by the configuration's own Provider field.
 //
-// It is a third seam for the same reason as the two above, and it is the one that
-// keeps a test from reaching the network: a test that stands in for the client can
-// exercise a whole turn without a credential and without a request.
-var newTransport = openrouter.New
+// It is a variable rather than a call for the same reason gate and draw
+// above are: it is the seam that keeps a test from reaching the network,
+// since a test that stands in for the client can exercise a whole turn
+// without a credential and without a request. It takes the whole
+// configuration rather than only the credential - unlike the single-provider
+// openrouter.New it replaces here - because choosing between the two
+// transports needs the Provider field alongside the key, and a seam that
+// took the key alone would have no way to ask for Groq instead of
+// OpenRouter.
+//
+// Only Chat is required, so this stays provider-agnostic at the one
+// signature cmd/orcli's chatClient interface names: both *openrouter.Client
+// and *groq.Client already satisfy it, since internal/groq's own Chat method
+// reads and writes the same openrouter.Request and openrouter.Event types
+// (see internal/groq's package doc for why).
+var newTransport = func(cfg config.Config) chatClient {
+	if isGroqProvider(cfg.Provider) {
+		return groq.New(cfg.APIKey)
+	}
+	return openrouter.New(cfg.APIKey)
+}
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -358,7 +377,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
+		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
 		hello,
 	)
 }

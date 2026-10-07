@@ -9,6 +9,7 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/groq"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
@@ -66,12 +67,18 @@ type dispatcher struct {
 	client    *cloudflare.APIClient
 	newClient func(key string) *cloudflare.APIClient
 
-	// orClient is the OpenRouter catalog client /key, /models, /freemodels and
-	// /attribute share, built on first use the way client above is. newORClient is
-	// the seam a test points at a fake: openrouter.Client's base URL cannot be
-	// pointed at a test server from outside its own package (see catalogClient's
-	// doc comment in openrouter_cmds.go), so a dispatcher test stands in for the
-	// whole client rather than for one request.
+	// orClient is the catalog client /key, /models, /freemodels and /attribute
+	// share, built on first use the way client above is. newORClient is the seam
+	// a test points at a fake: neither openrouter.Client's nor groq.Client's base
+	// URL can be pointed at a test server from outside its own package (see
+	// catalogClient's doc comment in openrouter_cmds.go), so a dispatcher test
+	// stands in for the whole client rather than for one request.
+	//
+	// The field is still named for OpenRouter, and so is the comment above it,
+	// kept that way rather than renamed to something provider-neutral: a rename
+	// here touches nothing a reader outside this file sees, and the name is
+	// accurate again the moment a session is configured for OpenRouter, which is
+	// still every session whose configuration predates Groq support.
 	orClient    catalogClient
 	newORClient func(key string) catalogClient
 
@@ -97,7 +104,18 @@ type dispatcher struct {
 // newDispatcherFor builds a dispatcher over a configuration.
 func newDispatcherFor(cfg config.Config) *dispatcher {
 	d := &dispatcher{cfg: cfg, newClient: cloudflare.New}
-	d.newORClient = func(key string) catalogClient { return openrouter.New(key) }
+
+	// newORClient is chosen by the configuration's own Provider field, the same
+	// way newTransport in main.go is: a session configured for Groq gets a
+	// *groq.Client here too, so /key, /models and /freemodels read Groq's own
+	// endpoints rather than OpenRouter's whenever that is the provider in force.
+	// See isGroqProvider's doc comment in provider.go for what decides which
+	// provider a configuration names.
+	if isGroqProvider(cfg.Provider) {
+		d.newORClient = func(key string) catalogClient { return groq.New(key) }
+	} else {
+		d.newORClient = func(key string) catalogClient { return openrouter.New(key) }
+	}
 	d.canAsk = func() bool { return false }
 	d.commands = map[string]handler{
 		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {

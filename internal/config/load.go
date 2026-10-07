@@ -44,6 +44,16 @@ type Config struct {
 	Model string `json:"model,omitempty"`
 
 	// Provider is the endpoint host, defaulting to the OpenRouter one.
+	//
+	// It is read as a plain string rather than validated against an enum,
+	// which is what lets "groq" be a legal value today with no change to this
+	// package: cmd/orcli is what reads this field to choose between its two
+	// transports (see cmd/orcli/provider.go's isGroqProvider), and this
+	// package's job stops at carrying whatever the reader wrote. The single
+	// APIKey field above is still read as the credential for whichever
+	// provider this names - this build holds one credential per session, for
+	// whichever one provider that session is configured to use, not one
+	// credential per provider at once.
 	Provider string `json:"provider,omitempty"`
 
 	// AttributionID names who asked, and is sent with every request so the
