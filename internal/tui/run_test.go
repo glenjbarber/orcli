@@ -1,9 +1,76 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+// TestStartSendsHelloAutomatically covers the startup hello at the level Start's
+// own event loop runs it at, without opening a real terminal screen: a test binary
+// has none, and driving tview's own Application through a fake screen is more than
+// this hook needs proving. interfaceLoop.start is the exact call Start makes for a
+// non-empty hello, on the same group a reader's own line would be started on, so
+// calling it directly here exercises the real mechanism - the goroutine, the
+// group accounting, and the session writes - with no key pressed and no line
+// runner consulted at all.
+func TestStartSendsHelloAutomatically(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	var asked string
+	ask := func(_ context.Context, question string, level int) error {
+		asked = question
+		s.Deliver("hello back", level)
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	maybeSendHello(context.Background(), l, "introduce yourself")
+	if err := l.group.Close(); err != nil {
+		t.Fatalf("group.Close: %v", err)
+	}
+
+	if asked != "introduce yourself" {
+		t.Errorf("ask was called with %q, want the hello text", asked)
+	}
+
+	rows := s.Log().Rows()
+	if got := rows[len(rows)-1].Text; got != "hello back" {
+		t.Errorf("last log row = %q, want the hello's own reply, written with no line submitted", got)
+	}
+}
+
+// TestStartSendsNoHelloWhenEmpty covers the other side: an empty hello is a
+// caller's choice not to greet, and maybeSendHello - the exact call Start makes -
+// starts no turn at all when it is given one.
+func TestStartSendsNoHelloWhenEmpty(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+
+	called := false
+	ask := func(context.Context, string, int) error {
+		called = true
+		return nil
+	}
+
+	l := &interfaceLoop{session: s, ask: ask, group: newGroup()}
+	maybeSendHello(context.Background(), l, "")
+	_ = l.group.Close()
+
+	if called {
+		t.Error("ask was called despite an empty hello")
+	}
+}
+
+// TestMaybeSendHelloSkipsWithNoAsk covers a loop built with no ask at all - a
+// session with no model configured, say - sending nothing rather than calling a
+// nil function.
+func TestMaybeSendHelloSkipsWithNoAsk(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	l := &interfaceLoop{session: s, group: newGroup()}
+
+	maybeSendHello(context.Background(), l, "introduce yourself")
+	_ = l.group.Close()
+}
 
 func plainPalette() Palette { return NewPalette(false, GroundDark, nil) }
 
