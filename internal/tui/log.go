@@ -29,7 +29,6 @@ package tui
 import (
 	"strings"
 	"sync"
-	"unicode"
 )
 
 // Log is the record of what has been written, one row at a time.
@@ -243,6 +242,8 @@ func (l *Log) Truncate() {
 // dropping it would fold a table into a wall. The box-drawing and braille figures
 // the interface draws with are kept, since they are text and a reader selecting a
 // row out of the log gets the figure rather than a question mark.
+// The Unicode replacement character is kept too: it is valid text, and removing
+// it can change JSON or Markdown that the model returned.
 func plainRow(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -264,7 +265,6 @@ func plainRow(s string) string {
 			b.WriteRune(r)
 		case r < 0x20, r == 0x7f:
 		case r >= 0x80 && r <= 0x9f:
-		case r == unicode.ReplacementChar:
 		default:
 			b.WriteRune(r)
 		}
