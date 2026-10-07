@@ -123,3 +123,40 @@ func TestFrameSweepsTheFigureAsCellStyles(t *testing.T) {
 		t.Fatalf("figure hue after %d steps = %v, want cycle back to %v", cycle, cycledFG, firstFG)
 	}
 }
+
+// TestFrameDrawsAnIdleFigureInChromeNotSwept covers the bar with nothing
+// running: the figure reads "idle" with no turn behind it to animate, and
+// should read as plain chrome text like the rest of the bar, not a leftover
+// swept colour with no figure left to explain it.
+func TestFrameDrawsAnIdleFigureInChromeNotSwept(t *testing.T) {
+	bar := Bar{Status: Status{fieldFigure: "idle"}}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(60, 20)
+	p := plainPalette()
+	frame := NewFrame()
+	frame.SetRect(0, 0, 60, 20)
+	frame.SetContent(bar, nil, p)
+	frame.SetSweepStep(3)
+	frame.Draw(screen)
+
+	barOneRow := scrollbackRows(20) + 2
+	prefix, _, _ := renderBarOne(bar.Status)
+	start := DisplayWidth(prefix)
+
+	_, _, prefixCell, _ := screen.GetContent(0, barOneRow)
+	_, _, first, _ := screen.GetContent(start, barOneRow)
+	_, _, next, _ := screen.GetContent(start+1, barOneRow)
+	prefixFG, _, _ := prefixCell.Decompose()
+	firstFG, _, _ := first.Decompose()
+	nextFG, _, _ := next.Decompose()
+
+	if firstFG != prefixFG {
+		t.Errorf("idle figure foreground = %v, want the bar's own chrome %v", firstFG, prefixFG)
+	}
+	if firstFG != nextFG {
+		t.Error("adjacent idle figure cells use different hues, want the same flat chrome")
+	}
+}

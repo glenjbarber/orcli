@@ -493,14 +493,26 @@ func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
 	screen.ShowCursor(x+column, y)
 }
 
-// drawBarOne draws bar one at row y, with the figure segment swept. Factored out of
-// Draw's main path so the shedding ladder below can draw the same row at whatever
-// height it survives to, rather than repeating the sweep arithmetic twice.
+// drawBarOne draws bar one at row y, with the figure segment swept while a turn is
+// running. Factored out of Draw's main path so the shedding ladder below can draw
+// the same row at whatever height it survives to, rather than repeating the sweep
+// arithmetic twice.
+//
+// The figure reads "idle" (literally [StateIdle]'s own value - the one word
+// [twiddleWord] never returns) whenever nothing is running, including through a
+// screen break, and that word is drawn in chrome like the rest of the bar rather
+// than swept: a sweep with nothing turning behind it is a colour with no figure to
+// explain it, and the reader is left wondering why one word in an otherwise plain
+// line is still lit.
 func (f *Frame) drawBarOne(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
 	prefix, figure, suffix := renderBarOne(f.bar.Status)
 	drawCellText(screen, x, y, width, prefix, chrome)
 	figureX := DisplayWidth(prefix)
-	drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	if figure == string(StateIdle) {
+		drawCellText(screen, x+figureX, y, width-figureX, figure, chrome)
+	} else {
+		drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	}
 	suffixX := figureX + DisplayWidth(figure)
 	if suffixX < width {
 		drawCellText(screen, x+suffixX, y, width-suffixX, suffix, chrome)
