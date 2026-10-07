@@ -345,3 +345,124 @@ func TestCapabilitiesReflectsCloudflareEitherWay(t *testing.T) {
 		t.Errorf("capabilities with a nil Cloudflare check = %q, want it treated as not ready", nilCheck)
 	}
 }
+
+// TestCapabilitiesNamesNoPluginSystem covers the honest answer to "what plugins
+// are enabled": there is no plugin system in this build, so the capability
+// message says that rather than leaving the question unanswered.
+func TestCapabilitiesNamesNoPluginSystem(t *testing.T) {
+	s := tui.New(tui.Options{Model: "some/model"})
+	got := capabilities(s, nil, nil)
+	if !strings.Contains(got, "Plugins:") || !strings.Contains(got, "no plugin system") {
+		t.Errorf("capabilities = %q, want it to name that no plugin system exists", got)
+	}
+}
+
+// TestDocumentationListsDocAndStaged covers the listing ask sends alongside
+// AGENTS.md: every file directly under doc/ and staged/ is named, by heading and
+// by file name, so the model can point a reader at the real tree rather than guess.
+func TestDocumentationListsDocAndStaged(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "doc"), 0o755); err != nil {
+		t.Fatalf("MkdirAll doc: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "staged"), 0o755); err != nil {
+		t.Fatalf("MkdirAll staged: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "doc", "interface-commands.md"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "staged", "adr-0000042-thing.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := documentation(dir)
+	for _, want := range []string{"doc/", "staged/", "interface-commands.md", "adr-0000042-thing.txt"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("documentation(%q) = %q, want it to carry %q", dir, got, want)
+		}
+	}
+}
+
+// TestNoDocumentationWithoutDocOrStaged covers the absence: a working directory
+// with neither directory carries no documentation message at all, the same rule
+// introduction follows for a missing AGENTS.md.
+func TestNoDocumentationWithoutDocOrStaged(t *testing.T) {
+	dir := t.TempDir()
+	if got := documentation(dir); got != "" {
+		t.Errorf("documentation(%q) = %q, want empty with neither directory present", dir, got)
+	}
+}
+
+// TestAskSendsDocumentationAsAThirdSystemMessage covers the wiring into ask: a
+// working directory with AGENTS.md and a doc/ directory sends the capability
+// message, the AGENTS.md introduction, and the documentation listing, in that
+// order, ahead of the question.
+func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("be terse"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "doc"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "doc", "readme.md"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	s := newTestSession(dir)
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
+	}}
+
+	a := ask(s, fake, "", nil, nil)
+	if err := a(context.Background(), "hi", 0); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	msgs := fake.seen[0].Messages
+	if len(msgs) != 4 {
+		t.Fatalf("messages = %+v, want capability, AGENTS.md, documentation, and the question", msgs)
+	}
+	if msgs[2].Role != "system" || !strings.Contains(msgs[2].Content, "readme.md") {
+		t.Errorf("the third message is %+v, want the documentation listing", msgs[2])
+	}
+	if msgs[3].Role != "user" || msgs[3].Content != "hi" {
+		t.Errorf("the fourth message is %+v, want the user's question", msgs[3])
+	}
+}
+
+// TestHelloQuestionAsksForAnIntroduction covers the question the session sends
+// itself at startup: it is non-empty and, run through ask like any other
+// question, carries the same capability message, AGENTS.md introduction, and
+// documentation listing a reader's own question would, so the model answering it
+// has everything it needs to actually introduce the session rather than guess.
+func TestHelloQuestionAsksForAnIntroduction(t *testing.T) {
+	if strings.TrimSpace(helloQuestion) == "" {
+		t.Fatal("helloQuestion is empty")
+	}
+
+	dir := t.TempDir()
+	s := newTestSession(dir)
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{
+			{Kind: openrouter.EventDelta, Text: "Hi, I'm orcli."},
+			{Kind: openrouter.EventFinish, Reason: "stop", Finished: true},
+		},
+	}}
+
+	a := ask(s, fake, "", nil, nil)
+	if err := a(context.Background(), helloQuestion, 0); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	msgs := fake.seen[0].Messages
+	last := msgs[len(msgs)-1]
+	if last.Role != "user" || last.Content != helloQuestion {
+		t.Errorf("the last message is %+v, want the hello question", last)
+	}
+
+	rows := s.Log().Rows()
+	if got := rows[len(rows)-2].Text; got != "Hi, I'm orcli." {
+		t.Errorf("the delivered reply is %q, want the hello's own reply", got)
+	}
+}

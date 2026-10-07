@@ -347,9 +347,19 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// The confirmation is wired here rather than in ask, since the writer belongs to
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
+	//
+	// The hello is only sent when canAsk(s) agrees a turn can be sent at all: a
+	// session with no model configured has nothing to greet with, and Begin would
+	// only refuse it and leave a failure notice as the first thing the reader sees.
+	hello := ""
+	if canAsk(s) {
+		hello = helloQuestion
+	}
+
 	return tui.Start(ctx, s,
 		d.Run,
 		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s), d.cloudflareReady),
+		hello,
 	)
 }
 
