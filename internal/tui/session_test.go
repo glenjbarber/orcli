@@ -497,6 +497,101 @@ func TestTickBreakCountsDownThenEnds(t *testing.T) {
 	}
 }
 
+// TestTickBreakHalvesOnceWhenTheReaderKeptTyping covers a reader who never
+// stopped: the first close does not end the break or say so, it halves the
+// remaining time and tries once more.
+func TestTickBreakHalvesOnceWhenTheReaderKeptTyping(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	before := s.Log().Len()
+
+	s.NoteBreakActivity()
+	end := start.Add(breakDuration + time.Second)
+	s.TickBreak(end)
+
+	state, detail := s.State()
+	if state != StateBreak {
+		t.Fatalf("state after the first close is %q, want %q", state, StateBreak)
+	}
+	if detail == "" {
+		t.Error("the halved break left no countdown in the detail")
+	}
+	if got := s.Log().Len(); got != before+1 {
+		t.Errorf("the halved break logged %d rows, want 1", got-before)
+	}
+	if rows := s.Log().Rows(); strings.Contains(rows[len(rows)-1].Text, "ended") {
+		t.Error("the halved break's own notice says the break ended")
+	}
+	if !s.breakEnd.Equal(end.Add(breakDuration / 2)) {
+		t.Errorf("breakEnd after halving is %v, want %v", s.breakEnd, end.Add(breakDuration/2))
+	}
+}
+
+// TestTickBreakEndsSilentlyOnTheSecondCloseIfStillTyping covers the rest of
+// that reader's break: the halved period gets no second halving, and still
+// says nothing about ending if they kept typing through it too, but does
+// reset lastBreak so the next full interval starts from here.
+func TestTickBreakEndsSilentlyOnTheSecondCloseIfStillTyping(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	s.NoteBreakActivity()
+	firstClose := start.Add(breakDuration + time.Second)
+	s.TickBreak(firstClose)
+
+	s.NoteBreakActivity()
+	before := s.Log().Len()
+	secondClose := firstClose.Add(breakDuration/2 + time.Second)
+	s.TickBreak(secondClose)
+
+	state, _ := s.State()
+	if state != StateIdle {
+		t.Errorf("state after the second close is %q, want %q", state, StateIdle)
+	}
+	if got := s.Log().Len(); got != before {
+		t.Errorf("the second close logged %d rows, want 0", got-before)
+	}
+	if !s.lastBreak.Equal(secondClose) {
+		t.Errorf("lastBreak is %v, want %v", s.lastBreak, secondClose)
+	}
+}
+
+// TestTickBreakEndsNormallyOnTheSecondCloseIfInputStopped covers a reader
+// who took the hint partway through: no further typing during the halved
+// period gets the ordinary "ended" notice back, same as a break nobody
+// interrupted at all.
+func TestTickBreakEndsNormallyOnTheSecondCloseIfInputStopped(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	s.NoteBreakActivity()
+	firstClose := start.Add(breakDuration + time.Second)
+	s.TickBreak(firstClose)
+
+	before := s.Log().Len()
+	secondClose := firstClose.Add(breakDuration/2 + time.Second)
+	s.TickBreak(secondClose)
+
+	if got := s.Log().Len(); got != before+1 {
+		t.Fatalf("the second close logged %d rows, want 1", got-before)
+	}
+	if rows := s.Log().Rows(); !strings.Contains(rows[len(rows)-1].Text, "ended") {
+		t.Error("the second close did not say the break ended")
+	}
+}
+
+// TestNoteBreakActivityIsANoOpOutsideABreak covers the one thing that lets
+// every key reach it unconditionally: it does nothing unless a break is
+// actually running.
+func TestNoteBreakActivityIsANoOpOutsideABreak(t *testing.T) {
+	s := New(Options{})
+	s.NoteBreakActivity()
+	if s.breakInput {
+		t.Error("NoteBreakActivity set breakInput with no break running")
+	}
+}
+
 // TestTickBreakDoesNothingOutsideABreak covers a tick arriving while no
 // break is running, which is the ordinary case on every repaint.
 func TestTickBreakDoesNothingOutsideABreak(t *testing.T) {

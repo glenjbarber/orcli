@@ -503,6 +503,12 @@ func twiddleWord(state State) string {
 
 // act applies one key and reports whether the loop should leave.
 func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
+	// A mouse report is not the reader typing - see the KeyMouse case below -
+	// so it does not count as the activity a running screen break watches for.
+	if key != KeyMouse {
+		l.session.NoteBreakActivity()
+	}
+
 	switch key {
 	case KeyRune:
 		l.session.Editor().Insert(r)
