@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -77,6 +76,7 @@ const (
 	KeyCtrlA
 	KeyCtrlW
 	KeyCtrlU
+	KeyCtrlT
 )
 
 // Start runs the interface until the reader leaves.
@@ -110,24 +110,15 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, hello s
 		frame:   frame,
 		group:   newGroup(),
 	}
+	// Pasted text is always literal content and never a submit trigger,
+	// however many lines it contains: embedded '\r'/'\n' bytes used to be
+	// turned into KeyEnter calls here, which is the bug that let a
+	// multi-line paste send partway through itself. InsertPastedText is the
+	// one place that decides what a paste becomes (plain insert, or a
+	// collapsed summary over the real text), so the newline-to-Enter
+	// conversion that used to live in this handler is gone for good.
 	frame.SetPasteHandler(func(text string) {
-		runes := []rune(text)
-		for i := 0; i < len(runes); i++ {
-			r := runes[i]
-			if r == '\r' || r == '\n' {
-				if l.act(ctx, KeyEnter, 0) {
-					app.Stop()
-					return
-				}
-				if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
-					i++
-				}
-				continue
-			}
-			if !unicode.IsControl(r) {
-				l.act(ctx, KeyRune, r)
-			}
-		}
+		l.session.Editor().InsertPastedText(text)
 		l.paint()
 	})
 	app.SetAfterDrawFunc(func(screen tcell.Screen) {
@@ -340,6 +331,8 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 		return KeyCtrlW, 0
 	case tcell.KeyCtrlU:
 		return KeyCtrlU, 0
+	case tcell.KeyCtrlT:
+		return KeyCtrlT, 0
 	default:
 		return KeyNone, 0
 	}
@@ -533,6 +526,15 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	case KeyCtrlU:
 		l.session.Editor().ClearLeft()
 
+	case KeyCtrlT:
+		// PLACEHOLDER BINDING: Ctrl+T is a tentative choice for
+		// expand/collapse of a pasted block, picked only because it did
+		// not collide with Ctrl+A/Ctrl+W/Ctrl+U or anything else keyEvent
+		// already mapped. Glen has not confirmed this key; it is wired
+		// here so the mechanism (Editor.ToggleExpandPastedBlock) has
+		// somewhere to be reached from while the real binding is decided.
+		l.session.Editor().ToggleExpandPastedBlock()
+
 	case KeyScrollUp:
 		l.session.ScrollUp(1)
 
@@ -545,7 +547,11 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 
 // submit acts on a line the reader finished typing.
 func (l *interfaceLoop) submit(ctx context.Context) bool {
-	line := strings.TrimSpace(l.session.Editor().Text())
+	// SubmitText rather than Text: a still-collapsed pasted block is
+	// substituted back to its real, raw text here, so the runner and the
+	// history both get what the reader actually pasted, never the
+	// "```pasted, N lines```" placeholder the field was showing.
+	line := strings.TrimSpace(l.session.Editor().SubmitText())
 	if line == "" {
 		return false
 	}
