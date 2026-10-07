@@ -74,8 +74,16 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 	intro := introduction(s.Options().WorkingDir)
 	docs := documentation(s.Options().WorkingDir)
 
-	return func(ctx context.Context, question string, level int) error {
-		turnCtx, err := s.Begin(ctx, question, level)
+	return func(ctx context.Context, question string, level int, silent bool) error {
+		begin := s.Begin
+		if silent {
+			// The hello is the only caller that passes silent: its text instructs the
+			// model, it is not something the reader typed, and BeginSilent is the
+			// primitive that sends it to the model without writing it into the log as
+			// a question row. See BeginSilent's own doc comment for why.
+			begin = s.BeginSilent
+		}
+		turnCtx, err := begin(ctx, question, level)
 		if err != nil {
 			return err
 		}
