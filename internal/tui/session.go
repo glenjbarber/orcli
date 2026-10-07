@@ -1,29 +1,29 @@
 // Package tui draws the interface.
 //
-// Nothing here exists yet. This file holds the log, which is the part of the
-// frame every other decision hangs off: a downward-scrolling sequence of rows
-// written into the normal screen buffer, the way `brew` reports a run. The header,
-// the pane and the fixed input block are gone, so the log is what the reader
-// reads, what `/copy` copies, and what `/search` searches.
-//
-// # Why a log rather than a frame
-//
-// The frame that preceded this one was redrawn whole at every repaint, which is
-// what a fixed layout needs and the wrong model for output that arrives over
-// minutes. A model answering a question one tool call at a time produces rows that
-// belong in the order they happened, and a reader who scrolls back to compare two
-// tool results is reading history rather than a viewport.
-//
-// The cost of a log is that the reader's own scrollback is where the transcript
-// lives, so the client must stop taking it: the alternate screen is given up, and
-// what was on the screen before the client started comes back when it stops.
+// The screen is a frame: five fixed rows below a scrollback region that takes
+// whatever height is left. The fixed rows are the pane bar, two status bars, one
+// blank separator line, and the prompt, in that order from the bottom; see the
+// comment above barRows in stack.go for their order and rationale. The
+// scrollback above them holds the log: a downward-scrolling sequence of rows,
+// newest just above the prompt, oldest pushed off the top as it grows. This file
+// holds that log, along with the session and the terminal check.
 //
 // # What this file is not
 //
-// It is not the whole package. The palette, the line editor, the terminal control,
-// the session and the command table are separate concerns with their own
-// decisions, and the design record at DESIGN-NOTES.md describes where each of them
-// is headed.
+// It is not the whole package. The palette, the line editor, the terminal
+// control, and the command table are separate concerns with their own files and
+// their own decisions.
+//
+// # History
+//
+// An earlier version of this file described a log with no frame at all: the
+// alternate screen given up, and the reader's own scrollback carrying the
+// transcript, because the frame that preceded it was redrawn whole at every
+// repaint, which is the wrong model for output that arrives over minutes. That
+// was superseded (2026-10-06) when the frame returned, this time redrawing only
+// what changed rather than the whole screen at every repaint (see paint in
+// run.go); it carries forward loreloom/UI-redesign.md's shape, which stack.go
+// describes.
 package tui
 
 import (
