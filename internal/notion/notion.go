@@ -31,7 +31,7 @@ type Client struct {
 
 // New returns a client using Notion's public API.
 func New(token string) *Client {
-	return &Client{Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}, Base: apiBase}
+	return &Client{Token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Base: apiBase}
 }
 
 // SetApproval applies the current session's write policy to Notion calls.

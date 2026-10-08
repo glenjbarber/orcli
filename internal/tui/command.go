@@ -377,7 +377,7 @@ func Complete(prefix string) (names []string, whole bool) {
 }
 
 // Plugins returns the built-in plugin names accepted by the @plugin command form.
-func Plugins() []string { return []string{"apiary", "cloudflare", "notion"} }
+func Plugins() []string { return []string{"apiary", "cloudflare", "github", "notion"} }
 
 // PluginSubcommands returns the discoverable operations for a built-in plugin.
 func PluginSubcommands(name string) []string {
@@ -386,8 +386,10 @@ func PluginSubcommands(name string) []string {
 		return []string{"query"}
 	case "cloudflare":
 		return []string{"confirm", "dns"}
+	case "github":
+		return []string{"tasks"}
 	case "notion":
-		return []string{"api", "blocks", "comments", "data", "fetch", "pages", "search"}
+		return []string{"api", "blocks", "comments", "data", "fetch", "pages", "search", "tasks"}
 	default:
 		return nil
 	}

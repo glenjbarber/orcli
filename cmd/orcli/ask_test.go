@@ -296,6 +296,31 @@ func TestToolSchemasCoverTheWholeSet(t *testing.T) {
 	}
 }
 
+func TestTaskToolsAreRegisteredOnlyWhenTheirSettingsAreComplete(t *testing.T) {
+	base := newToolsetWithTasks(t.TempDir(), "", nil, taskIntegrationSettings{})
+	for _, tool := range base {
+		if tool.Name() == "github_tasks" || tool.Name() == "notion_tasks" {
+			t.Fatalf("task tool %q was registered without task settings", tool.Name())
+		}
+	}
+	configured := newToolsetWithTasks(t.TempDir(), "", nil, taskIntegrationSettings{
+		GitHubToken: "gh-secret", GitHubLogin: "glenjbarber", GitHubRepositories: []string{"glenjbarber/orcli"},
+		NotionToken: "ntn-secret", NotionDataSourceID: "11111111-1111-4111-8111-111111111111",
+		NotionAssigneeProp: "Assignee", NotionAssigneeID: "22222222-2222-4222-8222-222222222222", NotionStatusProp: "Status",
+	})
+	got := make(map[string]bool)
+	for _, tool := range configured {
+		got[tool.Name()] = true
+	}
+	if !got["github_tasks"] || !got["notion_tasks"] {
+		t.Fatalf("configured task tools missing: %v", got)
+	}
+	capabilitiesText := capabilities(tui.New(tui.Options{Model: "test"}), configured, nil)
+	if !strings.Contains(capabilitiesText, "@github") {
+		t.Fatalf("capabilities do not advertise configured GitHub tool: %s", capabilitiesText)
+	}
+}
+
 // TestCapabilitiesNamesTheRealModel covers adr-0000042's model line: a session with
 // a model configured names it and its provider, not a generic claim.
 func TestCapabilitiesNamesTheRealModel(t *testing.T) {

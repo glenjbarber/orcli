@@ -147,6 +147,29 @@ func TestUnconfiguredApiaryActionRequestsSetupGuidance(t *testing.T) {
 	}
 }
 
+func TestGitHubTasksRequireCredentialsAndExplicitRepositoryScope(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@github tasks list assigned")
+	if err != nil {
+		t.Fatalf("unconfigured task request: %v", err)
+	}
+	for _, want := range []string{"not configured", "github.api_key", "github.login", "github.repositories", "Issues read/write", "0600"} {
+		if !strings.Contains(out.Ask, want) {
+			t.Errorf("setup prompt does not include %q: %s", want, out.Ask)
+		}
+	}
+
+	configured := loadBody(t, `{"api_key":"orcli-key","github":{"api_key":"github-secret","login":"glenjbarber","repositories":["glenjbarber/orcli"]}}`)
+	d = newDispatcherFor(configured)
+	out, err = d.Run(context.Background(), "@github tasks list assigned")
+	if err != nil {
+		t.Fatalf("configured task request: %v", err)
+	}
+	if strings.Contains(out.Ask, "not configured") || !strings.Contains(out.Ask, "Use the \"tasks\" operation") {
+		t.Fatalf("configured request was not routed to task operation: %q", out.Ask)
+	}
+}
+
 // TestALineThatIsNotACommandIsNotARefusal covers the ordinary case. A question the
 // reader wants to ask is not a command, and the loop is what sends it to the model.
 func TestALineThatIsNotACommandIsNotARefusal(t *testing.T) {

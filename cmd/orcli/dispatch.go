@@ -405,6 +405,12 @@ func (d *dispatcher) plugin(ctx context.Context, name, args string) (tui.Result,
 		return tui.Result{Ask: pluginRequestPrompt(name, "")}, nil
 	}
 	action, rest, _ := strings.Cut(request, " ")
+	if name == "github" && !d.githubTasksReady() {
+		return tui.Result{Ask: fmt.Sprintf("The reader explicitly requested @github tasks, but task access is not configured. Explain the exact setup from these facts and do not make an API call. Task: %s\nFacts: %s", request, pluginHelpPrompt(name))}, nil
+	}
+	if name == "notion" && action == "tasks" && !d.notionTasksReady() {
+		return tui.Result{Ask: fmt.Sprintf("The reader explicitly requested @notion tasks, but task access is not configured. Explain the exact setup from these facts and do not make an API call. Task: %s\nFacts: %s", request, pluginHelpPrompt(name))}, nil
+	}
 	if !containsString(tui.PluginSubcommands(name), action) {
 		if name == "cloudflare" {
 			return tui.Result{}, fmt.Errorf("@cloudflare has no free-form API tool; use @cloudflare dns or @cloudflare confirm, or ask @cloudflare help for guidance")
@@ -428,6 +434,17 @@ func (d *dispatcher) apiaryReady() bool {
 	return err == nil && baseURL != "" && viewerToken != ""
 }
 
+func (d *dispatcher) githubTasksReady() bool {
+	key, login, repositories, err := d.cfg.GitHubSettings()
+	return err == nil && key != "" && login != "" && len(repositories) > 0
+}
+
+func (d *dispatcher) notionTasksReady() bool {
+	token, tokenErr := d.cfg.NotionToken()
+	dataSource, assigneeProperty, assigneeID, statusProperty, settingsErr := d.cfg.NotionTaskSettings()
+	return tokenErr == nil && settingsErr == nil && token != "" && dataSource != "" && assigneeProperty != "" && assigneeID != "" && statusProperty != ""
+}
+
 func pluginRequestPrompt(name, request string) string {
 	if strings.TrimSpace(request) == "" {
 		return fmt.Sprintf("The reader explicitly invoked @%s to request use of that plugin. Ask what they would like done with %s; do not make a call until they provide a task.", name, pluginDisplayName(name))
@@ -439,6 +456,8 @@ func pluginDisplayName(name string) string {
 	switch name {
 	case "notion":
 		return "Notion"
+	case "github":
+		return "GitHub"
 	case "apiary":
 		return "Apiary Viewer"
 	default:
@@ -457,7 +476,8 @@ func containsString(values []string, value string) bool {
 
 func pluginHelpPrompt(name string) string {
 	guides := map[string]string{
-		"notion":     "Notion supports search, page and block reads, data-source queries, comments, page creation and updates, and documented REST operations. Setup uses the `notion` object with an `api_key` string in ~/.orcli.json or ~/.config/orcli/orcli.json. Example: {\"notion\":{\"api_key\":\"YOUR_NOTION_INTEGRATION_TOKEN\"}}. The token is an integration token; explain that orcli does not specify a stricter prefix. The file must be mode 0600.",
+		"notion":     "Notion supports search, page and block reads, data-source queries, comments, page creation and updates, and documented REST operations. Task operations are limited to one configured data source and one configured assignee. Setup uses the `notion` object with `api_key`, `task_data_source_id`, `task_assignee_property`, `task_assignee_id`, and `task_status_property` in ~/.orcli.json or ~/.config/orcli/orcli.json. Example: {\"notion\":{\"api_key\":\"YOUR_NOTION_TOKEN\",\"task_data_source_id\":\"00000000-0000-0000-0000-000000000000\",\"task_assignee_property\":\"Assignee\",\"task_assignee_id\":\"00000000-0000-0000-0000-000000000000\",\"task_status_property\":\"Status\"}}. Share the task data source with the Notion integration. The file must be mode 0600.",
+		"github":     "GitHub task operations read assigned issues, details, and comments, and can create issues, update issue fields/state, and add comments. They are limited to the configured repository allowlist. Setup uses a fine-grained personal access token under `github.api_key`, the account name under `github.login`, and an explicit list under `github.repositories` in ~/.orcli.json or ~/.config/orcli/orcli.json. Example: {\"github\":{\"api_key\":\"YOUR_GITHUB_TOKEN\",\"login\":\"YOUR_GITHUB_LOGIN\",\"repositories\":[\"owner/repo\"]}}. Grant Issues read/write and Metadata read only for the selected repositories. The file must be mode 0600.",
 		"apiary":     "Apiary Viewer supports status, health, VM and jail list/detail reads, and network listing. Setup uses {\"apiary\":{\"base_url\":\"https://apiary.example\",\"viewer_token\":\"apk_YOUR_VIEWER_KEY\"}} in ~/.orcli.json or ~/.config/orcli/orcli.json. The key must already be a Viewer key, API-key authentication must be enabled, and the file must be mode 0600. It has no mutation or escalation operations.",
 		"cloudflare": "Cloudflare supports DNS list, add, edit and delete, followed by explicit /cloudflare confirm for pending changes. Setup uses {\"cloudflare\":{\"api_key\":\"YOUR_CLOUDFLARE_API_TOKEN\"}} in ~/.orcli.json or ~/.config/orcli/orcli.json. The file must be mode 0600. The integration does not define a token prefix.",
 	}
