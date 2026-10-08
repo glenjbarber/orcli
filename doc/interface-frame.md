@@ -223,8 +223,9 @@ where the bars could be redrawn per paint, and it was not taken.
    working directory, and `opts.WorkingDir` is available to render it. Nothing
    fills it because a path is wider than one character and the field is not.
 
-3. **`fieldPane` is a constant.** It reads `0` and never changes, since the pane
-   set described in `SPAWN-API.md` is not built.
+3. **Pane navigation is limited to two sessions.** The pane bar follows the
+   focused session: pane 0 is the main session, and pane 1 is the latest `/begin`
+   session. A full pane set is not built.
 
 4. **`fieldVerbosity` is a letter.** It reads `v` and nothing reaches the wire,
    since `internal/verbosity` is not imported.

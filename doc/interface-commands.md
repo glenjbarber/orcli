@@ -12,7 +12,7 @@ What the merge that brought this tree up to date changed is recorded in
 `staged/adr-0000004-model-choice-records-replaced.txt`, and the short of it is here
 rather than left to a reader who has to go looking.
 
-## The table is the one place names are written
+## The table is the one place slash-command names are written
 
 ```go
 type Command struct {
@@ -25,8 +25,8 @@ type Command struct {
 }
 ```
 
-Four consumers read it and nothing else declares a name: the dispatcher, the help,
-the completer, and the tests.
+The dispatcher, help, completer and tests read it. Plugin names live in the separate
+`Plugins` list and have their own subcommand list.
 
 **It is filled in `init`, not in a variable initialiser,** and the comment records
 both reasons. The help renderer reaches this table, so a variable initialiser
@@ -55,7 +55,7 @@ worth writing down.
 | `verbosity` | 0-5 | | how much the model is asked to answer with |
 | `verbose` | | | report the shape of each streamed turn, on or off |
 | `delegate` | QUESTION | | ask a question alongside, without recording it |
-| `pane` | main\|delegate\|spawn | | show the conversation, the delegate output or the spawn output |
+| `pane` | 0\|1\|main\|delegate\|spawn | | show or focus pane 0 (main) or pane 1 (first `/begin`), or set the current pane label |
 | `spawn` | QUESTION | | answer a question in a worker given the tools |
 | `btw` | QUESTION | | start a thread branched from this conversation |
 | `close` | N | | dereference the level a copy would name |
@@ -95,10 +95,21 @@ spelling nobody asked for.
 says the value has to be one the endpoint offers. Merging them would take that
 decision from the reader.
 
-**The table lists thirty-nine entries and this build runs four.** The dispatcher in
-`cmd/orcli` implements `cloudflare`, `model`, `test` and `quit`. Everything else is
-reported as listed-but-not-run, which is a different message from unknown, since a
-reader told there is no such command goes looking for a typo they do not have.
+**The command table and slash-command help share names and summaries.** Append
+`help` to any listed command, for example `/model help`; commands without a handler
+still explain that they are not implemented in this build.
+
+**The plugin surface uses `@<name> <subcommand>`.** The built-in names are
+`@notion`, `@apiary`, and `@cloudflare`. Use `@<name> help` for capability and
+credential setup guidance. That guidance is composed from local facts and sent to
+the model to phrase for the reader; it uses placeholders and does not call a plugin
+or reveal a key. Plugin operations are model requests constrained by the tool schemas
+available in the current session.
+
+**Pane 0 is the main session and pane 1 is the latest `/begin` session.** Press
+Ctrl+B then N to focus pane 1; Ctrl+B then P returns to pane 0. `/pane 0` and
+`/pane 1` do the same. Navigation consumes the next key; pressing Ctrl+B twice
+inserts the literal control byte.
 
 ## The dispatcher
 
@@ -255,8 +266,13 @@ type a space or whether the command takes nothing after it.
 caret, and a completer writing into the terminal behind it would be two things
 writing to one place.
 
-**An ambiguous prefix is left alone.** The field is what the reader typed, and a
-completer offering a choice would be a prompt this interface does not have.
+**Tab cycles through ambiguous matches.** A repeated Tab advances through the
+candidate list and wraps to its first entry. One match completes and adds a space;
+an ambiguous match does not add a space, so the next Tab can keep cycling.
+
+**Completion follows the preceding token.** After `/command ` it offers `help` and
+the command's declared argument choices; after `@plugin ` it offers `help` and that
+plugin's subcommands.
 
 **`IsCommand` strips the slash and cuts at the first space,** so `name` arrives
 without it and a line that is only a slash is not a command at all.
@@ -533,7 +549,8 @@ and is what a caller checks before trusting `IsTerminal`.
 2. **Thirty-five of thirty-nine commands have no body.** The table lists them, the
    dispatcher reports them as listed-but-not-run, and no handler exists.
 
-3. **No command renders help.** The table carries summaries and nothing reads them.
+3. **The first `/begin` worker is the only secondary pane.** Ctrl+B navigation
+switches between it and the main session; a full pane set is not implemented.
 
 4. **`Options.Verbosity` does not exist.** The frame carries a letter `v` in
    `fieldVerbosity` and nothing reaches the wire, so `/verbosity` has no body and
