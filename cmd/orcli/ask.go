@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glenjbarber/orcli/internal/apiary"
 	"github.com/glenjbarber/orcli/internal/notion"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
@@ -66,8 +67,8 @@ type chatClient interface {
 // The two are kept separate because they come from different places and change for
 // different reasons: one reflects this session's live configuration, the other is
 // whatever the reader put in a file.
-func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string) tui.AskFunc {
-	toolset := newToolset(s.Options().WorkingDir, notionToken)
+func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string, apiarySettings ...string) tui.AskFunc {
+	toolset := newToolset(s.Options().WorkingDir, notionToken, apiarySettings...)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
 	docs := documentation(s.Options().WorkingDir)
@@ -228,12 +229,15 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 // Filesystem tools are omitted, not fatal, if the root cannot be opened - a session
 // without them is a session with less in it rather than one that cannot run, the same
 // rule NewFilesystem's own doc comment states for its caller.
-func newToolset(dir, notionToken string) []tools.Tool {
+func newToolset(dir, notionToken string, apiarySettings ...string) []tools.Tool {
 	set := []tools.Tool{tools.NewGit(dir), tools.NewShell(dir)}
 	if fs, err := tools.NewFilesystem(dir); err == nil {
 		set = append(set, fs.Tools()...)
 	}
 	set = append(set, notion.New(notionToken).ToolSet()...)
+	if len(apiarySettings) >= 2 && apiarySettings[0] != "" && apiarySettings[1] != "" {
+		set = append(set, apiary.New(apiarySettings[0], apiarySettings[1]).ToolSet()...)
+	}
 	return set
 }
 

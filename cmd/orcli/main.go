@@ -201,7 +201,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if *debug {
 		notionToken, _ := cfg.NotionToken()
 		cloudflareToken, _ := cfg.CloudflareAPIKey()
-		capture, err = openDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken)
+		_, apiaryToken, _ := cfg.ApiarySettings()
+		capture, err = openDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken, apiaryToken)
 		if err != nil {
 			return err
 		}
@@ -382,6 +383,10 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	if err != nil {
 		return err
 	}
+	apiaryURL, apiaryToken, err := cfg.ApiarySettings()
+	if err != nil {
+		return err
+	}
 
 	// The dispatcher needs the session so `/model` can change the model the next turn
 	// is sent with, not only the one written to the file.
@@ -401,7 +406,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady, capture, notionToken),
+		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady, capture, notionToken, apiaryURL, apiaryToken),
 		helo,
 	)
 }
