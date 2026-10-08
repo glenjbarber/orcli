@@ -149,6 +149,10 @@ type Config struct {
 	// Notion is the block holding the Notion integration token.
 	Notion *Notion `json:"notion,omitempty"`
 
+	// GitHub is the block holding the GitHub API credential. It is stored as raw
+	// JSON so members written by a future version survive configuration reads.
+	GitHub *GitHub `json:"github,omitempty"`
+
 	// Apiary holds the base URL and existing read-only Viewer credential.
 	Apiary *Apiary `json:"apiary,omitempty"`
 }
@@ -318,6 +322,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			c.Cloudflare, err = readCloudflare(value)
 		case notionKey:
 			c.Notion, err = readNotion(value)
+		case githubKey:
+			c.GitHub, err = readGitHub(value)
 		case apiaryKey:
 			c.Apiary, err = readApiary(value)
 		}
