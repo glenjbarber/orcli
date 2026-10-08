@@ -42,6 +42,26 @@ func TestHelpListsEveryNameAndSkipsHiddenOnes(t *testing.T) {
 	}
 }
 
+func TestTraceCommandCapturesSessionCommands(t *testing.T) {
+	d := togglesDispatcher(t)
+	d.capture = newDebugLog(t.TempDir(), "configured-secret")
+
+	out, err := d.Run(context.Background(), "/trace")
+	if err != nil || !strings.HasPrefix(out.Text, "trace is on: ") {
+		t.Fatalf("/trace = %+v, %v", out, err)
+	}
+	if _, err := d.Run(context.Background(), "/trace off"); err != nil {
+		t.Fatalf("/trace off: %v", err)
+	}
+	data, err := os.ReadFile(d.capture.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "trace_started") || !strings.Contains(string(data), "trace_stopped") || !strings.Contains(string(data), "/trace off") {
+		t.Fatalf("trace does not include command activity: %s", data)
+	}
+}
+
 // TestVersionReportsTheSameIdentityStartupDoes covers the one fact /version exists
 // to carry: it is the same variable `orcli version` prints.
 func TestVersionReportsTheSameIdentityStartupDoes(t *testing.T) {
