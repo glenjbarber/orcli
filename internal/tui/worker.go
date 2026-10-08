@@ -224,9 +224,8 @@ func (s *Session) Stop(w *Worker, reason string) {
 // the way the worker left it, which is the point of a state a reader did not
 // have to be watching to catch.
 //
-// It does not distinguish which worker is running or done when several are,
-// since the pane bar draws one colour for the one pane there is today (see
-// stack.go's renderPaneBar) rather than a colour per worker.
+// It does not distinguish which worker is running or done when several are;
+// the pane bar shows this state for the currently focused session.
 func (s *Session) PaneState() string {
 	if len(s.Running()) > 0 {
 		return "running"

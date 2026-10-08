@@ -11,6 +11,56 @@ import (
 // errFailedTurn is a stand-in failure for TestStartDoesNotDrainTheQueueAfterAFailedTurn.
 var errFailedTurn = errors.New("the turn failed")
 
+func TestCtrlBPaneNavigationConsumesNavigationKeys(t *testing.T) {
+	main := New(Options{})
+	worker := New(Options{})
+	l := &interfaceLoop{
+		session: main,
+		navigatePane: func(direction int) *Session {
+			if direction > 0 {
+				return worker
+			}
+			return main
+		},
+	}
+
+	l.act(context.Background(), KeyCtrlB, 0)
+	if !l.prefixPending {
+		t.Fatal("Ctrl+B did not enter prefix mode")
+	}
+	l.act(context.Background(), KeyRune, 'N')
+	if l.session != worker {
+		t.Fatal("Ctrl+B N did not focus pane 1")
+	}
+	if got := worker.Editor().Text(); got != "" {
+		t.Fatalf("navigation key was inserted into pane 1 input: %q", got)
+	}
+
+	l.act(context.Background(), KeyCtrlB, 0)
+	l.act(context.Background(), KeyRune, 'p')
+	if l.session != main {
+		t.Fatal("Ctrl+B p did not return focus to pane 0")
+	}
+	if got := main.Editor().Text(); got != "" {
+		t.Fatalf("navigation key was inserted into pane 0 input: %q", got)
+	}
+
+	l.act(context.Background(), KeyRune, 'n')
+	if got := main.Editor().Text(); got != "n" {
+		t.Fatalf("unprefixed n = %q, want literal input", got)
+	}
+}
+
+func TestCtrlBDoublePressInsertsLiteralControlB(t *testing.T) {
+	s := New(Options{})
+	l := &interfaceLoop{session: s}
+	l.act(context.Background(), KeyCtrlB, 0)
+	l.act(context.Background(), KeyCtrlB, 0)
+	if got := s.Editor().Text(); got != "\x02" {
+		t.Fatalf("double Ctrl+B inserted %q, want one literal control-B byte", got)
+	}
+}
+
 // TestStartSendsHELOAutomatically covers the startup HELO at the level Start's
 // own event loop runs it at, without opening a real terminal screen: a test binary
 // has none, and driving tview's own Application through a fake screen is more than

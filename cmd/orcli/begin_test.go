@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glenjbarber/orcli/internal/config"
@@ -35,15 +36,41 @@ func TestBeginDeliversTheNoteToANewSession(t *testing.T) {
 	if d.worker == nil {
 		t.Fatal("begin left no worker session")
 	}
+	if got := d.worker.Pane(); got != "1" {
+		t.Fatalf("the first /begin pane is %q, want identity 1", got)
+	}
 
 	found := false
+	wantNote := "take over the release checklist\n\n" + beginCheckInstruction
 	for _, row := range d.worker.Log().Rows() {
-		if row.Text == "take over the release checklist" {
+		if row.Text == wantNote {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the worker's log does not carry the note: %+v", d.worker.Log().Rows())
+		t.Fatalf("the worker's log does not carry the full instruction %q: %+v", wantNote, d.worker.Log().Rows())
+	}
+	if !strings.HasSuffix(wantNote, "and check its work") {
+		t.Fatalf("the handoff does not end with the required phrase: %q", wantNote)
+	}
+	if !strings.Contains(wantNote, "parent /pane 0") {
+		t.Fatalf("the handoff does not identify parent pane 0: %q", wantNote)
+	}
+}
+
+func TestNavigatePaneSwitchesBetweenMainZeroAndBeginOne(t *testing.T) {
+	d := beginDispatcher(t)
+	main := d.mainSession
+	if _, err := d.begin("work in pane one"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	worker := d.worker
+
+	if got := d.navigatePane(1); got != worker || d.session != worker || d.focusedPane != 1 {
+		t.Fatal("next pane did not focus pane 1")
+	}
+	if got := d.navigatePane(-1); got != main || d.session != main || d.focusedPane != 0 {
+		t.Fatal("previous pane did not focus pane 0")
 	}
 }
 

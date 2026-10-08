@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/glenjbarber/orcli/internal/config"
@@ -410,11 +411,25 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	if canAsk(s) {
 		helo = heloQuestion
 	}
+	confirmations := map[*tui.Session]func(string, bool){s: confirmModel(s)}
+	var confirmationMu sync.Mutex
+	askForSession := func(target *tui.Session) tui.AskFunc {
+		confirmationMu.Lock()
+		defer confirmationMu.Unlock()
+		confirmed, ok := confirmations[target]
+		if !ok {
+			confirmed = confirmModel(target)
+			confirmations[target] = confirmed
+		}
+		return ask(target, newTransport(cfg), cfg.AttributionID, confirmed, d.cloudflareReady, capture, notionToken, apiaryURL, apiaryToken)
+	}
 
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady, capture, notionToken, apiaryURL, apiaryToken),
+		askForSession(s),
 		helo,
+		d.navigatePane,
+		askForSession,
 	)
 }
 

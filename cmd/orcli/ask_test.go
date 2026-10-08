@@ -368,14 +368,15 @@ func TestCapabilitiesReflectsCloudflareEitherWay(t *testing.T) {
 	}
 }
 
-// TestCapabilitiesNamesNoPluginSystem covers the honest answer to "what plugins
-// are enabled": there is no plugin system in this build, so the capability
-// message says that rather than leaving the question unanswered.
-func TestCapabilitiesNamesNoPluginSystem(t *testing.T) {
+// TestCapabilitiesNamesPluginCommands covers the plugin help and invocation syntax.
+func TestCapabilitiesNamesPluginCommands(t *testing.T) {
 	s := tui.New(tui.Options{Model: "some/model"})
 	got := capabilities(s, nil, nil)
-	if !strings.Contains(got, "Plugins:") || !strings.Contains(got, "no plugin system") {
-		t.Errorf("capabilities = %q, want it to name that no plugin system exists", got)
+	if !strings.Contains(got, "@notion") || !strings.Contains(got, "@<plugin> help") {
+		t.Errorf("capabilities = %q, want plugin invocation and help syntax", got)
+	}
+	if strings.Contains(got, "@apiary") {
+		t.Errorf("capabilities = %q, lists Apiary without configured tools", got)
 	}
 }
 
@@ -468,6 +469,9 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 func TestHELOQuestionAsksForAnIntroduction(t *testing.T) {
 	if strings.TrimSpace(heloQuestion) == "" {
 		t.Fatal("heloQuestion is empty")
+	}
+	if len(heloQuestion) > 100 || !strings.Contains(heloQuestion, "capabilities above") {
+		t.Fatalf("heloQuestion = %q, want a compact instruction grounded in prior context", heloQuestion)
 	}
 
 	dir := t.TempDir()

@@ -20,6 +20,13 @@ import "strings"
 // reporting it as one would send a reader looking for it.
 func IsCommand(line string) (name, args string, ok bool) {
 	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "@") {
+		plugin, args, _ := strings.Cut(strings.TrimPrefix(trimmed, "@"), " ")
+		if len(PluginSubcommands(plugin)) > 0 {
+			return "@" + plugin, strings.TrimSpace(args), true
+		}
+		return "", "", false
+	}
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", "", false
 	}

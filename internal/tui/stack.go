@@ -501,9 +501,8 @@ func paneBarStyle(p Palette, chrome tcell.Style, state string) tcell.Style {
 // (see cutTail's callers) rather than matching 0000020's text literally - a deliberate,
 // confirmed departure from that record, not an oversight.
 //
-// There is only ever one pane today (fieldPane is hardcoded "main" in run.go's status
-// builder; 0000007's multiplexer was never built), so this draws that one name honestly
-// rather than fabricating a pane list to truncate.
+// The interface loop supplies the focused session's identity; the renderer has no
+// separate pane selection to reconcile.
 func renderPaneBar(status Status, width int) string {
 	return CutColumnFromEnd(status[fieldPane], width)
 }

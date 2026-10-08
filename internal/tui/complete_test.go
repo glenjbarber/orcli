@@ -67,22 +67,55 @@ func TestCompleteKeepsWhatIsAfterTheWord(t *testing.T) {
 	}
 }
 
-// TestCompleteLeavesAnAmbiguousPrefixAlone covers what the completer can and cannot do.
-// A prefix matching several names has no single completion, and this interface has no
-// way to ask the reader which one they meant.
-//
-// The attribute entry is the case in point: it carries the alias attribution, so a
-// prefix of seven characters matches two names and the field is left alone.
-func TestCompleteLeavesAnAmbiguousPrefixAlone(t *testing.T) {
+// TestCompleteCyclesAmbiguousMatches covers tab cycling when a prefix matches more
+// than one command name. The attribute entry carries the attribution alias, so the
+// reader can step between the two candidates and wrap to the first.
+func TestCompleteCyclesAmbiguousMatches(t *testing.T) {
 	e := NewEditor()
 	for _, r := range "/attrib" {
 		e.Insert(r)
 	}
 
 	e.Complete()
+	if got, want := e.Text(), "/attribute"; got != want {
+		t.Fatalf("first completion = %q, want %q", got, want)
+	}
+	e.Complete()
+	if got, want := e.Text(), "/attribution"; got != want {
+		t.Fatalf("second completion = %q, want %q", got, want)
+	}
+	e.Complete()
+	if got, want := e.Text(), "/attribute"; got != want {
+		t.Fatalf("wrapped completion = %q, want %q", got, want)
+	}
+}
 
-	if got, want := e.Text(), "/attrib"; got != want {
-		t.Errorf("got %q, want %q: an ambiguous prefix was resolved", got, want)
+func TestCompleteCyclesPluginNamesAndSubcommands(t *testing.T) {
+	e := NewEditor()
+	for _, r := range "@n" {
+		e.Insert(r)
+	}
+	e.Complete()
+	if got, want := e.Text(), "@notion "; got != want {
+		t.Fatalf("plugin completion = %q, want %q", got, want)
+	}
+	for _, r := range "se" {
+		e.Insert(r)
+	}
+	e.Complete()
+	if got, want := e.Text(), "@notion search "; got != want {
+		t.Fatalf("subcommand completion = %q, want %q", got, want)
+	}
+}
+
+func TestCompleteCyclesSlashCommandHelpSubcommand(t *testing.T) {
+	e := NewEditor()
+	for _, r := range "/model he" {
+		e.Insert(r)
+	}
+	e.Complete()
+	if got, want := e.Text(), "/model help "; got != want {
+		t.Fatalf("help completion = %q, want %q", got, want)
 	}
 }
 

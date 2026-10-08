@@ -43,6 +43,15 @@ type Editor struct {
 	// already in the field is left exactly as it stood; only the ability to
 	// toggle it back is given up.
 	block *pastedBlock
+
+	completion *completionCycle
+}
+
+type completionCycle struct {
+	candidates []string
+	index      int
+	expected   string
+	caret      int
 }
 
 // pastedBlock is the real text behind a collapsed paste summary.
@@ -114,6 +123,7 @@ func (e *Editor) Reset() {
 	e.text = e.text[:0]
 	e.caret = 0
 	e.block = nil
+	e.completion = nil
 }
 
 // Insert puts a rune in at the caret and steps over it.
@@ -271,17 +281,36 @@ func (e *Editor) EraseWordBefore() {
 func (e *Editor) Complete() {
 	word, start := e.wordBeforeCaret()
 	if word == "" {
+		e.completion = nil
+		return
+	}
+	contextBefore := string(e.text[:start])
+	if cycle := e.completion; cycle != nil && string(e.text) == cycle.expected && e.caret == cycle.caret {
+		cycle.index = (cycle.index + 1) % len(cycle.candidates)
+		e.applyCompletion(start, word, cycle.candidates[cycle.index], false)
+		cycle.expected = string(e.text)
+		cycle.caret = e.caret
 		return
 	}
 
-	text, caret, whole := Completion(word)
-	if !whole {
+	text, caret, whole, candidates := CompletionAt(contextBefore, word)
+	if len(candidates) == 0 {
+		e.completion = nil
 		return
 	}
 
 	e.invalidateBlock()
 	before := e.text[:start]
 	after := e.text[e.wordEnd(start):]
+	if len(candidates) > 1 {
+		text = candidates[0]
+		caret = len([]rune(text))
+		whole = false
+	}
+	if whole {
+		text += " "
+		caret++
+	}
 
 	// The caret is placed inside the completed word, which is where the completer
 	// said it went, and then measured in runes again since the completion may have
@@ -294,6 +323,25 @@ func (e *Editor) Complete() {
 	if e.caret > len(e.text) {
 		e.caret = len(e.text)
 	}
+	if len(candidates) > 1 {
+		e.completion = &completionCycle{candidates: candidates, index: 0, expected: string(e.text), caret: e.caret}
+	} else {
+		e.completion = nil
+	}
+}
+
+func (e *Editor) applyCompletion(start int, word, candidate string, whole bool) {
+	e.invalidateBlock()
+	before := e.text[:start]
+	after := e.text[e.wordEnd(start):]
+	text := candidate
+	if whole {
+		text += " "
+	}
+	runes := append(append([]rune(nil), before...), []rune(text)...)
+	runes = append(runes, after...)
+	e.text = runes
+	e.caret = len(before) + len([]rune(text))
 }
 
 // wordBeforeCaret returns the partial word the caret sits in, and where it starts
