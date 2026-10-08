@@ -40,9 +40,8 @@ picture, since the real picture is larger and not yet fully understood.
 Build, lint and test gates pass when the work ends, and a failure that cannot
 be settled is reported rather than left for the reader to find.
 
-**Push only on the exact phrase.** Never push to a remote unless told
-otherwise with the words `YES-I-REALLY-MEAN-IT`. The repository is pushed by
-hand.
+**Push after the user asks.** Confirm the intended branch and ensure its local
+checks pass before pushing. Do not require a separate confirmation phrase.
 
 ## Where things live
 
@@ -213,7 +212,8 @@ Every commit carries the trailer:
 Co-Authored-By:	Space Bunny Alpha
 ```
 
-Never push. The repository is pushed by hand.
+Push the requested branch after the user explicitly asks, then report the remote
+result. Do not push unrelated branches or uncommitted changes.
 
 ## Editing
 
