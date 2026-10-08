@@ -99,12 +99,13 @@ decision from the reader.
 `help` to any listed command, for example `/model help`; commands without a handler
 still explain that they are not implemented in this build.
 
-**The plugin surface uses `@<name> <subcommand>`.** The built-in names are
-`@notion`, `@apiary`, and `@cloudflare`. Use `@<name> help` for capability and
-credential setup guidance. That guidance is composed from local facts and sent to
-the model to phrase for the reader; it uses placeholders and does not call a plugin
-or reveal a key. Plugin operations are model requests constrained by the tool schemas
-available in the current session.
+**An `@<name>` prefix explicitly requests that plugin.** For example,
+`@notion find the roadmap page` sends the task to the model with an instruction to
+use Notion tools. A bare `@notion` asks what the reader wants done. The built-in
+names are `@notion`, `@apiary`, and `@cloudflare`; structured subcommands remain
+available where supported. Use `@<name> help` for capability and credential setup
+guidance. Help uses placeholders and does not call a plugin or reveal a key. Plugin
+operations are constrained by the tool schemas available in the current session.
 
 **Pane 0 is the main session and pane 1 is the latest `/begin` session.** Press
 Ctrl+B then N to focus pane 1; Ctrl+B then P returns to pane 0. `/pane 0` and
