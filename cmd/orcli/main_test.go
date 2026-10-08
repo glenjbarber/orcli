@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
@@ -39,6 +40,33 @@ func runIn(t *testing.T, trusted bool, args ...string) (stdout, stderr string, e
 	var out, errOut bytes.Buffer
 	err = run(context.Background(), args, strings.NewReader(""), &out, &errOut)
 	return out.String(), errOut.String(), err
+}
+
+type fakeStatusCatalog struct {
+	*fakeCatalog
+	credits openrouter.CreditInfo
+}
+
+func (f *fakeStatusCatalog) Credits(context.Context) (openrouter.CreditInfo, error) {
+	return f.credits, nil
+}
+
+func TestStatusRefreshUsesProviderBalanceAndModelContext(t *testing.T) {
+	s := tui.New(tui.Options{APIKey: "test", Model: "vendor/model"})
+	s.AddUsage(32000, 0, 0, true, false, false)
+	catalog := &fakeStatusCatalog{
+		fakeCatalog: &fakeCatalog{models: []openrouter.ModelInfo{{ID: "vendor/model", ContextLength: 128000}}},
+		credits:     openrouter.CreditInfo{TotalCredits: 100.5, TotalUsage: 25.75},
+	}
+	d := newDispatcherFor(config.Config{APIKey: "test"})
+	d.orClient = catalog
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	refreshStatusData(ctx, s, d)
+	got := s.Usage()
+	if got.Credits != "$74.75" || got.Context != "25.0%" {
+		t.Errorf("status details = credits %q context %q, want $74.75 and 25.0%%", got.Credits, got.Context)
+	}
 }
 
 // TestVersionFlagPrintsAndStops covers the ordinary flag path, and is here because

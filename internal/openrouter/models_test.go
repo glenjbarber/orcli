@@ -35,7 +35,7 @@ func servingGET(t *testing.T, status int, body string) (*Client, *string, *strin
 // the list a caller can filter.
 func TestModelsDecodesTheCatalog(t *testing.T) {
 	c, path, auth := servingGET(t, http.StatusOK, `{"data":[
-		{"id":"vendor/a","name":"A","pricing":{"prompt":"0.000001","completion":"0.000002"}},
+		{"id":"vendor/a","name":"A","context_length":128000,"pricing":{"prompt":"0.000001","completion":"0.000002"}},
 		{"id":"vendor/b:free","name":"B (free)","pricing":{"prompt":"0","completion":"0"}}
 	]}`)
 
@@ -48,6 +48,9 @@ func TestModelsDecodesTheCatalog(t *testing.T) {
 	}
 	if models[0].ID != "vendor/a" || models[0].Free() {
 		t.Errorf("vendor/a decoded as %+v, want a priced model named vendor/a", models[0])
+	}
+	if models[0].ContextLength != 128000 {
+		t.Errorf("context length = %d, want 128000", models[0].ContextLength)
 	}
 	if models[1].ID != "vendor/b:free" || !models[1].Free() {
 		t.Errorf("vendor/b:free decoded as %+v, want a free model", models[1])
@@ -155,5 +158,20 @@ func TestKeyUsageReportsAnEndpointRefusal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "key revoked") {
 		t.Errorf("the error is %q, want it to quote the endpoint", err)
+	}
+}
+
+func TestCreditsReportsRemainingAccountBalance(t *testing.T) {
+	c, path, _ := servingGET(t, http.StatusOK,
+		`{"data":{"total_credits":100.5,"total_usage":25.75}}`)
+	info, err := c.Credits(context.Background())
+	if err != nil {
+		t.Fatalf("Credits: %v", err)
+	}
+	if info.Remaining() != 74.75 {
+		t.Errorf("remaining = %v, want 74.75", info.Remaining())
+	}
+	if *path != "/credits" {
+		t.Errorf("request hit %q, want /credits", *path)
 	}
 }

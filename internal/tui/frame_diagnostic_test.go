@@ -49,8 +49,10 @@ func TestARealFrameIsWhatAReaderSees(t *testing.T) {
 	if !strings.Contains(text, "diagnostic log row") {
 		t.Error("the session row was absent from the frame cells")
 	}
-	if !strings.Contains(text, "openrouter.ai") || !strings.Contains(text, "stealth/space-bunny-alpha") {
-		t.Errorf("the provider or model was absent from the frame cells:\n%s", text)
+	for _, field := range []string{"hostname:", "out:"} {
+		if !strings.Contains(text, field) {
+			t.Errorf("status field %q was absent from frame cells:\n%s", field, text)
+		}
 	}
 	t.Logf("a real frame on an 80 by 20 simulation screen:\n%s", text)
 }
