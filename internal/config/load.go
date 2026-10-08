@@ -94,6 +94,9 @@ type Config struct {
 	// environment variable are ignored, on the same terms as the API key.
 	Color bool `json:"color,omitempty"`
 
+	// Trace reports whether redacted conversation capture starts enabled.
+	Trace bool `json:"trace,omitempty"`
+
 	// PaneActiveColor is the colour (`#rrggbb`) the pane bar is drawn in while a
 	// worker is running at the shown pane. It is a second, distinct toggle from
 	// Color above: Color decides whether colour is written at all, and this and
@@ -230,6 +233,24 @@ func Load() (Config, error) {
 	return Config{}, ErrNotFound
 }
 
+// LoadFromPath reads the configuration at path without searching or creating a
+// default file. The resolved path is returned for session-scoped writes.
+func LoadFromPath(path string) (Config, string, error) {
+	resolved, err := resolve(path)
+	if err != nil {
+		return Config{}, "", err
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Config{}, resolved, fmt.Errorf("config: %s: %w", resolved, ErrNotFound)
+		}
+		return Config{}, resolved, fmt.Errorf("config: read %s: %w", resolved, err)
+	}
+	cfg, err := Parse(data, resolved)
+	return cfg, resolved, err
+}
+
 // Parse reads a configuration from bytes.
 //
 // The path is used only for the diagnostics, so a caller holding the contents
@@ -306,6 +327,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readBool(value, &c.BreakBell)
 		case "color":
 			err = readBool(value, &c.Color)
+		case "trace":
+			err = readBool(value, &c.Trace)
 		case "pane_active_color":
 			err = readString(value, &c.PaneActiveColor)
 		case "pane_done_color":

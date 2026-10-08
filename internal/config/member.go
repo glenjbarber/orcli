@@ -278,6 +278,32 @@ func WriteColor(path string, on bool) error {
 	return osWriteFile(path, edited)
 }
 
+// WriteTrace sets the top-level trace key while preserving every other byte.
+func WriteTrace(path string, on bool) error {
+	if err := checkMode(path); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("config: read %s: %w", path, err)
+	}
+	if !isObject(data) {
+		return fmt.Errorf("config: %s: %w", path, ErrNotAnObject)
+	}
+	value := "false"
+	if on {
+		value = "true"
+	}
+	edited, err := setMember(data, "trace", value)
+	if err != nil {
+		return err
+	}
+	if err := checkMember(edited, "trace", value); err != nil {
+		return fmt.Errorf("config: the edit did not verify: %w", err)
+	}
+	return osWriteFile(path, edited)
+}
+
 // setMember changes one top-level member, or adds one, preserving the rest.
 //
 // The file is edited as bytes rather than through a decode and an encode, since an

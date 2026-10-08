@@ -32,6 +32,10 @@ type handler func(ctx context.Context, d *dispatcher, args string) (tui.Result, 
 // session is the log, the levels, the workers and the four states; a proposed DNS
 // record is none of those.
 type dispatcher struct {
+	// configFile is the resolved configuration selected for this session. An
+	// empty value keeps the default-path seam used by dispatcher unit tests.
+	configFile string
+
 	// capture is dormant until --debug or /trace enables it.
 	capture *debugLog
 	// cfg is the configuration as startup read it, held as a configuration rather
@@ -102,6 +106,13 @@ type dispatcher struct {
 	// permission.go) names as the open gap: nothing in internal/tools reads this
 	// map, so a grant recorded here records intent and nothing else yet.
 	permissions map[string]*permissionGrant
+}
+
+func (d *dispatcher) activeConfigPath() (string, error) {
+	if d != nil && d.configFile != "" {
+		return d.configFile, nil
+	}
+	return configPath()
 }
 
 // newDispatcherFor builds a dispatcher over a configuration.
@@ -291,7 +302,11 @@ func (d *dispatcher) model(args string) (tui.Result, error) {
 	if d.session == nil {
 		return tui.Result{}, fmt.Errorf("/model needs an open interface")
 	}
-	return modelHandler(d.session, args)
+	path, err := d.activeConfigPath()
+	if err != nil {
+		return tui.Result{}, err
+	}
+	return modelHandler(d.session, args, path)
 }
 
 // level is the handler for `/level`.

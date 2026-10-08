@@ -54,7 +54,7 @@ func (d *dispatcher) approve(args string) (tui.Result, error) {
 			want, approvalModeNames())
 	}
 
-	path, err := configPath()
+	path, err := d.activeConfigPath()
 	if err != nil {
 		return tui.Result{}, err
 	}
