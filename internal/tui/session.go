@@ -583,20 +583,20 @@ func (s *Session) PresetStyle() string {
 // before this field existed.
 const defaultPane = "main"
 
-// panes are the names `/pane` accepts, matching the Args the command table
-// documents for it ("main|delegate|spawn") exactly. It is a map rather than a
+// panes are the labels `/pane` accepts, matching the Args the command table
+// documents for it exactly. Numeric pane IDs 0 and 1 also switch sessions. It is a map rather than a
 // switch at the call site, so a dispatcher building the "the panes are ..."
 // refusal and the completer that will eventually offer these names read the
 // same list.
-var panes = map[string]bool{"main": true, "delegate": true, "spawn": true}
+var panes = map[string]bool{"main": true, "delegate": true, "spawn": true, "0": true, "1": true}
 
-// SetPane makes name the pane `/pane` reports, once name is one of the three
-// this build knows. An unknown name is refused rather than stored, since a
+// SetPane makes name the pane `/pane` reports, once name is a known label or
+// numeric pane ID. An unknown name is refused rather than stored, since a
 // pane the bar then reports but nothing ever named again is a typo the reader
 // has no way to notice.
 func (s *Session) SetPane(name string) error {
 	if !panes[name] {
-		return fmt.Errorf("%q is not a pane: the panes are main, delegate, spawn", name)
+		return fmt.Errorf("%q is not a pane: the panes are 0, 1, main, delegate, spawn", name)
 	}
 
 	s.mu.Lock()

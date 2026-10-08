@@ -55,11 +55,12 @@ type dispatcher struct {
 	existed bool
 
 	// worker is the session /begin most recently opened, forked off the calling
-	// session rather than replacing it. There is no pane set in this tree yet (see
-	// staged/adr-0000032 and staged/adr-0000047), so this one field is the whole of
-	// what the dispatcher keeps of it; a second /begin replaces it rather than
-	// adding to a set that does not exist.
+	// session rather than replacing it. It is pane 1; a second /begin replaces it.
 	worker *tui.Session
+
+	// mainSession remains pane 0 when focus moves to the first /begin session.
+	mainSession *tui.Session
+	focusedPane int
 
 	// client is the API client, built on first use, and newClient is what builds it.
 	// It is a field rather than a package variable so two dispatchers in one test run
@@ -254,7 +255,27 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 // is built before the session is handed to the interface and the two are wired
 // together in openInterface. A dispatcher with no session can still run the commands
 // that do not touch one, which is what a test over /cloudflare does.
-func (d *dispatcher) withSession(s *tui.Session) { d.session = s }
+func (d *dispatcher) withSession(s *tui.Session) {
+	d.session = s
+	d.mainSession = s
+	d.focusedPane = 0
+}
+
+// navigatePane switches between pane 0 and the first /begin pane (1). /begin
+// currently retains only one worker session, so navigation is bounded to those two.
+func (d *dispatcher) navigatePane(direction int) *tui.Session {
+	if d.worker == nil || d.mainSession == nil {
+		return d.session
+	}
+	if direction > 0 {
+		d.focusedPane = 1
+		d.session = d.worker
+		return d.worker
+	}
+	d.focusedPane = 0
+	d.session = d.mainSession
+	return d.mainSession
+}
 
 // model is the handler for `/model`.
 //
@@ -324,6 +345,22 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 	if !ok {
 		return tui.Result{}, nil
 	}
+	if strings.HasPrefix(name, "@") {
+		return d.plugin(ctx, strings.TrimPrefix(name, "@"), args)
+	}
+	if strings.TrimSpace(args) == "help" {
+		if command, found := tui.Lookup(name); found {
+			usage := "/" + command.Name
+			if command.Args != "" {
+				usage += " " + command.Args
+			}
+			detail := usage + "\n" + command.Summary
+			if _, runnable := d.commands[name]; !runnable {
+				detail += "\nThis command is listed but not implemented in this build."
+			}
+			return tui.Result{Text: detail + "\nUse /" + command.Name + " help for this command's help."}, nil
+		}
+	}
 
 	h, known := d.commands[name]
 	if !known {
@@ -334,6 +371,47 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 	}
 
 	return h(ctx, d, args)
+}
+
+func (d *dispatcher) plugin(ctx context.Context, name, args string) (tui.Result, error) {
+	if strings.TrimSpace(args) == "" {
+		args = "help"
+	}
+	action, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
+	if action == "help" {
+		return tui.Result{Ask: pluginHelpPrompt(name)}, nil
+	}
+	if !containsString(tui.PluginSubcommands(name), action) {
+		return tui.Result{}, fmt.Errorf("@%s %s is not a subcommand; use @%s help", name, action, name)
+	}
+	if name == "cloudflare" {
+		return d.cloudflare(ctx, args)
+	}
+	if name == "apiary" {
+		baseURL, viewerToken, err := d.cfg.ApiarySettings()
+		if err != nil || baseURL == "" || viewerToken == "" {
+			return tui.Result{Ask: fmt.Sprintf("The reader requested @apiary %s, but the Apiary Viewer tools are not configured for this session. Explain how to set up the local configuration using the facts in this instruction, and do not attempt the query. Facts: %s", strings.TrimSpace(args), pluginHelpPrompt(name))}, nil
+		}
+	}
+	return tui.Result{Ask: fmt.Sprintf("The reader selected plugin @%s subcommand %q. Use only the %s plugin tools listed in your available tool schemas. Interpret the remaining text as that operation's input: %s. Complete the requested operation and report the result clearly. Never ask the reader to paste a secret into chat, and do not reveal or reproduce credentials.", name, action, name, strings.TrimSpace(rest))}, nil
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func pluginHelpPrompt(name string) string {
+	guides := map[string]string{
+		"notion":     "Notion supports search, page and block reads, data-source queries, comments, page creation and updates, and documented REST operations. Setup uses the `notion` object with an `api_key` string in ~/.orcli.json or ~/.config/orcli/orcli.json. Example: {\"notion\":{\"api_key\":\"YOUR_NOTION_INTEGRATION_TOKEN\"}}. The token is an integration token; explain that orcli does not specify a stricter prefix. The file must be mode 0600.",
+		"apiary":     "Apiary Viewer supports status, health, VM and jail list/detail reads, and network listing. Setup uses {\"apiary\":{\"base_url\":\"https://apiary.example\",\"viewer_token\":\"apk_YOUR_VIEWER_KEY\"}} in ~/.orcli.json or ~/.config/orcli/orcli.json. The key must already be a Viewer key, API-key authentication must be enabled, and the file must be mode 0600. It has no mutation or escalation operations.",
+		"cloudflare": "Cloudflare supports DNS list, add, edit and delete, followed by explicit /cloudflare confirm for pending changes. Setup uses {\"cloudflare\":{\"api_key\":\"YOUR_CLOUDFLARE_API_TOKEN\"}} in ~/.orcli.json or ~/.config/orcli/orcli.json. The file must be mode 0600. The integration does not define a token prefix.",
+	}
+	return fmt.Sprintf("Explain the @%s plugin's capabilities and setup to the reader. Interpret the following source-grounded facts into concise, useful instructions. Include available subcommands, the exact JSON configuration shape and file path, file mode, and the credential format/known prefix. Use placeholders only. Do not ask for, include, or expose any actual key; tell the reader to edit the local configuration file rather than paste a secret into chat. Do not make API calls or change configuration while answering. Facts: %s", name, guides[name])
 }
 
 // didYouMean returns the text appended to "unknown command" for a typed name that is

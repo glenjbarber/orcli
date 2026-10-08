@@ -352,7 +352,14 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 	// than left out, on the same "absence is a statement" grounds as every other
 	// line above, so a reader who asks what plugins are enabled is told none can be,
 	// not left to guess whether the question was never asked.
-	b.WriteString("Plugins: no plugin system exists in this build; none can be enabled.\n")
+	plugins := []string{"@notion", "@cloudflare"}
+	for _, tool := range toolset {
+		if strings.HasPrefix(tool.Describe().Function.Name, "apiary_") {
+			plugins = append(plugins, "@apiary")
+			break
+		}
+	}
+	b.WriteString("Plugins: use " + strings.Join(plugins, ", ") + " followed by a subcommand; use @<plugin> help for capabilities and setup guidance.\n")
 
 	// /level's active preset, when there is one, is written as its own sentence
 	// rather than folded into the paragraph above: it is an instruction about how
@@ -394,10 +401,7 @@ func introduction(dir string) string {
 // greeting stay silent about doc/ and staged/ below: the names are already in its
 // context the moment the reader does ask, so the HELO does not need to recite them
 // first to make that true later.
-const heloQuestion = "This is the start of the session, before the reader has " +
-	"typed anything. Greet them briefly: say you are orcli and summarize in a " +
-	"sentence or two what this session has configured from the capability " +
-	"message above."
+const heloQuestion = "Briefly greet the user as orcli, grounded in the session capabilities above."
 
 // documentation lists the names of orcli's own documentation under dir, so the
 // capability message can point the model at doc/ and staged/ by name rather than

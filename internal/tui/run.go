@@ -87,6 +87,7 @@ const (
 	KeyCtrlW
 	KeyCtrlU
 	KeyCtrlT
+	KeyCtrlB
 )
 
 // Start runs the interface until the reader leaves.
@@ -102,7 +103,7 @@ const (
 // no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
 // passes an empty string and nothing is sent. Start does not decide whether to greet, only
 // how, once asked to.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string) error {
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -119,6 +120,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		ask:     ask,
 		frame:   frame,
 		group:   newGroup(),
+	}
+	l.navigatePane = navigatePane
+	if len(askForSession) > 0 {
+		l.askForSession = askForSession[0]
 	}
 	// Pasted text is always literal content and never a submit trigger,
 	// however many lines it contains: embedded '\r'/'\n' bytes used to be
@@ -177,14 +182,14 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			case <-finished:
 				return
 			case <-ticker.C:
-				now := time.Now()
-				due := l.session.BreakDue(now)
-				if due {
-					l.session.StartBreak(now)
-				} else {
-					l.session.TickBreak(now)
-				}
 				app.QueueUpdateDraw(func() {
+					now := time.Now()
+					due := l.session.BreakDue(now)
+					if due {
+						l.session.StartBreak(now)
+					} else {
+						l.session.TickBreak(now)
+					}
 					if due && l.session.Options().BreakBell {
 						l.bellPending = true
 					}
@@ -232,10 +237,13 @@ func maybeSendHELO(ctx context.Context, l *interfaceLoop, helo string) {
 // a function whose signature nobody can read. It is not named Loop because that reads as
 // an exported thing this package offers, and it is not.
 type interfaceLoop struct {
-	session *Session
-	runner  LineRunner
-	ask     AskFunc
-	frame   *Frame
+	session       *Session
+	runner        LineRunner
+	ask           AskFunc
+	frame         *Frame
+	navigatePane  func(direction int) *Session
+	askForSession func(*Session) AskFunc
+	prefixPending bool
 
 	// group counts the goroutines writing to the frame, and is what leaving waits for.
 	group *group
@@ -376,6 +384,8 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 		return KeyCtrlU, 0
 	case tcell.KeyCtrlT:
 		return KeyCtrlT, 0
+	case tcell.KeyCtrlB:
+		return KeyCtrlB, 0
 	default:
 		return KeyNone, 0
 	}
@@ -547,6 +557,22 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	if key != KeyMouse {
 		l.session.NoteBreakActivity()
 	}
+	if l.prefixPending {
+		l.prefixPending = false
+		switch {
+		case key == KeyCtrlB:
+			l.session.Editor().Insert('\x02')
+		case key == KeyRune && (r == 'n' || r == 'N'):
+			l.changePane(1)
+		case key == KeyRune && (r == 'p' || r == 'P'):
+			l.changePane(-1)
+		}
+		return false
+	}
+	if key == KeyCtrlB {
+		l.prefixPending = true
+		return false
+	}
 
 	switch key {
 	case KeyRune:
@@ -636,6 +662,15 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 	}
 
 	return false
+}
+
+func (l *interfaceLoop) changePane(direction int) {
+	if l.navigatePane == nil {
+		return
+	}
+	if next := l.navigatePane(direction); next != nil {
+		l.session = next
+	}
 }
 
 // submit acts on a line the reader finished typing.
@@ -786,14 +821,22 @@ func splitRows(text string) []string {
 // the terminal back with a request still writing to it. A turn refused by the count never
 // started, which is why it is a refusal rather than a silent skip.
 func (l *interfaceLoop) start(ctx context.Context, question string, silent bool) {
+	l.startOnSession(ctx, l.session, question, silent)
+}
+
+func (l *interfaceLoop) startOnSession(ctx context.Context, session *Session, question string, silent bool) {
 	if err := l.group.Add(); err != nil {
-		l.session.Notice(err.Error(), 0, RoleFailure)
+		session.Notice(err.Error(), 0, RoleFailure)
 		return
+	}
+	task := l.ask
+	if l.askForSession != nil {
+		task = l.askForSession(session)
 	}
 
 	turnCtx, cancel := context.WithCancel(ctx)
 
-	l.session.SetCancel(cancel)
+	session.SetCancel(cancel)
 
 	go func() {
 		// The count is lowered on every path out, including a panic, since a turn that took
@@ -801,13 +844,13 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 		// waited for it for ever.
 		defer l.group.Done()
 
-		err := l.ask(turnCtx, question, 0, silent)
+		err := task(turnCtx, question, 0, silent)
 
-		l.session.ClearCancel()
+		session.ClearCancel()
 		cancel()
 
 		if err != nil {
-			l.session.Notice(err.Error(), 0, RoleFailure)
+			session.Notice(err.Error(), 0, RoleFailure)
 			return
 		}
 
@@ -818,8 +861,8 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 		// may want to look at or retype first, which is a judgment call this
 		// comment flags rather than one settled by a design record: there is no
 		// existing precedent in this tree for when a queued message should fire.
-		if next, ok := l.session.Drain(); ok {
-			l.start(ctx, next, false)
+		if next, ok := session.Drain(); ok {
+			l.startOnSession(ctx, session, next, false)
 		}
 	}()
 }

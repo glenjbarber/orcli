@@ -41,7 +41,7 @@ import (
 
 // panesUsage is what a /pane refusal names, so a reader told their argument
 // is not a pane is told in the same breath what is.
-const panesUsage = "main, delegate, spawn"
+const panesUsage = "0, 1, main, delegate, spawn"
 
 // pane is the handler for `/pane`.
 //
@@ -49,12 +49,9 @@ const panesUsage = "main, delegate, spawn"
 // both do for the same reason: a reader who has never touched it should not
 // have to change it just to find out what it is set to.
 //
-// There is one scrollback in this build regardless of what /pane says (see
-// Session.SetPane's doc comment, and stack.go's renderPaneBar, which still
-// draws the single hardcoded pane adr-0000007's multiplexer was never built
-// to show more than one of). What /pane changes today is the name and the
-// colour the pane bar draws, which is the one piece of the design this
-// build can honor without that multiplexer.
+// Pane 0 is the main session and pane 1 is the most recent /begin session.
+// Those numeric names switch the visible session. The other accepted names set
+// a display label on the current session for compatibility with the pane design.
 func (d *dispatcher) pane(args string) (tui.Result, error) {
 	if d.session == nil {
 		return tui.Result{}, fmt.Errorf("/pane needs an open interface")
@@ -63,6 +60,17 @@ func (d *dispatcher) pane(args string) (tui.Result, error) {
 	want := strings.TrimSpace(args)
 	if want == "" {
 		return tui.Result{Text: "the pane is " + d.session.Pane()}, nil
+	}
+	if want == "0" || want == "1" {
+		if want == "1" && d.worker == nil {
+			return tui.Result{}, fmt.Errorf("/pane 1 is not open; /begin opens pane 1")
+		}
+		direction := -1
+		if want == "1" {
+			direction = 1
+		}
+		focused := d.navigatePane(direction)
+		return tui.Result{Text: "the pane is " + focused.Pane()}, nil
 	}
 
 	if err := d.session.SetPane(want); err != nil {

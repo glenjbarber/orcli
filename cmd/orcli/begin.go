@@ -19,6 +19,8 @@ import (
 // cheaper than a new pane opening onto a note that says nothing.
 var ErrNoNote = errors.New("begin: /begin needs a note describing the task")
 
+const beginCheckInstruction = "Return the result to parent /pane 0 and check its work"
+
 // begin is the handler for /begin.
 //
 // It implements staged/adr-0000047: the calling session is left exactly as it was,
@@ -28,15 +30,16 @@ var ErrNoNote = errors.New("begin: /begin needs a note describing the task")
 // orcli's own temp directory and removed the moment the load that reads it back is
 // done, rather than through a pipe and rather than living on disk past the handoff.
 //
-// It does not implement a pane set: nothing in this tree opens one yet, which
-// staged/adr-0000032 already says plainly. The new session is held on the dispatcher
-// as the one the next `/begin` replaces, which is the one piece of multi-session
-// bookkeeping that exists today; the calling session the reader is looking at is
-// untouched either way.
+// The new session is pane 1 and is held on the dispatcher as the one the next
+// `/begin` replaces. Pane 0 remains the calling session; Ctrl+B navigation and
+// `/pane 0` or `/pane 1` switch which session the interface displays.
 func (d *dispatcher) begin(note string) (tui.Result, error) {
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return tui.Result{}, ErrNoNote
+	}
+	if !strings.HasSuffix(note, beginCheckInstruction) {
+		note += "\n\n" + beginCheckInstruction
 	}
 
 	loaded, err := handoff(note)
@@ -45,6 +48,9 @@ func (d *dispatcher) begin(note string) (tui.Result, error) {
 	}
 
 	worker := tui.New(d.session.Options())
+	if err := worker.SetPane("1"); err != nil {
+		return tui.Result{}, err
+	}
 	for _, turn := range loaded.Turns {
 		worker.Notice(turn.Content, 0, tui.RoleEmphasis)
 	}

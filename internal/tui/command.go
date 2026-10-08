@@ -371,6 +371,83 @@ func Complete(prefix string) (names []string, whole bool) {
 	return matches, false
 }
 
+// Plugins returns the built-in plugin names accepted by the @plugin command form.
+func Plugins() []string { return []string{"apiary", "cloudflare", "notion"} }
+
+// PluginSubcommands returns the discoverable operations for a built-in plugin.
+func PluginSubcommands(name string) []string {
+	switch name {
+	case "apiary":
+		return []string{"query"}
+	case "cloudflare":
+		return []string{"confirm", "dns"}
+	case "notion":
+		return []string{"api", "blocks", "comments", "data", "fetch", "pages", "search"}
+	default:
+		return nil
+	}
+}
+
+// CompleteAt returns matches for the token at the caret, using preceding text to
+// select command, plugin, or subcommand candidates.
+func CompleteAt(before, word string) (matches []string, whole bool) {
+	if before == "" {
+		if strings.HasPrefix(word, "/") {
+			matches, whole := Complete(word)
+			for i := range matches {
+				matches[i] = "/" + matches[i]
+			}
+			return matches, whole
+		}
+		if strings.HasPrefix(word, "@") {
+			matches, whole := matching(Plugins(), strings.TrimPrefix(word, "@"))
+			for i := range matches {
+				matches[i] = "@" + matches[i]
+			}
+			return matches, whole
+		}
+		return Complete(word)
+	}
+	context := strings.TrimSpace(before)
+	if strings.HasPrefix(context, "/") && !strings.Contains(context, " ") {
+		name := strings.TrimPrefix(context, "/")
+		choices := []string{"help"}
+		if c, ok := Lookup(name); ok {
+			choices = append(choices, argumentChoices(c.Args)...)
+		}
+		return matching(choices, word)
+	}
+	if strings.HasPrefix(context, "@") && !strings.Contains(context, " ") {
+		name := strings.TrimPrefix(context, "@")
+		if len(PluginSubcommands(name)) == 0 {
+			return nil, false
+		}
+		return matching(append([]string{"help"}, PluginSubcommands(name)...), word)
+	}
+	return nil, false
+}
+
+func matching(candidates []string, prefix string) ([]string, bool) {
+	matches := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, prefix) {
+			matches = append(matches, candidate)
+		}
+	}
+	return matches, len(matches) == 1
+}
+
+func argumentChoices(args string) []string {
+	if !strings.Contains(args, "|") {
+		return nil
+	}
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return nil
+	}
+	return strings.Split(fields[0], "|")
+}
+
 // Completion is what a completer puts in the field, and where the caret goes.
 //
 // The trailing space is the whole point. It separates a finished name from the
@@ -400,4 +477,17 @@ func Completion(prefix string) (text string, caret int, whole bool) {
 
 	text = slash + names[0] + " "
 	return text, len(text), true
+}
+
+// CompletionAt replaces the token under the caret with one candidate.
+func CompletionAt(before, word string) (text string, caret int, whole bool, candidates []string) {
+	candidates, whole = CompleteAt(before, word)
+	if len(candidates) == 0 {
+		return word, len([]rune(word)), false, nil
+	}
+	if !whole {
+		return candidates[0], len([]rune(candidates[0])), false, candidates
+	}
+	text = candidates[0]
+	return text, len([]rune(text)), true, candidates
 }
