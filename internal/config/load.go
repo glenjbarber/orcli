@@ -148,6 +148,9 @@ type Config struct {
 
 	// Notion is the block holding the Notion integration token.
 	Notion *Notion `json:"notion,omitempty"`
+
+	// Apiary holds the base URL and existing read-only Viewer credential.
+	Apiary *Apiary `json:"apiary,omitempty"`
 }
 
 // Default is the configuration a session runs with when nothing is on disk.
@@ -315,6 +318,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			c.Cloudflare, err = readCloudflare(value)
 		case notionKey:
 			c.Notion, err = readNotion(value)
+		case apiaryKey:
+			c.Apiary, err = readApiary(value)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
