@@ -17,7 +17,7 @@ import (
 // stand in for the call into a terminal can only run on a machine with a terminal
 // attached, and the wiring is exactly the thing that has no other way to be checked.
 func standDrawFor(t *testing.T, fn func(context.Context, *tui.Session, config.Config,
-	io.Reader, io.Writer, *debugLog) error) {
+	io.Reader, io.Writer, *debugLog, string) error) {
 	t.Helper()
 
 	restore := draw
@@ -34,7 +34,7 @@ func TestTheInterfaceIsStarted(t *testing.T) {
 
 		called := false
 		standDrawFor(t, func(context.Context, *tui.Session, config.Config,
-			io.Reader, io.Writer, *debugLog) error {
+			io.Reader, io.Writer, *debugLog, string) error {
 			called = true
 			return nil
 		})
@@ -58,7 +58,7 @@ func TestARedirectedRunReportsTheTerminalRequirement(t *testing.T) {
 
 		called := false
 		standDrawFor(t, func(context.Context, *tui.Session, config.Config,
-			io.Reader, io.Writer, *debugLog) error {
+			io.Reader, io.Writer, *debugLog, string) error {
 			called = true
 			return tui.ErrNoTerminal
 		})
@@ -85,7 +85,7 @@ func TestAFailureOpeningTheInterfaceStopsStartup(t *testing.T) {
 		writeConfig(t, `{"api_key":"k"}`)
 
 		standDrawFor(t, func(context.Context, *tui.Session, config.Config,
-			io.Reader, io.Writer, *debugLog) error {
+			io.Reader, io.Writer, *debugLog, string) error {
 			return io.ErrUnexpectedEOF
 		})
 
@@ -111,7 +111,7 @@ func TestAFailureOpeningTheInterfaceStopsStartup(t *testing.T) {
 func TestTheInterfaceIsToldTheStreamCannotBeAsked(t *testing.T) {
 	var b strings.Builder
 
-	err := openInterface(context.Background(), nil, config.Config{}, strings.NewReader(""), &b, nil)
+	err := openInterface(context.Background(), nil, config.Config{}, strings.NewReader(""), &b, nil, "")
 	if !errors.Is(err, tui.ErrNoTerminal) {
 		t.Errorf("a buffer was given to openInterface and it returned %v, want ErrNoTerminal", err)
 	}
