@@ -202,16 +202,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return fmt.Errorf("read the working directory: %w", err)
 		}
 	}
-	var capture *debugLog
+	notionToken, _ := cfg.NotionToken()
+	cloudflareToken, _ := cfg.CloudflareAPIKey()
+	_, apiaryToken, _ := cfg.ApiarySettings()
+	capture := newDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken, apiaryToken)
+	defer capture.close()
 	if *debug {
-		notionToken, _ := cfg.NotionToken()
-		cloudflareToken, _ := cfg.CloudflareAPIKey()
-		_, apiaryToken, _ := cfg.ApiarySettings()
-		capture, err = openDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken, apiaryToken)
-		if err != nil {
+		if err := capture.enable(true); err != nil {
 			return err
 		}
-		defer capture.close()
 		capture.record("session", map[string]any{"directory": workDir, "version": version})
 	}
 
@@ -383,6 +382,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	}
 
 	d := newDispatcherFor(cfg)
+	d.capture = capture
 	d.canAsk = func() bool { return canAsk(s) }
 	notionToken, err := cfg.NotionToken()
 	if err != nil {
@@ -616,7 +616,8 @@ in the interface:
   configuration file only once the endpoint has answered. Type /model NAME to
   choose one and /model last to go back to the one before it. Type /cloudflare
   to manage DNS records, and /cloudflare confirm to apply a change it showed you.
-  /quit leaves.
+  /trace enables redacted stream capture after a problem; /trace status reports
+  whether it is active, and /trace off stops it. /quit leaves.
 
 tools:
   A directory is asked about once and the answer is recorded. A reader who

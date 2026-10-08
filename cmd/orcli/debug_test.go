@@ -73,3 +73,35 @@ func TestOpenDebugLogUsesPrivateModeAndRejectsSymlink(t *testing.T) {
 		t.Fatal("openDebugLog accepted a symlink")
 	}
 }
+
+func TestTraceCommandEnablesRedactedCaptureAndStops(t *testing.T) {
+	dir := t.TempDir()
+	log := newDebugLog(dir, "configured-secret")
+	log.record("before", map[string]any{"message": "not captured"})
+	if _, err := os.Stat(log.path()); !os.IsNotExist(err) {
+		t.Fatalf("dormant capture created a file: %v", err)
+	}
+	text, err := log.traceCommand("")
+	if err != nil || !strings.HasPrefix(text, "trace is on: ") {
+		t.Fatalf("trace on = %q, %v", text, err)
+	}
+	log.record("request", map[string]any{"message": "configured-secret"})
+	text, err = log.traceCommand("status")
+	if err != nil || !strings.Contains(text, log.path()) {
+		t.Fatalf("trace status = %q, %v", text, err)
+	}
+	if text, err = log.traceCommand("off"); err != nil || text != "trace is off" {
+		t.Fatalf("trace off = %q, %v", text, err)
+	}
+	log.record("after", map[string]any{"message": "not captured"})
+	data, err := os.ReadFile(log.path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "configured-secret") || !strings.Contains(string(data), "[REDACTED]") {
+		t.Fatalf("trace contents were not redacted: %s", data)
+	}
+	if strings.Contains(string(data), `"type":"after"`) {
+		t.Fatalf("capture continued after /trace off: %s", data)
+	}
+}

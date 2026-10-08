@@ -221,6 +221,11 @@ func init() {
 			Summary: "clear the log",
 		},
 		{
+			Name:    "trace",
+			Args:    "on|off|status",
+			Summary: "capture the redacted conversation stream for debugging",
+		},
+		{
 			Name:    "info",
 			Summary: "report the session settings",
 		},
