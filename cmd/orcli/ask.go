@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/glenjbarber/orcli/internal/apiary"
+	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/github"
 	"github.com/glenjbarber/orcli/internal/notion"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
@@ -68,7 +70,38 @@ type chatClient interface {
 // different reasons: one reflects this session's live configuration, the other is
 // whatever the reader put in a file.
 func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string, apiarySettings ...string) tui.AskFunc {
-	toolset := newToolset(s.Options().WorkingDir, notionToken, apiarySettings...)
+	return askWithTaskIntegrations(s, c, attribution, confirmed, cloudflareReady, capture, notionToken, apiarySettings, taskIntegrationSettings{})
+}
+
+type taskIntegrationSettings struct {
+	GitHubToken        string
+	GitHubLogin        string
+	GitHubRepositories []string
+	NotionToken        string
+	NotionDataSourceID string
+	NotionAssigneeProp string
+	NotionAssigneeID   string
+	NotionStatusProp   string
+}
+
+func taskIntegrationsFrom(cfg config.Config) taskIntegrationSettings {
+	var settings taskIntegrationSettings
+	key, login, repositories, err := cfg.GitHubSettings()
+	if err == nil && key != "" {
+		settings.GitHubToken, settings.GitHubLogin, settings.GitHubRepositories = key, login, repositories
+	}
+	token, err := cfg.NotionToken()
+	if err == nil && token != "" {
+		settings.NotionDataSourceID, settings.NotionAssigneeProp, settings.NotionAssigneeID, settings.NotionStatusProp, err = cfg.NotionTaskSettings()
+		if err == nil {
+			settings.NotionToken = token
+		}
+	}
+	return settings
+}
+
+func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string, apiarySettings []string, integrations taskIntegrationSettings) tui.AskFunc {
+	toolset := newToolsetWithTasks(s.Options().WorkingDir, notionToken, apiarySettings, integrations)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
 	docs := documentation(s.Options().WorkingDir)
@@ -241,6 +274,17 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 	}
 }
 
+func newToolsetWithTasks(dir, notionToken string, apiarySettings []string, integrations taskIntegrationSettings) []tools.Tool {
+	set := newToolset(dir, notionToken, apiarySettings...)
+	if integrations.GitHubToken != "" && integrations.GitHubLogin != "" && len(integrations.GitHubRepositories) > 0 {
+		set = append(set, github.New(integrations.GitHubToken, integrations.GitHubLogin, integrations.GitHubRepositories).ToolSet()...)
+	}
+	if integrations.NotionToken != "" && integrations.NotionDataSourceID != "" && integrations.NotionAssigneeProp != "" && integrations.NotionAssigneeID != "" && integrations.NotionStatusProp != "" {
+		set = append(set, notion.New(integrations.NotionToken).TaskTool(integrations.NotionDataSourceID, integrations.NotionAssigneeProp, integrations.NotionAssigneeID, integrations.NotionStatusProp))
+	}
+	return set
+}
+
 // newToolset builds the tools a turn may call, contained to dir.
 //
 // Filesystem tools are omitted, not fatal, if the root cannot be opened - a session
@@ -347,15 +391,16 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 		b.WriteString("Cloudflare: no credential is configured; the connector is not available.\n")
 	}
 
-	// There is no plugin system in this build: nothing in the tree registers a
-	// plugin, enables one, or carries a list of them to read. This is named rather
-	// than left out, on the same "absence is a statement" grounds as every other
-	// line above, so a reader who asks what plugins are enabled is told none can be,
-	// not left to guess whether the question was never asked.
 	plugins := []string{"@notion", "@cloudflare"}
 	for _, tool := range toolset {
 		if strings.HasPrefix(tool.Describe().Function.Name, "apiary_") {
 			plugins = append(plugins, "@apiary")
+			break
+		}
+	}
+	for _, tool := range toolset {
+		if strings.HasPrefix(tool.Describe().Function.Name, "github_") {
+			plugins = append(plugins, "@github")
 			break
 		}
 	}

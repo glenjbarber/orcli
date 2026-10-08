@@ -218,9 +218,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 	}
 	notionToken, _ := cfg.NotionToken()
+	githubToken, _ := cfg.GitHubAPIKey()
 	cloudflareToken, _ := cfg.CloudflareAPIKey()
 	_, apiaryToken, _ := cfg.ApiarySettings()
-	capture := newDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken, apiaryToken)
+	capture := newDebugLog(workDir, cfg.APIKey, notionToken, githubToken, cloudflareToken, apiaryToken)
 	defer capture.close()
 	if *debug {
 		if err := capture.enable(true); err != nil {
@@ -443,7 +444,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 			confirmed = confirmModelAt(target, d.activeConfigPath)
 			confirmations[target] = confirmed
 		}
-		return ask(target, newTransport(cfg), cfg.AttributionID, confirmed, d.cloudflareReady, capture, notionToken, apiaryURL, apiaryToken)
+		return askWithTaskIntegrations(target, newTransport(cfg), cfg.AttributionID, confirmed, d.cloudflareReady, capture, notionToken, []string{apiaryURL, apiaryToken}, taskIntegrationsFrom(cfg))
 	}
 
 	return tui.Start(ctx, s,
