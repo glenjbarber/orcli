@@ -66,6 +66,18 @@ func (d *dispatcher) clear() (tui.Result, error) {
 	return tui.Result{Text: fmt.Sprintf("cleared %d rows", n)}, nil
 }
 
+// trace enables, disables, or reports the redacted capture for this session.
+func (d *dispatcher) trace(args string) (tui.Result, error) {
+	if d.capture == nil {
+		return tui.Result{}, fmt.Errorf("/trace needs an open session")
+	}
+	text, err := d.capture.traceCommand(args)
+	if err != nil {
+		return tui.Result{}, err
+	}
+	return tui.Result{Text: text}, nil
+}
+
 // onOff parses the one argument every plain toggle in this file takes.
 //
 // Three outcomes rather than two: empty is "say nothing new", a recognised word is a

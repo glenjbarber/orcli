@@ -15,6 +15,7 @@ import (
 type debugLog struct {
 	mu   sync.Mutex
 	file *os.File
+	dir  string
 	keys []string
 }
 
@@ -35,34 +36,75 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 func openDebugLog(dir string, keys ...string) (*debugLog, error) {
-	path := filepath.Join(dir, ".orcli-debug.jsonl")
+	d := &debugLog{dir: dir, keys: keys}
+	if err := d.enable(true); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func newDebugLog(dir string, keys ...string) *debugLog {
+	return &debugLog{dir: dir, keys: keys}
+}
+
+func (d *debugLog) path() string {
+	return filepath.Join(d.dir, ".orcli-debug.jsonl")
+}
+
+func (d *debugLog) enable(truncate bool) error {
+	if d == nil {
+		return fmt.Errorf("debug capture is unavailable")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.file != nil {
+		return nil
+	}
+	path := d.path()
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("debug log path is not a regular file: %s", path)
+			return fmt.Errorf("debug log path is not a regular file: %s", path)
 		}
 	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("inspect debug log: %w", err)
+		return fmt.Errorf("inspect debug log: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if truncate {
+		flags |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open debug log: %w", err)
+		return fmt.Errorf("open debug log: %w", err)
 	}
 	if err := f.Chmod(0o600); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("secure debug log: %w", err)
+		return fmt.Errorf("secure debug log: %w", err)
 	}
-	return &debugLog{file: f, keys: keys}, nil
+	d.file = f
+	return nil
 }
 
 func (d *debugLog) close() error {
-	if d == nil || d.file == nil {
+	if d == nil {
 		return nil
 	}
-	return d.file.Close()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.file == nil {
+		return nil
+	}
+	err := d.file.Close()
+	d.file = nil
+	return err
 }
 
 func (d *debugLog) record(kind string, value any) {
-	if d == nil || d.file == nil {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.file == nil {
 		return
 	}
 	body, err := json.Marshal(value)
@@ -77,9 +119,50 @@ func (d *debugLog) record(kind string, value any) {
 			}
 		}
 	}
+	_, _ = fmt.Fprintf(d.file, "{\"time\":%q,\"type\":%q,\"data\":%s}\n", time.Now().UTC().Format(time.RFC3339Nano), kind, body)
+}
+
+func (d *debugLog) enabled() bool {
+	if d == nil {
+		return false
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, _ = fmt.Fprintf(d.file, "{\"time\":%q,\"type\":%q,\"data\":%s}\n", time.Now().UTC().Format(time.RFC3339Nano), kind, body)
+	return d.file != nil
+}
+
+func (d *debugLog) traceCommand(args string) (string, error) {
+	if d == nil {
+		return "", fmt.Errorf("/trace is unavailable")
+	}
+	action := strings.TrimSpace(args)
+	if action == "" {
+		action = "on"
+	}
+	switch action {
+	case "status":
+		if d.enabled() {
+			return fmt.Sprintf("trace is on: %s", d.path()), nil
+		}
+		return "trace is off", nil
+	case "on":
+		if err := d.enable(false); err != nil {
+			return "", err
+		}
+		d.record("trace_started", map[string]any{"path": d.path()})
+		return fmt.Sprintf("trace is on: %s", d.path()), nil
+	case "off":
+		if !d.enabled() {
+			return "trace is off", nil
+		}
+		d.record("trace_stopped", map[string]any{"path": d.path()})
+		if err := d.close(); err != nil {
+			return "", fmt.Errorf("close trace log: %w", err)
+		}
+		return "trace is off", nil
+	default:
+		return "", fmt.Errorf("/trace must be on, off, or status")
+	}
 }
 
 func (d *debugLog) redactValue(value any) any {

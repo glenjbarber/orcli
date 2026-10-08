@@ -32,6 +32,8 @@ type handler func(ctx context.Context, d *dispatcher, args string) (tui.Result, 
 // session is the log, the levels, the workers and the four states; a proposed DNS
 // record is none of those.
 type dispatcher struct {
+	// capture is dormant until --debug or /trace enables it.
+	capture *debugLog
 	// cfg is the configuration as startup read it, held as a configuration rather
 	// than as a credential so the block is read where it is needed and so a test can
 	// build one over a file it wrote.
@@ -176,6 +178,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		},
 		"clear": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.clear()
+		},
+		"trace": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.trace(args)
 		},
 		"bell": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.bell(args)
@@ -344,6 +349,9 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 	name, args, ok := tui.IsCommand(line)
 	if !ok {
 		return tui.Result{}, nil
+	}
+	if d.capture != nil {
+		d.capture.record("command", map[string]any{"input": line})
 	}
 	if strings.HasPrefix(name, "@") {
 		return d.plugin(ctx, strings.TrimPrefix(name, "@"), args)
