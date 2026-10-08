@@ -48,6 +48,29 @@ func TestPaneSwitchesToEachKnownName(t *testing.T) {
 	}
 }
 
+func TestPaneNumbersFocusMainAndBeginSessions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d := levelsDispatcher(t)
+	main := d.session
+	if _, err := d.begin("worker task"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	worker := d.worker
+	for _, tc := range []struct {
+		name  string
+		want  *tui.Session
+		label string
+	}{{"1", worker, "1"}, {"0", main, "main"}} {
+		out, err := d.pane(tc.name)
+		if err != nil {
+			t.Fatalf("pane(%s): %v", tc.name, err)
+		}
+		if d.session != tc.want || out.Text != "the pane is "+tc.label {
+			t.Errorf("pane(%s) = %q, session=%p; want %p", tc.name, out.Text, d.session, tc.want)
+		}
+	}
+}
+
 func TestPaneRefusesAnUnknownName(t *testing.T) {
 	d := levelsDispatcher(t)
 

@@ -64,6 +64,65 @@ func TestTheCommandIsFoundAndRun(t *testing.T) {
 	}
 }
 
+func TestEveryListedCommandAcceptsHelp(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	for _, name := range tui.Names() {
+		t.Run(name, func(t *testing.T) {
+			out, err := d.Run(context.Background(), "/"+name+" help")
+			if err != nil {
+				t.Fatalf("help: %v", err)
+			}
+			command, _ := tui.Lookup(name)
+			if !strings.Contains(out.Text, "/"+command.Name) || out.Ask != "" {
+				t.Fatalf("help result = %+v", out)
+			}
+		})
+	}
+}
+
+func TestPluginHelpAsksModelForSafeSetupGuidance(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@notion help")
+	if err != nil {
+		t.Fatalf("plugin help: %v", err)
+	}
+	if out.Ask == "" || out.Text != "" {
+		t.Fatalf("plugin help result = %+v, want a model instruction", out)
+	}
+	for _, want := range []string{"api_key", "~/.orcli.json", "0600", "placeholder", "Do not ask for"} {
+		if !strings.Contains(out.Ask, want) {
+			t.Errorf("help prompt does not include %q", want)
+		}
+	}
+	for _, secret := range []string{"ntn_", "secret_", "sk-"} {
+		if strings.Contains(out.Ask, secret) {
+			t.Errorf("help prompt contains token-like value %q", secret)
+		}
+	}
+}
+
+func TestPluginSubcommandSelectsToolOperation(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@notion search query")
+	if err != nil {
+		t.Fatalf("plugin operation: %v", err)
+	}
+	if !strings.Contains(out.Ask, "@notion") || !strings.Contains(out.Ask, "search") || !strings.Contains(out.Ask, "query") {
+		t.Fatalf("plugin operation prompt = %q", out.Ask)
+	}
+}
+
+func TestUnconfiguredApiaryActionRequestsSetupGuidance(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@apiary query status")
+	if err != nil {
+		t.Fatalf("Apiary query: %v", err)
+	}
+	if !strings.Contains(out.Ask, "not configured") || !strings.Contains(out.Ask, "viewer_token") {
+		t.Fatalf("Apiary setup prompt = %q", out.Ask)
+	}
+}
+
 // TestALineThatIsNotACommandIsNotARefusal covers the ordinary case. A question the
 // reader wants to ask is not a command, and the loop is what sends it to the model.
 func TestALineThatIsNotACommandIsNotARefusal(t *testing.T) {
