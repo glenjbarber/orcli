@@ -1,0 +1,84 @@
+# 0000044 The introduction file is AGENTS.md, not CONTEXT.md
+
+- Status: accepted
+- Date: 2026-10-06
+- Supersedes: `46a6320`'s choice of `CONTEXT.md` as the introduction file
+
+## Context
+
+`46a6320` wired `introduction()` to read `CONTEXT.md` from the session's
+working directory and send it as a system message ahead of the question.
+`CONTEXT.md` was never this project's own convention; it was a name already
+in use across `apiary`, `loreloom`, and this repository's own root for a
+different purpose entirely - a pointer to Loreloom's cross-project
+coordination policy, including, in every one of those files, an instruction
+telling whatever reads it to fetch a Notion-hosted policy at task start and
+pause if that fails. `introduction()` reading that file by the same name
+meant a reader opening `orcli` inside `apiary` or `loreloom` had that
+instruction handed to the model as a live system message, at the same
+request the model now has real filesystem, git, and shell tools wired into
+(`46a6320`), whether anyone intended that collision or not.
+
+This project's own `AGENTS.md` already claims the role `introduction()`
+was reaching for: "This file is read by default. It holds the operating
+rules for this tree, and no other file holds them." That claim was false
+of the actual code until this record - `introduction()` read `CONTEXT.md`,
+not `AGENTS.md` - and it is the file `goose` and other tools already
+converge on for the same purpose, where `CONTEXT.md` carried no standing
+beyond Loreloom's own documents.
+
+## Decision
+
+**`introduction()` reads `AGENTS.md`, not `CONTEXT.md`.** Same mechanism
+0000042 and `46a6320` already built - one system message, sent only when
+the file exists, raw contents, no filtering - pointed at the file this
+project's own convention already names as read by default.
+
+**`CONTEXT.md` is not a file this project's introduction mechanism
+recognizes at all, not even as a fallback.** A working directory with a
+`CONTEXT.md` and no `AGENTS.md` sends no introduction, the same as a
+directory with neither. Reading `CONTEXT.md` as a fallback would keep
+exactly the collision this record exists to end.
+
+## Consequences
+
+A reader who had a `CONTEXT.md` doing this job stops getting it sent,
+silently, the moment this lands - not a behavior change this record hides.
+`apiary`, `loreloom`, and this repository's own root `CONTEXT.md` are now
+dead weight for this purpose specifically; whether they should be removed,
+and whether the Loreloom coordination-policy pointer they carry belongs in
+`AGENTS.md` instead, is Glen's decision across those repositories, not a
+change this record makes to them.
+
+Every tree that wants an introduction now needs an `AGENTS.md`, which most
+already have for an unrelated reason - operating rules for a coding agent
+working on the tree. The introduction message and the operating-rules file
+are now the same file for every project that has one, which means a change
+to one changes the other; this record treats that as the right default,
+not an accident to correct later.
+
+## What this does not settle
+
+Whether `AGENTS.md`'s contents, written for a coding agent working on the
+tree, are the right contents for a model answering a question through
+`orcli` - the two readers are not the same, and a file written for one may
+carry instructions irrelevant or confusing to the other. This record
+changes which file is read, not what belongs in it.
+
+Whether `CONTEXT.md` should be deleted from `apiary`, `loreloom`, and this
+repository's own root, or repurposed, is open and is not this record's
+decision to make for those trees.
+
+## Notes
+
+Code changed with this record: `cmd/orcli/ask.go`'s `introduction()` now
+reads `AGENTS.md`; `cmd/orcli/ask_test.go`'s two introduction tests
+(`TestIntroductionCarriesAgentsMD`, `TestNoIntroductionWithoutAgentsMD`)
+were renamed and rewritten to match. `go build ./...`, `go vet ./...`, and
+`go test ./...` pass (`GOWORK=off`, this worktree's `go.work` is the
+parent checkout's and not this module's own). Diff for this change:
+22 lines added, 18 removed.
+
+## See also
+
+Supersedes `46a6320`'s choice of CONTEXT.md as the introduction file. See also adr-0000042, whose implementation this record corrects.

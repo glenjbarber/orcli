@@ -9,6 +9,8 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/groq"
+	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
@@ -52,20 +54,68 @@ type dispatcher struct {
 	before  cloudflare.Record
 	existed bool
 
+	// worker is the session /begin most recently opened, forked off the calling
+	// session rather than replacing it. There is no pane set in this tree yet (see
+	// staged/adr-0000032 and staged/adr-0000047), so this one field is the whole of
+	// what the dispatcher keeps of it; a second /begin replaces it rather than
+	// adding to a set that does not exist.
+	worker *tui.Session
+
 	// client is the API client, built on first use, and newClient is what builds it.
 	// It is a field rather than a package variable so two dispatchers in one test run
 	// cannot reach each other's transport.
 	client    *cloudflare.APIClient
 	newClient func(key string) *cloudflare.APIClient
 
+	// orClient is the catalog client /key, /models, /freemodels and /attribute
+	// share, built on first use the way client above is. newORClient is the seam
+	// a test points at a fake: neither openrouter.Client's nor groq.Client's base
+	// URL can be pointed at a test server from outside its own package (see
+	// catalogClient's doc comment in openrouter_cmds.go), so a dispatcher test
+	// stands in for the whole client rather than for one request.
+	//
+	// The field is still named for OpenRouter, and so is the comment above it,
+	// kept that way rather than renamed to something provider-neutral: a rename
+	// here touches nothing a reader outside this file sees, and the name is
+	// accurate again the moment a session is configured for OpenRouter, which is
+	// still every session whose configuration predates Groq support.
+	orClient    catalogClient
+	newORClient func(key string) catalogClient
+
 	// canAsk reports whether a model can be asked at all, which decides whether
 	// /cloudflare sends its guidance to the model or falls back to its own text.
 	canAsk func() bool
+
+	// autosave reports whether /autosave is on, which is the whole of what this
+	// build does about it: there is no timer here and nothing writes a session to
+	// disk on its own. The field exists so /autosave on and /autosave off have
+	// something to move and /autosave with no argument has something to report,
+	// ahead of the save/load mechanism this is meant to drive once it exists.
+	autosaveOn bool
+
+	// permissions is the in-memory grant list `/permission` writes to and reports
+	// from. It is keyed by directory, and it is the v1 this build has rather than
+	// the persisted, consulted store the command's own doc comment (see
+	// permission.go) names as the open gap: nothing in internal/tools reads this
+	// map, so a grant recorded here records intent and nothing else yet.
+	permissions map[string]*permissionGrant
 }
 
 // newDispatcherFor builds a dispatcher over a configuration.
 func newDispatcherFor(cfg config.Config) *dispatcher {
 	d := &dispatcher{cfg: cfg, newClient: cloudflare.New}
+
+	// newORClient is chosen by the configuration's own Provider field, the same
+	// way newTransport in main.go is: a session configured for Groq gets a
+	// *groq.Client here too, so /key, /models and /freemodels read Groq's own
+	// endpoints rather than OpenRouter's whenever that is the provider in force.
+	// See isGroqProvider's doc comment in provider.go for what decides which
+	// provider a configuration names.
+	if isGroqProvider(cfg.Provider) {
+		d.newORClient = func(key string) catalogClient { return groq.New(key) }
+	} else {
+		d.newORClient = func(key string) catalogClient { return openrouter.New(key) }
+	}
 	d.canAsk = func() bool { return false }
 	d.commands = map[string]handler{
 		"cloudflare": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
@@ -74,11 +124,125 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"model": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.model(args)
 		},
+		"level": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.level(args)
+		},
 		"test": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.test(args)
 		},
 		"quit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return tui.Result{Quit: true}, nil
+		},
+		// /exit is a second name for the same thing /quit does. The table carries
+		// both because a reader coming from another program types whichever word
+		// that program used, and a client that only answered to one of them would
+		// send that reader looking for a third command that does nothing different.
+		"exit": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return tui.Result{Quit: true}, nil
+		},
+		"begin": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.begin(args)
+		},
+		"pane": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.pane(args)
+		},
+		"spawn": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.spawn(args)
+		},
+		"btw": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.btw(args)
+		},
+		"delegate": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.delegate(args)
+		},
+		"close": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.close(args)
+		},
+		"copy": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.copyCmd(args)
+		},
+		"queue": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.queue(args)
+		},
+		"redirect": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.redirect(args)
+		},
+		"help": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.help()
+		},
+		"version": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.version()
+		},
+		"clear": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.clear()
+		},
+		"bell": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.bell(args)
+		},
+		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.color(args)
+		},
+		// /stealth is the listed name; /cognito is kept as a hidden alias of it in
+		// internal/tui/command.go's table, and both keys here answer to the same
+		// handler since Run looks a typed name up in this map directly rather than
+		// through the table's own alias resolution.
+		"stealth": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.stealth(args)
+		},
+		"cognito": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.stealth(args)
+		},
+		"mouse": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.mouse(args)
+		},
+		"copymode": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.copymode(args)
+		},
+		"pause": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.pause()
+		},
+		"info": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.info()
+		},
+		"autosave": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.autosave(args)
+		},
+		"approve": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.approve(args)
+		},
+		"permission": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.permission(args)
+		},
+		"tools": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.tools()
+		},
+		"save": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.save(args)
+		},
+		"load": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.load(args)
+		},
+		"key": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.key(ctx)
+		},
+		"search": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.search(args)
+		},
+		"models": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.models(ctx, args)
+		},
+		"freemodels": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.freemodels(ctx, args)
+		},
+		// /attribute and its alias /attribution (internal/tui/attribute.go's table
+		// entry) both answer here, on the same grounds /stealth and /cognito above
+		// both do: Run looks a typed name up in this map directly rather than
+		// through the table's own alias resolution.
+		"attribute": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.attribute(ctx, args)
+		},
+		"attribution": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.attribute(ctx, args)
 		},
 	}
 	return d
@@ -104,13 +268,53 @@ func (d *dispatcher) model(args string) (tui.Result, error) {
 	return modelHandler(d.session, args)
 }
 
+// level is the handler for `/level`.
+//
+// It mirrors model's shape: an empty argument reports the state rather than
+// changing it, and a name this build does not have is refused by name rather than
+// guessed at. The table of presets it chooses from, what each one sets and why only
+// these four, is internal/tui/preset.go; this function is just the seam that reads
+// the typed name and reports what happened, the way model is the seam for /model.
+func (d *dispatcher) level(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/level needs an open interface")
+	}
+
+	want := strings.TrimSpace(args)
+	if want == "" {
+		return tui.Result{Text: reportLevel(d.session.Preset())}, nil
+	}
+
+	p, found := tui.LookupPreset(want)
+	if !found {
+		return tui.Result{}, fmt.Errorf("/level %s is not a preset; the presets are %s",
+			want, strings.Join(tui.PresetNames(), ", "))
+	}
+
+	d.session.SetPreset(p)
+	return tui.Result{Text: fmt.Sprintf("the level is %s: %s", p.Name, p.Summary)}, nil
+}
+
+// reportLevel is what `/level` with no argument prints.
+//
+// It names every preset rather than only saying "none", since a reader who has
+// never used /level and asks it what is there should not have to look elsewhere for
+// the list `/help` would otherwise be the only source of.
+func reportLevel(name string) string {
+	if name == "" {
+		return "no level preset is set; the presets are " + strings.Join(tui.PresetNames(), ", ")
+	}
+	return "the level is " + name
+}
+
 // Run executes a typed line.
 //
 // A command the dispatcher does not have is reported by name, and the two cases are
-// told apart. The table in internal/tui lists thirty-nine names and this build
-// implements four, so a reader who typed /copy is told the name is in the table and
-// this build does not run it, rather than being told there is no such command: those
-// are different faults and a reader told the second goes looking for a typo.
+// told apart. The table in internal/tui lists more names than this build implements,
+// so a reader who typed a name that is in the table but not yet in d.commands is told
+// the name is in the table and this build does not run it, rather than being told
+// there is no such command: those are different faults and a reader told the second
+// goes looking for a typo.
 //
 // A line that is not a command is not this function's business. The loop sends a
 // question to the model and a command here, and a dispatcher that also answered
@@ -126,10 +330,56 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 		if _, listed := tui.Lookup(name); listed {
 			return tui.Result{}, fmt.Errorf("/%s is in the table but this build does not run it yet", name)
 		}
-		return tui.Result{}, fmt.Errorf("unknown command /%s", name)
+		return tui.Result{}, fmt.Errorf("unknown command /%s%s", name, didYouMean(name))
 	}
 
 	return h(ctx, d, args)
+}
+
+// didYouMean returns the text appended to "unknown command" for a typed name that is
+// not in the table at all, or "" when nothing typed is close enough to be worth
+// guessing at.
+//
+// It runs only in that one case, deliberately. The other refusal Run gives, /%s is in
+// the table but this build does not run it yet, is for a name that is already a real,
+// listed command; a reader who typed one of those spelled a real command correctly and
+// is not helped by being pointed at a different one, so that branch never reaches this
+// function and its message is untouched by anything here.
+//
+// tui.Suggest does the actual matching (the threshold, the hidden-alias handling and
+// the tie-breaking are its decisions, recorded on its own doc comment), and this
+// function's whole job is turning what it returns into the parenthetical a reader
+// sees: nothing for no match, "(did you mean /x?)" for one, and "(did you mean /x,
+// /y or /z?)" for the small handful of names Suggest ties on.
+func didYouMean(name string) string {
+	return joinDidYouMean(tui.Suggest(name))
+}
+
+// joinDidYouMean turns the names tui.Suggest returns into the parenthetical
+// didYouMean appends, and is kept separate from the Suggest call so the sentence it
+// builds - no text for no guesses, "(did you mean /x?)" for one, the "or"-joined
+// form for a tie - can be tested against a chosen list directly, without needing a
+// typo that happens to tie in the table as it stands today.
+func joinDidYouMean(guesses []string) string {
+	if len(guesses) == 0 {
+		return ""
+	}
+
+	slashed := make([]string, len(guesses))
+	for i, g := range guesses {
+		slashed[i] = "/" + g
+	}
+
+	if len(slashed) == 1 {
+		return fmt.Sprintf(" (did you mean %s?)", slashed[0])
+	}
+
+	// More than one name tied at the same distance. The last is joined with "or"
+	// rather than another comma, so the list reads as a sentence a reader scans
+	// once rather than a bare comma-separated dump that could as easily be a typo
+	// list of its own.
+	head := strings.Join(slashed[:len(slashed)-1], ", ")
+	return fmt.Sprintf(" (did you mean %s or %s?)", head, slashed[len(slashed)-1])
 }
 
 // test is the handler for /test.
@@ -191,6 +441,16 @@ func (d *dispatcher) test(args string) (tui.Result, error) {
 // place the key lives and there is no second copy to fall out of step with the file.
 func (d *dispatcher) cloudflareKey() (string, error) {
 	return d.cfg.CloudflareAPIKey()
+}
+
+// cloudflareReady reports whether a Cloudflare call could be made right now, without
+// building the client. It is the check adr-0000042's capability message names the
+// connector by - the credential is fixed for the session today, set once at
+// configuration load with no command that changes it, but this checks fresh anyway
+// rather than caching a bool, so a later writer never has to remember to invalidate one.
+func (d *dispatcher) cloudflareReady() bool {
+	key, err := d.cloudflareKey()
+	return err == nil && key != ""
 }
 
 // cloudflareClient returns the API client, building it on first use.

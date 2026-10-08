@@ -128,3 +128,7 @@ and section 16 of `distributed-llm-system-scope-2026-10-05.txt` supersedes the
 requirement for separate visible panes, so the third part has no region on the
 current screen. The bell question it raised goes with it. What 0000016 settles about
 the shed order applies to the six regions that are left.
+
+## See also
+
+Supersedes adr-0000001 and the pane arrangement of adr-0000007. Superseded by `UI-redesign.md` (not by adr-0000010 alone, which is itself superseded).

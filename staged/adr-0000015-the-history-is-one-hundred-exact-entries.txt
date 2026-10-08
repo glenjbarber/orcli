@@ -1,6 +1,6 @@
 # 0000015 The history is one hundred exact entries
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It answers a question 0000011 left open
 
@@ -87,3 +87,7 @@ reason context has to survive.
 Nothing in the tree has changed. The line editor in `internal/tui` has its own
 history behaviour for a frame that is being replaced, and neither
 `/autosave` nor `/autocompact` is built.
+
+## See also
+
+Fills a gap left by adr-0000011. Superseded by `UI-redesign.md`.

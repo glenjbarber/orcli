@@ -283,6 +283,22 @@ func TestCompletingAWholeNameFromItsFirstLetter(t *testing.T) {
 	}
 }
 
+// TestLevelIsInTheTableAlongsideVerbosity covers the command this unit adds: it
+// should read the way /verbose and /verbosity already do, an argument-taking name
+// the completer and the help both know about.
+func TestLevelIsInTheTableAlongsideVerbosity(t *testing.T) {
+	c, found := Lookup("level")
+	if !found {
+		t.Fatal("/level is not in the table")
+	}
+	if c.Args == "" {
+		t.Error("/level has no Args, so the completer cannot offer a preset name")
+	}
+	if strings.TrimSpace(c.Summary) == "" {
+		t.Error("/level has no summary")
+	}
+}
+
 // TestTheTableIsFilledInInitRatherThanAVariableInitialiser is the constraint behind
 // the shape of this file.
 //

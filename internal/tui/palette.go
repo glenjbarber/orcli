@@ -42,6 +42,55 @@ type Palette struct {
 	// colour. Whether a terminal draws it is unverified, so it is offered rather
 	// than defaulted to.
 	faint bool
+
+	// paneActive and paneDone are the pane bar's own colours, apart from fg/bg
+	// above and from every Role: a pane's state is not a role a row carries, it
+	// is a fact about a worker that this palette is told about once per draw.
+	// The two hasPaneXxx flags are what let a palette built with neither (every
+	// existing caller, and every caller in a test) keep drawing the pane bar in
+	// chrome exactly as it did before this existed.
+	paneActive, paneDone       RGB
+	hasPaneActive, hasPaneDone bool
+}
+
+// WithPaneColors returns a palette that colours the pane bar while a worker
+// is running, or has just finished, at the pane shown. Either argument may be
+// nil, which leaves that one state drawn in chrome.
+//
+// It is a second method beside NewPalette rather than a parameter on it,
+// for the reason WithFaintDim is: these are configured apart from the ground
+// and the theme, and a caller that wants the ordinary palette untouched by
+// them keeps calling NewPalette alone.
+func (p Palette) WithPaneColors(active, done *RGB) Palette {
+	if active != nil {
+		p.paneActive, p.hasPaneActive = *active, true
+	}
+	if done != nil {
+		p.paneDone, p.hasPaneDone = *done, true
+	}
+	return p
+}
+
+// PaneStyle returns the style the pane bar draws a pane's state in, and
+// whether a configured colour applies. state is "running", "done", or
+// anything else for neither; the caller falls back to its own chrome style
+// when ok is false, which covers colour being off, the state being neither,
+// and no colour configured for the state that applies.
+func (p Palette) PaneStyle(state string) (style tcell.Style, ok bool) {
+	if !p.on {
+		return tcell.StyleDefault, false
+	}
+	switch state {
+	case "running":
+		if p.hasPaneActive {
+			return tcell.StyleDefault.Foreground(p.paneActive.TCellColor()), true
+		}
+	case "done":
+		if p.hasPaneDone {
+			return tcell.StyleDefault.Foreground(p.paneDone.TCellColor()), true
+		}
+	}
+	return tcell.StyleDefault, false
 }
 
 // NewPalette builds a palette for a ground, a theme and whether colour is on.
@@ -333,6 +382,44 @@ func RoleName(role Role) string {
 	default:
 		return fmt.Sprintf("role(%d)", int(role))
 	}
+}
+
+// sweepEntry is one colour the twiddle scrolls through, named so a ground can drop
+// an entry by name rather than by an index that would silently shift if the table
+// grew.
+type sweepEntry struct {
+	RGB
+	name string
+}
+
+// sweepTable is every colour the twiddle scrolls through, before any ground has
+// dropped one. The order is the order the pattern scrolls in.
+var sweepTable = []sweepEntry{
+	{RGB{R: 0xff, G: 0x55, B: 0x55}, "red"},
+	{RGB{R: 0xff, G: 0xaa, B: 0x00}, "orange"},
+	{RGB{R: 0xff, G: 0xee, B: 0x00}, "yellow"},
+	{RGB{R: 0x50, G: 0xfa, B: 0x7b}, "green"},
+	{RGB{R: 0x00, G: 0xd7, B: 0xd7}, "cyan"},
+	{RGB{R: 0x61, G: 0x9c, B: 0xff}, "blue"},
+	{RGB{R: 0x1a, G: 0x1a, B: 0x6e}, "dark blue"},
+	{RGB{R: 0xbd, G: 0x93, B: 0xf9}, "violet"},
+}
+
+// sweepColors returns the twiddle's colour list for a ground.
+//
+// Dark blue is dropped on a dark ground: it is the one entry in sweepTable close
+// enough to a dark terminal's own background to read as the twiddle going blank
+// rather than as a colour turning. A light ground keeps it, since the same value
+// reads as a colour against a light background.
+func sweepColors(ground Ground) []RGB {
+	out := make([]RGB, 0, len(sweepTable))
+	for _, e := range sweepTable {
+		if ground == GroundDark && e.name == "dark blue" {
+			continue
+		}
+		out = append(out, e.RGB)
+	}
+	return out
 }
 
 // GroundCandidates are the grounds offered by completion.

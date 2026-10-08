@@ -16,12 +16,9 @@ import (
 
 // maxToolRounds bounds how many times one turn can call a tool before this gives up
 // and reports the turn stopped rather than looping forever against a model that keeps
-// asking for more.
-//
-// Eight is a judgment, not a derivation: enough for a real multi-step task (read a
-// file, edit it, run a test, check the result) without being indistinguishable from a
-// hang.
-const maxToolRounds = 8
+// asking for more. The large ceiling permits long agent workflows while still making
+// a runaway turn finite.
+const maxToolRounds = 4096
 
 // chatClient is the one method ask needs from *openrouter.Client.
 //
@@ -59,21 +56,46 @@ type chatClient interface {
 // was; this closes the separate, narrower gap ask.go's own doc comment used to name -
 // "no tools are offered" - without deciding the first.
 //
-// # The introduction
+// # Two system messages, not one
 //
-// If CONTEXT.md exists in the session's working directory, its contents are sent as
-// one system message ahead of the question, naming it as the reader's own
-// introduction rather than inventing one. This is narrower than adr-0000042's
-// capability message, which wants a list assembled from live session state
-// (Options, Ready, connector checks) rather than a static file's contents; the two
-// are not the same thing, and this does not implement that record.
-func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string), capture *debugLog, notionToken string) tui.AskFunc {
+// adr-0000042's capability message - orcli naming itself and what this session
+// actually has, assembled from Session.Options()/Ready() and the Cloudflare check -
+// is sent first, built fresh every turn by capabilities. If AGENTS.md also exists in
+// the session's working directory, its contents follow as a second system message,
+// naming it as the reader's own introduction rather than folding it into the first.
+// The two are kept separate because they come from different places and change for
+// different reasons: one reflects this session's live configuration, the other is
+// whatever the reader put in a file.
+func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string) tui.AskFunc {
 	toolset := newToolset(s.Options().WorkingDir, notionToken)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
+	docs := documentation(s.Options().WorkingDir)
 
-	return func(ctx context.Context, question string, level int) error {
-		turnCtx, err := s.Begin(ctx, question, level)
+	return func(ctx context.Context, question string, level int, silent bool) error {
+		begin := s.Begin
+		deliver := s.Deliver
+		notice := s.Notice
+		finishedFn := s.Finished
+		if silent {
+			// The HELO is the only caller that passes silent: its text instructs the
+			// model, it is not something the reader typed, and BeginSilent is the
+			// primitive that sends it to the model without writing it into the log as
+			// a question row. See BeginSilent's own doc comment for why.
+			//
+			// The reply is not silenced the same way. A prior version of this code
+			// swapped Deliver, Notice and Finished to their *Silent counterparts too,
+			// on the theory that the model's own answer to a question the reader
+			// never asked should not surface as a row - but that directly contradicts
+			// maybeSendHELO's own doc comment, which promises the greeting "lands in
+			// the log, the same way any other turn's reply does," and Glen confirmed
+			// (2026-10-07) that the visible greeting is what he actually wants: a
+			// HELO whose reply nobody ever sees is a HELO that might as well not have
+			// run. Only begin stays silent; the question text is synthetic and still
+			// should not show as a fake question row, but the answer is real.
+			begin = s.BeginSilent
+		}
+		turnCtx, err := begin(ctx, question, level)
 		if err != nil {
 			return err
 		}
@@ -85,9 +107,16 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 		model := s.Options().Model
 		approval := string(s.Options().Approval)
 
-		messages := make([]openrouter.Message, 0, 3)
+		messages := make([]openrouter.Message, 0, 4)
+		messages = append(messages, openrouter.Message{
+			Role:    "system",
+			Content: capabilities(s, toolset, cloudflareReady),
+		})
 		if intro != "" {
 			messages = append(messages, openrouter.Message{Role: "system", Content: intro})
+		}
+		if docs != "" {
+			messages = append(messages, openrouter.Message{Role: "system", Content: docs})
 		}
 		messages = append(messages, openrouter.Message{Role: "user", Content: question})
 		for round := 0; round < maxToolRounds; round++ {
@@ -127,10 +156,10 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 					// failure is reported beside it, since the text is usually
 					// more useful than the error alone and a reader handed only
 					// an error has nothing to read.
-					s.Deliver(reply.String(), level)
+					deliver(reply.String(), level)
 					if e.Err != nil {
 						capture.record("stream_error", e.Err.Error())
-						s.Notice(e.Err.Error(), level, tui.RoleFailure)
+						notice(e.Err.Error(), level, tui.RoleFailure)
 						failed = e.Err
 					}
 
@@ -142,8 +171,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			})
 			if err != nil {
 				capture.record("request_error", err.Error())
-				s.Notice(err.Error(), level, tui.RoleFailure)
-				s.Finished("failed")
+				notice(err.Error(), level, tui.RoleFailure)
+				finishedFn("failed")
 				return nil
 			}
 			if failed != nil {
@@ -153,8 +182,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			if len(calls) == 0 {
 				// Deliver is a no-op for an empty reply, so a turn that failed
 				// before any text does not write a blank row.
-				s.Deliver(reply.String(), level)
-				s.Finished(reason)
+				deliver(reply.String(), level)
+				finishedFn(reason)
 
 				// A reply with text in it is the confirmation, and an empty one
 				// is a refusal even when the endpoint called the turn finished.
@@ -163,7 +192,7 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				// evidence would record a model nobody has reached the
 				// endpoint with.
 				if confirmed != nil && reply.Len() > 0 && finished {
-					confirmed(model)
+					confirmed(model, silent)
 				}
 				return nil
 			}
@@ -188,8 +217,8 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			}
 		}
 
-		s.Notice(fmt.Sprintf("stopped after %d rounds of tool calls", maxToolRounds), level, tui.RoleFailure)
-		s.Finished("stopped")
+		notice(fmt.Sprintf("stopped after %d rounds of tool calls", maxToolRounds), level, tui.RoleFailure)
+		finishedFn("stopped")
 		return nil
 	}
 }
@@ -257,16 +286,140 @@ func runTool(toolset []tools.Tool, approval string, call openrouter.ToolCall) st
 	return fmt.Sprintf("tools: no tool named %q", call.Function.Name)
 }
 
-// introduction reads CONTEXT.md from dir, for the one system message a turn sends
-// ahead of the question. A missing file is silence, not a failure: most working
-// directories have none, and a session without one sends no introduction at all
-// rather than an empty one.
+// capabilities builds adr-0000042's system message: orcli naming itself and what
+// this session actually has right now, assembled from the same state the reader's
+// own commands read rather than a second, hand-maintained list that could say
+// something `/model` or `/cloudflare` has already made false.
+//
+// Absence is written out, not omitted - a model told only what exists cannot tell
+// "not configured" from "not asked about yet," which is the position this record
+// exists to keep it out of.
+//
+// Each tool's own Describe().Function.Description is reused verbatim rather than
+// restated, for the same reason: a second copy of what a tool may do is a second
+// copy that goes stale the day the tool's own list changes and this one does not.
+func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() bool) string {
+	var b strings.Builder
+	b.WriteString("You are talking to orcli, a terminal interface that sends your replies " +
+		"straight to the reader's screen. This message names what this session actually " +
+		"has configured right now; anything not named here is not available this turn.\n\n")
+
+	if err := s.Ready(); err != nil {
+		b.WriteString("Model: none configured. " + err.Error() + "\n")
+	} else {
+		opts := s.Options()
+		fmt.Fprintf(&b, "Model: %s, via %s.\n", opts.Model, orNone(opts.Provider))
+	}
+
+	if len(toolset) == 0 {
+		b.WriteString("Tools: none available this session.\n")
+	} else {
+		b.WriteString("Tools:\n")
+		for _, t := range toolset {
+			fmt.Fprintf(&b, "- %s: %s\n", t.Name(), t.Describe().Function.Description)
+		}
+	}
+
+	if cloudflareReady != nil && cloudflareReady() {
+		b.WriteString("Cloudflare: a credential is configured; the connector is available.\n")
+	} else {
+		b.WriteString("Cloudflare: no credential is configured; the connector is not available.\n")
+	}
+
+	// There is no plugin system in this build: nothing in the tree registers a
+	// plugin, enables one, or carries a list of them to read. This is named rather
+	// than left out, on the same "absence is a statement" grounds as every other
+	// line above, so a reader who asks what plugins are enabled is told none can be,
+	// not left to guess whether the question was never asked.
+	b.WriteString("Plugins: no plugin system exists in this build; none can be enabled.\n")
+
+	// /level's active preset, when there is one, is written as its own sentence
+	// rather than folded into the paragraph above: it is an instruction about how
+	// to answer rather than a fact about what is configured, and the two should
+	// not read as one kind of statement.
+	if style := s.PresetStyle(); style != "" {
+		b.WriteString("\n" + style + "\n")
+	}
+
+	return b.String()
+}
+
+// introduction reads AGENTS.md from dir, for the one system message a turn sends
+// ahead of the question. AGENTS.md, not CONTEXT.md: it is the file a tree already
+// names as read by default (see this repository's own AGENTS.md, "This file is read
+// by default"), and the one goose and other tools already converge on, where
+// CONTEXT.md was a project-specific pointer file with no standing outside Loreloom's
+// own coordination documents and no claim on this role. A missing file is silence,
+// not a failure: most working directories have none, and a session without one
+// sends no introduction at all rather than an empty one.
 func introduction(dir string) string {
-	text, err := os.ReadFile(filepath.Join(dir, "CONTEXT.md"))
+	text, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
 		return ""
 	}
 	return string(text)
+}
+
+// heloQuestion is the question a session asks itself once, at the very start, so
+// the reader's screen carries an introduction before they have typed anything.
+// Glen named this exchange the HELO, canonically, after SMTP's own greeting
+// command (2026-10-07).
+//
+// It is sent through the same ask closure as any question a reader types, which is
+// what lets it see the same capability message, the same AGENTS.md introduction,
+// and the same documentation listing every other turn sees - a second path that
+// built its own greeting would be a second thing to keep in step with those three.
+// The documentation listing reaching the model this way, unchanged, is what lets the
+// greeting stay silent about doc/ and staged/ below: the names are already in its
+// context the moment the reader does ask, so the HELO does not need to recite them
+// first to make that true later.
+const heloQuestion = "This is the start of the session, before the reader has " +
+	"typed anything. Greet them briefly: say you are orcli and summarize in a " +
+	"sentence or two what this session has configured from the capability " +
+	"message above."
+
+// documentation lists the names of orcli's own documentation under dir, so the
+// capability message can point the model at doc/ and staged/ by name rather than
+// have it guess at what detail exists or describe this build from training data
+// rather than from the tree it is actually running in.
+//
+// Only names are listed, not contents: a reader who wants the detail behind a
+// capability can read the file itself, through the filesystem tool when one is
+// wired in, and a listing that inlined every file would be the AGENTS.md mistake
+// repeated - a second copy of material that lives in one place already.
+//
+// Either directory missing is silence for that directory, on the same grounds as
+// introduction's missing AGENTS.md: most working directories are not orcli's own
+// checkout, and a session outside it has neither to list.
+func documentation(dir string) string {
+	var b strings.Builder
+	list := func(heading, sub string) {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if err != nil {
+			return
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		if len(names) == 0 {
+			return
+		}
+		fmt.Fprintf(&b, "%s (%s/):\n", heading, sub)
+		for _, name := range names {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+	}
+
+	list("Reference documentation", "doc")
+	list("Design records and ADRs", "staged")
+
+	if b.Len() == 0 {
+		return ""
+	}
+	return "orcli's own documentation, for detail beyond this message:\n\n" + b.String()
 }
 
 // canAsk reports whether a model can be asked anything at all.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
+	"github.com/glenjbarber/orcli/internal/tui"
 )
 
 // zoneBody is a zone holding one record, which is the shape a list call decodes.
@@ -96,11 +97,15 @@ func TestQuitIsTheOneResultThatAsksTheLoopToLeave(t *testing.T) {
 }
 
 // TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne covers the case a
-// reader meets on day one: the table names thirty commands and this build runs two.
+// reader meets on day one: the table names more commands than this build runs.
+// /compact is used here as one still unbuilt - the OpenRouter transport cluster
+// (/key, /search, /models, /freemodels, /attribute) that used to leave /search as
+// the last name in this state is wired in now; it is not the point of the test,
+// only a name this build does not yet have a handler for.
 func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
 
-	_, err := d.Run(context.Background(), "/copy 1")
+	_, err := d.Run(context.Background(), "/compact")
 	if err == nil {
 		t.Fatal("a command this build does not run was accepted")
 	}
@@ -114,6 +119,88 @@ func TestACommandInTheTableButNotRunIsToldApartFromAnUnknownOne(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "table") {
 		t.Errorf("an unknown command was reported as one in the table: %q", err)
+	}
+}
+
+// TestAnUnknownCommandCloseToARealOneGetsASuggestion covers the worked example this
+// feature was asked for: a typo that shares no prefix with the command it was meant
+// to be, so the Tab completer's prefix matching in internal/tui/command.go could
+// never have caught it, but is within tui.Suggest's edit-distance threshold of
+// exactly one real name.
+func TestAnUnknownCommandCloseToARealOneGetsASuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/qiot")
+	if err == nil {
+		t.Fatal("a typo was accepted as a command")
+	}
+
+	want := "unknown command /qiot (did you mean /quit?)"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q", err.Error(), want)
+	}
+}
+
+// TestAnUnknownCommandTooFarFromAnythingGetsNoSuggestion covers the other half of the
+// same feature: a name that is not close enough to any real one, by the threshold
+// internal/tui/suggest.go settles on, is reported exactly the way it always was, with
+// nothing appended. A suggestion offered on every unknown command, whether or not it
+// means anything, is noise dressed as help.
+func TestAnUnknownCommandTooFarFromAnythingGetsNoSuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/nonesuch")
+	if err == nil {
+		t.Fatal("an unknown command was accepted")
+	}
+
+	want := "unknown command /nonesuch"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q (no suggestion appended)", err.Error(), want)
+	}
+}
+
+// TestDidYouMeanJoinsATieWithOr checks the sentence didYouMean builds for a tie
+// directly, independent of whether any single typo in the current table happens to
+// produce one. This is the "list up to a few names rather than just the first found"
+// decision from the PR: when tui.Suggest ties, every tied name is shown, joined as a
+// reader would join a short list in a sentence, so the hint reads naturally rather
+// than as a bare comma-separated dump.
+func TestDidYouMeanJoinsATieWithOr(t *testing.T) {
+	cases := []struct {
+		guesses []string
+		want    string
+	}{
+		{nil, ""},
+		{[]string{"quit"}, " (did you mean /quit?)"},
+		{[]string{"color", "close"}, " (did you mean /color or /close?)"},
+		{[]string{"close", "color", "copy"}, " (did you mean /close, /color or /copy?)"},
+	}
+
+	for _, c := range cases {
+		got := joinDidYouMean(c.guesses)
+		if got != c.want {
+			t.Errorf("joinDidYouMean(%v) = %q, want %q", c.guesses, got, c.want)
+		}
+	}
+}
+
+// TestTheTableButUnbuiltMessageCarriesNoSuggestion covers the other refusal Run
+// gives, the one for a name that IS in internal/tui/command.go's table but has no
+// handler yet. That message is deliberately distinct from "unknown command" and
+// should stay untouched by this feature: a reader who typed a real, listed command
+// correctly does not need to be told to try something else.
+func TestTheTableButUnbuiltMessageCarriesNoSuggestion(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+
+	_, err := d.Run(context.Background(), "/compact")
+	if err == nil {
+		t.Fatal("a command this build does not run was accepted")
+	}
+
+	want := "/compact is in the table but this build does not run it yet"
+	if err.Error() != want {
+		t.Errorf("got %q, want %q (no suggestion appended)", err.Error(), want)
 	}
 }
 
@@ -513,6 +600,89 @@ func TestAnUnbuiltSubcommandIsRefusedByName(t *testing.T) {
 		if !strings.Contains(err.Error(), sub) {
 			t.Errorf("the refusal for %s is %q, want it to name it", sub, err)
 		}
+	}
+}
+
+// TestLevelWithNoArgumentReportsNoPreset covers the reader who has never typed
+// /level, the way /model with no argument reports before any model is chosen.
+func TestLevelWithNoArgumentReportsNoPreset(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.withSession(tui.New(tui.Options{}))
+
+	out, err := d.Run(context.Background(), "/level")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "no level preset is set") {
+		t.Errorf("the report is %q, want it to say none is set", out.Text)
+	}
+	for _, want := range tui.PresetNames() {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("the report does not list the preset %q:\n%s", want, out.Text)
+		}
+	}
+}
+
+// TestLevelSetsThePresetAndIsReported covers the write and the read-back, since a
+// preset that could not be reported would be one the reader cannot confirm took.
+func TestLevelSetsThePresetAndIsReported(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	s := tui.New(tui.Options{})
+	d.withSession(s)
+
+	out, err := d.Run(context.Background(), "/level direct")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct") {
+		t.Errorf("the reply is %q, want it to name the preset", out.Text)
+	}
+	if got := s.Preset(); got != "direct" {
+		t.Errorf("s.Preset() is %q, want %q", got, "direct")
+	}
+	if got := s.Options().Verbosity; got != 1 {
+		t.Errorf("Verbosity is %d, want the direct preset's 1", got)
+	}
+
+	out, err = d.Run(context.Background(), "/level")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.Text, "direct") {
+		t.Errorf("/level with no argument did not report the preset: %q", out.Text)
+	}
+}
+
+// TestLevelWithAnUnknownNameIsRefusedByName covers the typo, since a reader who
+// mistyped a preset should be told what exists rather than left to guess.
+func TestLevelWithAnUnknownNameIsRefusedByName(t *testing.T) {
+	d := over(t, `{"api_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {})
+	d.withSession(tui.New(tui.Options{}))
+
+	_, err := d.Run(context.Background(), "/level nosuch")
+	if err == nil {
+		t.Fatal("an unknown preset was accepted")
+	}
+	if !strings.Contains(err.Error(), "nosuch") {
+		t.Errorf("the refusal is %q, want it to name what was typed", err)
+	}
+}
+
+// TestLevelStyleReachesTheSystemMessage covers the point of PresetStyle: the
+// instruction a preset carries has to be something a turn actually sends, not only
+// a label the status bar shows.
+func TestLevelStyleReachesTheSystemMessage(t *testing.T) {
+	s := tui.New(tui.Options{})
+	d := newDispatcherFor(config.Config{})
+	d.withSession(s)
+
+	if _, err := d.Run(context.Background(), "/level direct"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	msg := capabilities(s, nil, nil)
+	if !strings.Contains(msg, "Be direct") {
+		t.Errorf("the system message does not carry the preset's style:\n%s", msg)
 	}
 }
 

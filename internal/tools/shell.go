@@ -94,6 +94,7 @@ var shellPermitted = []string{
 	"jq",
 	"ps",
 	"dmesg",
+	"notmuch",
 
 	// Writers.
 	"gh",
@@ -172,6 +173,13 @@ var pathShapes = map[string]pathShape{
 	// ordinary word, so any other shape would resolve it as a file name and refuse
 	// the call, which is the defect the noPaths shape exists to prevent.
 	"dmesg": noPaths,
+
+	// notmuch is the same shape for the same reason: an email indexing and search
+	// tool whose arguments are a subcommand (search, show, tag, count, ...) and a
+	// query - Xapian query syntax, ordinary words and operators, never a path into
+	// this tree. Any shape that expected one would resolve a query term as a file
+	// name and refuse the call.
+	"notmuch": noPaths,
 }
 
 // refusedOptions are the options each program may not be given, by name.

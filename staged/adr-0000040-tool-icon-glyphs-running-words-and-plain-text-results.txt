@@ -1,6 +1,6 @@
 # 0000040 Tool icon glyphs, running words, and plain-text results
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles backlog items 27, 28, and 29 in
   `QUESTIONS.md`, filling in specifics 0000028 left open
@@ -61,3 +61,7 @@ Nothing from backlog items 27, 28, or 29.
 ## Notes
 
 Nothing in the tree has changed. There is no tool line drawn in the tree.
+
+## See also
+
+Supersedes adr-0000028's icon scheme. Superseded by `UI-redesign.md`.

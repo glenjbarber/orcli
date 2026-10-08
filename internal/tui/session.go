@@ -1,35 +1,37 @@
 // Package tui draws the interface.
 //
-// Nothing here exists yet. This file holds the log, which is the part of the
-// frame every other decision hangs off: a downward-scrolling sequence of rows
-// written into the normal screen buffer, the way `brew` reports a run. The header,
-// the pane and the fixed input block are gone, so the log is what the reader
-// reads, what `/copy` copies, and what `/search` searches.
-//
-// # Why a log rather than a frame
-//
-// The frame that preceded this one was redrawn whole at every repaint, which is
-// what a fixed layout needs and the wrong model for output that arrives over
-// minutes. A model answering a question one tool call at a time produces rows that
-// belong in the order they happened, and a reader who scrolls back to compare two
-// tool results is reading history rather than a viewport.
-//
-// The cost of a log is that the reader's own scrollback is where the transcript
-// lives, so the client must stop taking it: the alternate screen is given up, and
-// what was on the screen before the client started comes back when it stops.
+// The screen is a frame: five fixed rows below a scrollback region that takes
+// whatever height is left. The fixed rows are the pane bar, two status bars, one
+// blank separator line, and the prompt, in that order from the bottom; see the
+// comment above barRows in stack.go for their order and rationale. The
+// scrollback above them holds the log: a downward-scrolling sequence of rows,
+// newest just above the prompt, oldest pushed off the top as it grows. This file
+// holds that log, along with the session and the terminal check.
 //
 // # What this file is not
 //
-// It is not the whole package. The palette, the line editor, the terminal control,
-// the session and the command table are separate concerns with their own
-// decisions, and the design record at DESIGN-NOTES.md describes where each of them
-// is headed.
+// It is not the whole package. The palette, the line editor, the terminal
+// control, and the command table are separate concerns with their own files and
+// their own decisions.
+//
+// # History
+//
+// An earlier version of this file described a log with no frame at all: the
+// alternate screen given up, and the reader's own scrollback carrying the
+// transcript, because the frame that preceded it was redrawn whole at every
+// repaint, which is the wrong model for output that arrives over minutes. That
+// was superseded (2026-10-06) when the frame returned, this time redrawing only
+// what changed rather than the whole screen at every repaint (see paint in
+// run.go); it carries forward loreloom/UI-redesign.md's shape, which stack.go
+// describes.
 package tui
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 )
 
 // Options is what a session is built from.
@@ -72,8 +74,36 @@ type Options struct {
 	// arriving.
 	Bell bool
 
+	// BreakInterval is how long the session runs before a screen-break
+	// reminder interrupts it. Zero turns the reminder off: a caller that wants
+	// no reminder at all says so with the zero value rather than with a
+	// sentinel duration that reads as a figure somebody chose.
+	BreakInterval time.Duration
+
+	// BreakBell reports whether the terminal bell is rung when a screen break
+	// starts. It is independent of Bell above, which is about a reply arriving
+	// rather than about a break starting.
+	BreakBell bool
+
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
+
+	// CopyMode reports whether the screen is held still for a terminal-native
+	// copy.
+	//
+	// It is a field on Options rather than state kept privately in run.go, for
+	// the same reason Mouse and Color are: /copymode has to move the live
+	// session's own copy, not only whatever a redraw happens to read, and a
+	// status bar built from a stale Options would answer the reader's toggle
+	// with the mode they just left.
+	//
+	// While it is on, paint() does not advance the twiddle sweep or recolor it,
+	// and status() does not refresh the stat fields (held, folded, workers,
+	// queue, and the rest) - both freeze their last-computed values instead of
+	// recomputing them, so a reader's terminal-native click-drag selection is
+	// not fought by a screen repainting under it. The log itself still renders
+	// normally: only the footer's noise is held still.
+	CopyMode bool
 
 	// Cognito reports that nothing is to be recorded.
 	//
@@ -82,6 +112,32 @@ type Options struct {
 	// a file records what it did even though the transcript records nothing, and a
 	// reader who asked for nothing recorded should not get a findings file.
 	Cognito bool
+
+	// PaneActiveColor is the colour the pane bar is drawn in while a worker is
+	// running at the shown pane. Nil leaves the bar in chrome, the way it drew
+	// before this existed, and is what a session built with no opinion about it
+	// (every test in this package but the ones that ask for it) gets.
+	//
+	// It is separate from Color above on purpose: Color is the plain on/off
+	// toggle this package already had, and this is a second, distinct pair of
+	// colours for pane state that only applies once Color is on.
+	PaneActiveColor *RGB
+
+	// PaneDoneColor is the colour the pane bar is drawn in once a worker at the
+	// shown pane has finished on its own, and keeps drawing in until another
+	// worker starts there. See Session.PaneState for why "until the next one
+	// starts" rather than a timed flash: there is no clock in the frame to lose
+	// a race against, and a reader who has not looked back since still finds
+	// the pane coloured the way they left it.
+	PaneDoneColor *RGB
+
+	// Verbosity is how much the model is asked to answer with, 0 to 5.
+	//
+	// It starts at zero, unchanged from today's default, and nothing moves it
+	// until the reader asks: /level's preset is the one thing in this build that
+	// writes it (see internal/tui/preset.go), and there is no /verbosity handler
+	// yet even though the name is in the command table.
+	Verbosity int
 }
 
 // Approval is the mode a tool call is settled under.
@@ -140,6 +196,18 @@ type Session struct {
 	// way it carried none when the loop held it.
 	editor Editor
 
+	// history is the record of lines this session has sent, and the walk Up
+	// and Down take through it.
+	//
+	// It lives here rather than on the editor for the same reason the editor
+	// itself lives here and not on the loop that draws it: DESIGN.md §3
+	// gives a session the input history as something it owns, alongside the
+	// messages and the transcript, so a second pane gets a history of its
+	// own rather than one shared with the pane it is not showing. Nothing
+	// else touches it concurrently, so, like the editor, it carries no lock
+	// of its own.
+	history History
+
 	mu     sync.RWMutex
 	state  State
 	detail string
@@ -157,6 +225,74 @@ type Session struct {
 	// is: Shift+Up/Shift+Down move it from the input goroutine while paint reads it
 	// from the same or a timer goroutine.
 	scroll int
+
+	// lastBreak is when the last screen break ended, or when the session
+	// started if none has yet. BreakDue measures from it rather than from a
+	// ticking countdown of its own, so the figure survives whatever paused or
+	// resumed the repaint tick without drifting.
+	lastBreak time.Time
+
+	// breakEnd is when the break in progress is due to end. It is the zero
+	// time while no break is running, which TickBreak never mistakes for a due
+	// time because it only reads this field while state is StateBreak.
+	breakEnd time.Time
+
+	// helo reports whether the turn now in flight, if any, is the session's own
+	// startup HELO - the one exchange BeginSilent is ever called for. The figure
+	// field reads this to show "Connecting..." in place of the ordinary
+	// thinking/working words, since "thinking" describes a model reasoning about
+	// a question, not a client proving its credential and model for the first
+	// time. It is set in BeginSilent and cleared in Finished, so it never outlives
+	// the one turn it describes.
+	helo bool
+
+	// breakInput reports whether a key reached the session while the current
+	// break was showing. A reader who kept typing through the reminder has not
+	// taken the break, and TickBreak reads this to decide whether to say so
+	// rather than close out the break as if they had.
+	breakInput bool
+
+	// breakExtended reports whether this break has already been given its one
+	// second chance - the halved countdown TickBreak runs once, and only once,
+	// when breakInput is set. A reader still typing through that halved period
+	// gets no second halving; the break ends at its close regardless.
+	breakExtended bool
+
+	// preset is the name of the /level preset in force, or "" when none has been
+	// set. It is guarded by mu for the reason opts.Model is: /level runs on the
+	// input goroutine and a turn reads it on the request goroutine.
+	//
+	// This is unrelated to levels above (and to Level/Levels below): those name a
+	// conversation branch a pane reaches with /copy and /btw. /level names a
+	// bundle of reply characteristics. The two share an English word and nothing
+	// else - see preset.go's doc comment for the same note from the other side.
+	preset string
+
+	// pane is the name of the pane `/pane` last asked for: "main", "delegate" or
+	// "spawn". It starts at "main" rather than "", because run.go's status
+	// builder wrote the literal "main" into fieldPane before this field existed
+	// (adr-0000007's multiplexer was never built, so there was only ever one
+	// pane to name), and a session that started with no name there would show a
+	// blank pane bar until the reader typed `/pane` once.
+	//
+	// There is still only one scrollback today: every level's rows are drawn in
+	// the same log regardless of what this says. What `/pane` changes is which
+	// name the bar reports and, through fieldPaneState, which colour it draws
+	// in - the one piece of the three-pane design (adr-0000020) this build can
+	// honor without the multiplexer stack.go's own comment says was never
+	// built. A reader who wants to see a worker's or a delegate's own rows
+	// still reaches them with `/copy N`, not by switching panes.
+	pane string
+
+	// queue holds the follow-up prompts `/queue` has added, oldest first.
+	//
+	// It is guarded by mu for the same reason preset is: `/queue` appends from
+	// the input goroutine and the turn-finish path in run.go drains it from the
+	// goroutine a turn runs on. A slice rather than a channel, because the
+	// length has to be read for fieldQueue's count without taking anything out
+	// of it, and a channel read for that would either block or require a
+	// select with a default on every repaint.
+	queue []string
 }
 
 // State is what the client is doing, and it is one of four.
@@ -177,19 +313,32 @@ const (
 	StateWorking State = "working"
 	// StatePaused is the reader holding the log still while a turn continues.
 	StatePaused State = "paused"
+	// StateBreak is a screen-break reminder showing, counting down to when the
+	// reader may resume.
+	StateBreak State = "break"
 )
+
+// breakDuration is how long a screen break lasts once it starts.
+//
+// It is fixed rather than configurable: the approved design makes the
+// interval before a break the configurable figure and the break itself a
+// fixed two minutes, the length an eye needs to recover from near focus.
+const breakDuration = 2 * time.Minute
 
 // New returns a session holding the log and nothing else.
 //
 // The log starts with one row: the banner. A session that opens onto an empty screen
 // gives a reader nothing to tell it has started, and a row that names the program is
-// the one line of state a reader wants before typing anything.
+// the one line of state a reader wants before typing anything. The banner names the
+// frame this package draws - the pane bar, the two status bars, and the scrollback
+// log above them (see the package doc comment) - rather than the pre-redesign
+// description of a bare log, which stopped being true once the frame returned.
 func New(opts Options) *Session {
-	s := &Session{opts: opts, state: StateIdle, levels: newLevels()}
+	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now(), history: NewHistory()}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
-		Text:  "orcli, a log and nothing else yet",
+		Text:  "orcli",
 		Spans: []Span{{Start: 0, End: 5, Role: RoleEmphasis}},
 	})
 	return s
@@ -232,6 +381,197 @@ func (s *Session) SetModel(model string) error {
 	return nil
 }
 
+// SetBell changes whether the terminal bell is rung when a reply finishes
+// arriving.
+//
+// It is a method rather than a caller reaching into the options, for the reason
+// SetModel gives: the frame's status bar reads Bell off a copy of the options taken
+// at draw time, so a command that changed the field some other way would leave the
+// bar answering a question nobody asked. There is nothing to refuse here the way an
+// empty model is refused by SetModel, since both true and false are states a reader
+// might want.
+func (s *Session) SetBell(on bool) {
+	s.mu.Lock()
+	s.opts.Bell = on
+	s.mu.Unlock()
+}
+
+// SetMouse changes whether mouse reporting is on.
+//
+// It exists for the same reason SetBell does, and /pause calls it as well as
+// /mouse: a screen held still for the reader is a screen where the wheel ought to
+// do something different, which is the whole of what /pause's own summary asks for
+// alongside holding the log.
+func (s *Session) SetMouse(on bool) {
+	s.mu.Lock()
+	s.opts.Mouse = on
+	s.mu.Unlock()
+}
+
+// SetCopyMode changes whether the screen is held still for a terminal-native copy.
+//
+// It is a method for the same reason SetMouse is one: CopyMode is read off a copy
+// of the options paint() and status() take, and a write that bypassed this would
+// leave that copy answering a question /copymode already changed the answer to.
+func (s *Session) SetCopyMode(on bool) {
+	s.mu.Lock()
+	s.opts.CopyMode = on
+	s.mu.Unlock()
+}
+
+// SetCognito changes whether nothing is to be recorded.
+//
+// It is a method for the same reason SetBell is one: Cognito is read off a copy of
+// the options the status bar takes at draw time, and a write that bypassed this
+// would leave that copy answering a question the reader already changed the answer
+// to.
+func (s *Session) SetCognito(on bool) {
+	s.mu.Lock()
+	s.opts.Cognito = on
+	s.mu.Unlock()
+}
+
+// SetColor changes whether colour output is on.
+//
+// The session's own copy is what the status bar and the palette read, so /color has
+// to move this as well as whatever it writes to the configuration file: a choice
+// written to disk and not to the running session is a choice the reader does not see
+// until they restart, which is not what "save the choice" promises alongside taking
+// effect now.
+func (s *Session) SetColor(on bool) {
+	s.mu.Lock()
+	s.opts.Color = on
+	s.mu.Unlock()
+}
+
+// SetApproval changes the mode a tool call is settled under.
+//
+// It is a method for the same reason SetModel is: `/approve` is read by a turn in
+// flight on the request goroutine (see ask.go's `approval := string(s.Options().Approval)`),
+// so the write and every read of it have to go through the one lock rather than
+// through a field a command reaches into directly.
+func (s *Session) SetApproval(mode Approval) {
+	s.mu.Lock()
+	s.opts.Approval = mode
+	s.mu.Unlock()
+}
+
+// SetPreset makes a /level preset the active one, moving Verbosity to what it
+// defines.
+//
+// It takes the preset's data rather than a name the session resolves for itself,
+// since the table it would be resolved against lives in preset.go beside the
+// command's own doc comments, and a session that imported that lookup would carry a
+// dependency it has no other reason to hold.
+func (s *Session) SetPreset(p Preset) {
+	s.mu.Lock()
+	s.preset = p.Name
+	s.opts.Verbosity = p.Verbosity
+	s.mu.Unlock()
+}
+
+// Preset reports the name of the active /level preset, or "" when none has been
+// set. /level with no argument reports this.
+func (s *Session) Preset() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.preset
+}
+
+// PresetStyle reports the active preset's style instruction, or "" when no preset
+// is active. capabilities() in cmd/orcli/ask.go reads this to add the instruction
+// to the system message sent with every turn, which is how /level reaches tone and
+// not only Options().Verbosity.
+func (s *Session) PresetStyle() string {
+	s.mu.RLock()
+	name := s.preset
+	s.mu.RUnlock()
+
+	if name == "" {
+		return ""
+	}
+	p, found := LookupPreset(name)
+	if !found {
+		return ""
+	}
+	return p.Style
+}
+
+// defaultPane is what `/pane` reports before the reader has ever typed it, and
+// the pane the bar showed, by the literal string in run.go's status builder,
+// before this field existed.
+const defaultPane = "main"
+
+// panes are the names `/pane` accepts, matching the Args the command table
+// documents for it ("main|delegate|spawn") exactly. It is a map rather than a
+// switch at the call site, so a dispatcher building the "the panes are ..."
+// refusal and the completer that will eventually offer these names read the
+// same list.
+var panes = map[string]bool{"main": true, "delegate": true, "spawn": true}
+
+// SetPane makes name the pane `/pane` reports, once name is one of the three
+// this build knows. An unknown name is refused rather than stored, since a
+// pane the bar then reports but nothing ever named again is a typo the reader
+// has no way to notice.
+func (s *Session) SetPane(name string) error {
+	if !panes[name] {
+		return fmt.Errorf("%q is not a pane: the panes are main, delegate, spawn", name)
+	}
+
+	s.mu.Lock()
+	s.pane = name
+	s.mu.Unlock()
+	return nil
+}
+
+// Pane reports the pane `/pane` last asked for, defaultPane until it has ever
+// been called.
+func (s *Session) Pane() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.pane == "" {
+		return defaultPane
+	}
+	return s.pane
+}
+
+// Enqueue adds text to the end of the follow-up queue `/queue` builds.
+//
+// Nothing here decides when it is sent; that is Drain's caller's decision
+// (see run.go's turn-finish path), and keeping the two separate is what lets
+// this stay the one-line append it is.
+func (s *Session) Enqueue(text string) {
+	s.mu.Lock()
+	s.queue = append(s.queue, text)
+	s.mu.Unlock()
+}
+
+// Drain removes and returns the oldest queued prompt, and reports whether
+// there was one.
+//
+// FIFO rather than a stack: a reader who queued three follow-ups in order
+// typed them in the order they want them sent, and a last-in-first-out queue
+// would answer the most recent one first, which is not the order they were
+// written down in.
+func (s *Session) Drain() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.queue) == 0 {
+		return "", false
+	}
+	text := s.queue[0]
+	s.queue = s.queue[1:]
+	return text, true
+}
+
+// QueueLen reports how many prompts are waiting, for fieldQueue's count.
+func (s *Session) QueueLen() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.queue)
+}
+
 // State reports what the client is doing, and any detail worth showing beside it.
 //
 // The detail is a second value rather than a suffix on the state, because the state
@@ -265,6 +605,15 @@ func (s *Session) SetState(state State, detail string) {
 // one editor per session, matching the one prompt a focused session shows.
 func (s *Session) Editor() *Editor {
 	return &s.editor
+}
+
+// History returns the record of lines this session has sent.
+//
+// It returns a pointer for the same reason Editor does: a caller reaches
+// History's own Record, Up and Down directly, and there is one history per
+// session, matching the one input field a focused session shows.
+func (s *Session) History() *History {
+	return &s.history
 }
 
 // SetCancel records the cancel for the turn now starting.
@@ -307,7 +656,7 @@ func (s *Session) StopTurn() context.CancelFunc {
 // session does not know how tall the frame drawing it is; a frame asked to draw an
 // offset past what it can show clamps that itself at draw time. Shift+Up/Shift+Down
 // are the keys chosen for this (2026-10-06), distinct from the plain arrow keys, which
-// are reserved for history (adr-0000011/0000015, not yet built).
+// are reserved for history, which Up/Down now walk.
 func (s *Session) ScrollUp(n int) {
 	s.mu.Lock()
 	s.scroll += n
@@ -365,6 +714,28 @@ func (s *Session) Ready() error {
 	return nil
 }
 
+// Restore replaces the session's log with rows read back from a saved
+// conversation, and returns the viewport to the live edge.
+//
+// `/load` is this method's one caller, and it replaces the log rather than
+// appending to it: a reader who loads a conversation wants exactly what was
+// saved in front of them, not that conversation stacked underneath whatever
+// they had been looking at. The scroll offset is reset for the same reason -
+// an offset measured against the log that was there is meaningless against the
+// one that has just replaced it, and a reader left scrolled away from the live
+// edge of a conversation they just asked to see would find nothing on the
+// screen.
+//
+// The levels table, the workers and the model are untouched here; `/load`
+// itself decides which of those a restored conversation also carries.
+func (s *Session) Restore(rows []Row) {
+	s.log.Restore(rows)
+
+	s.mu.Lock()
+	s.scroll = 0
+	s.mu.Unlock()
+}
+
 // Begin turns a question into a turn and reports what it took.
 //
 // The context is the caller's so that stopping a model stops the request and not
@@ -379,6 +750,55 @@ func (s *Session) Ready() error {
 // thing that will hold them is a separate concern, so this returns what a caller needs
 // to start one and says nothing about what it will carry.
 func (s *Session) Begin(ctx context.Context, question string, level int) (context.Context, error) {
+	return s.begin(ctx, question, level, true)
+}
+
+// BeginSilent is Begin for a question the reader never typed.
+//
+// The startup HELO is the one caller: its text is sent to the model so it knows
+// what to greet about, but it is an instruction this session wrote to itself, not a
+// line the reader submitted, and the log is a record of what the reader and the
+// model said to each other. Writing the hello's own instruction into it as a
+// question row would misrepresent it as something the reader typed. Everything
+// else Begin does - checking readiness, moving the session to StateThinking - still
+// happens, so the turn that follows looks like any other to the rest of the
+// session; only the row that would have named the question is left out. The reply
+// still reaches the log normally, through Deliver, because Deliver does not
+// re-derive anything from the question it is answering.
+//
+// This is also where helo is set, since this method is itself the one reliable
+// signal that the turn about to run is the HELO and nothing else ever calls it.
+// A failure here (Ready, or an empty question) never reaches StateThinking at
+// all, so the flag is cleared again immediately rather than left set for a turn
+// that never actually started.
+func (s *Session) BeginSilent(ctx context.Context, question string, level int) (context.Context, error) {
+	s.mu.Lock()
+	s.helo = true
+	s.mu.Unlock()
+
+	turnCtx, err := s.begin(ctx, question, level, false)
+	if err != nil {
+		s.mu.Lock()
+		s.helo = false
+		s.mu.Unlock()
+	}
+	return turnCtx, err
+}
+
+// HELOInFlight reports whether the turn now running, if any, is the session's
+// own startup HELO. See helo's own doc comment for what reads this and why.
+func (s *Session) HELOInFlight() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.helo
+}
+
+// begin is the shared body of Begin and BeginSilent, differing only in whether the
+// question itself becomes a row. Keeping one implementation behind both exported
+// names is what keeps the readiness check and the state transition from drifting
+// apart between a turn that is shown and one that is not - the two should behave
+// identically except for the one row Begin's own doc comment describes.
+func (s *Session) begin(ctx context.Context, question string, level int, record bool) (context.Context, error) {
 	if err := s.Ready(); err != nil {
 		return nil, err
 	}
@@ -386,12 +806,14 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 		return nil, ErrNoQuestion
 	}
 
-	s.log.Append(Row{
-		Kind:  KindQuestion,
-		Level: level,
-		Text:  question,
-		Spans: []Span{{Start: 0, End: len(question), Role: RoleEmphasis}},
-	})
+	if record {
+		s.log.Append(Row{
+			Kind:  KindQuestion,
+			Level: level,
+			Text:  question,
+			Spans: []Span{{Start: 0, End: len(question), Role: RoleEmphasis}},
+		})
+	}
 
 	s.SetState(StateThinking, "")
 	_ = ctx
@@ -409,6 +831,11 @@ func (s *Session) Begin(ctx context.Context, question string, level int) (contex
 // Text is written whole rather than a piece at a time, which is the decision the
 // interface was redesigned for. A reply held for its turn arrives as a block, so
 // the folding and the copy path see the same text the reader does.
+//
+// The row's spans come from ParseMarkdown, run here rather than by ask.go's
+// caller - see ParseMarkdown's own doc comment for why this is the seam: every
+// reply, from every caller of Deliver, is styled the same way with nothing for
+// a caller to remember to do first.
 func (s *Session) Deliver(text string, level int) {
 	if text == "" {
 		return
@@ -422,7 +849,7 @@ func (s *Session) Deliver(text string, level int) {
 		s.SetState(StateWorking, "")
 	}
 
-	s.log.Append(Row{Kind: KindReply, Level: level, Text: text})
+	s.log.Append(Row{Kind: KindReply, Level: level, Text: text, Spans: ParseMarkdown(text)})
 }
 
 // Notice records a message from the client: a refusal, a failure, a milestone.
@@ -446,6 +873,10 @@ func (s *Session) Notice(text string, level int, role Role) {
 // reader who stopped a model should not be told something is still running. The
 // detail carries why, so the bar says `idle, stopped` rather than making the reader
 // work out which kind of not-running this is.
+//
+// Every turn ends here, the HELO included, so this is also where helo is
+// cleared - the one point every path through a turn, success or failure,
+// passes through on its way back to idle.
 func (s *Session) Finished(reason string) {
 	s.log.Append(Row{
 		Kind:  KindNotice,
@@ -453,7 +884,141 @@ func (s *Session) Finished(reason string) {
 		Text:  reason,
 		Spans: []Span{{Start: 0, End: len(reason), Role: RoleDim}},
 	})
+	s.mu.Lock()
+	s.helo = false
+	s.mu.Unlock()
 	s.SetState(StateIdle, "")
+}
+
+// BreakDue reports whether a screen-break reminder is due at now.
+//
+// It is due only while the session is idle. A turn in flight is not
+// interrupted by a reminder unrelated to it, and a break already showing is
+// not due a second time, so a caller can poll this on every tick without
+// guarding it itself.
+func (s *Session) BreakDue(now time.Time) bool {
+	if s.opts.BreakInterval <= 0 {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state != StateIdle {
+		return false
+	}
+	return now.Sub(s.lastBreak) >= s.opts.BreakInterval
+}
+
+// StartBreak begins a screen-break reminder at now, lasting breakDuration.
+//
+// The prompt is cleared, matching the approved interaction: the break shows a
+// blank input box rather than one still holding what the reader had typed,
+// and that input box stays usable through the break rather than being locked.
+func (s *Session) StartBreak(now time.Time) {
+	s.mu.Lock()
+	s.state = StateBreak
+	s.detail = formatRemaining(breakDuration)
+	s.breakEnd = now.Add(breakDuration)
+	s.breakInput = false
+	s.breakExtended = false
+	s.mu.Unlock()
+
+	s.editor.Reset()
+	text := "screen break: look away from the screen for two minutes"
+	s.log.Append(Row{
+		Kind:  KindNotice,
+		Level: 0,
+		Text:  text,
+		Spans: []Span{{Start: 0, End: len("screen break"), Role: RoleEmphasis}},
+	})
+}
+
+// NoteBreakActivity records that a key reached the session right now.
+//
+// It is a no-op outside a running break - nothing before or after one reads
+// breakInput - so every caller can report every key unconditionally rather
+// than first checking the state itself.
+func (s *Session) NoteBreakActivity() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == StateBreak {
+		s.breakInput = true
+	}
+}
+
+// TickBreak advances a running break's countdown, or closes it out once
+// breakEnd has passed.
+//
+// It is driven by the repaint tick rather than by a timer of its own, since
+// the frame already wakes on an interval and a second clock could disagree
+// with the first about when the break is over.
+//
+// A close has two shapes. Ordinarily the break just ends: state returns to
+// idle, lastBreak resets so the next one is a full BreakInterval away, and
+// the reader is told it ended. But a reader who kept typing through the
+// reminder (breakInput) has not taken the break, and saying it "ended" to
+// someone who never stopped would be telling them something that did not
+// happen. The first such close instead halves the remaining time and tries
+// once more, silently; only a second close - the halved period's own, which
+// gets no further halving regardless of whether typing continued through it
+// - resets lastBreak and ends the break, and even then without the "ended"
+// line if the reader was still typing at the close that ends it.
+func (s *Session) TickBreak(now time.Time) {
+	s.mu.Lock()
+	if s.state != StateBreak {
+		s.mu.Unlock()
+		return
+	}
+
+	remaining := s.breakEnd.Sub(now)
+	if remaining > 0 {
+		s.detail = formatRemaining(remaining)
+		s.mu.Unlock()
+		return
+	}
+
+	if s.breakInput && !s.breakExtended {
+		s.breakExtended = true
+		s.breakInput = false
+		half := breakDuration / 2
+		s.breakEnd = now.Add(half)
+		s.detail = formatRemaining(half)
+		s.mu.Unlock()
+
+		s.log.Append(Row{
+			Kind:  KindNotice,
+			Level: 0,
+			Text:  "screen break: still there - one more minute, then this reminder lets go",
+			Spans: []Span{{Start: 0, End: len("screen break"), Role: RoleEmphasis}},
+		})
+		return
+	}
+
+	tookNoBreak := s.breakInput
+	s.state = StateIdle
+	s.detail = ""
+	s.lastBreak = now
+	s.mu.Unlock()
+
+	if tookNoBreak {
+		return
+	}
+	s.log.Append(Row{
+		Kind:  KindNotice,
+		Level: 0,
+		Text:  "screen break ended",
+		Spans: []Span{{Start: 0, End: len("screen break ended"), Role: RoleDim}},
+	})
+}
+
+// formatRemaining renders a duration as the countdown the state field shows,
+// rounded to the nearest second so the figure does not flicker between two
+// seconds a tick apart.
+func formatRemaining(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second) / time.Second)
+	return fmt.Sprintf("%dm%02ds remaining", total/60, total%60)
 }
 
 // RowsAt returns the rows at a level, which is what `/copy N` copies.

@@ -101,3 +101,7 @@ The pane zero broker direction, in section 16 of
 `orcli-broker-resume-notes.md`, makes the pane bar's withdrawal part of a larger
 move rather than a local one. It is recorded in `ANSWERS.md` and is not
 superseded by this record.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000037, which extends the shed order this record settles.

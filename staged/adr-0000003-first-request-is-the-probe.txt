@@ -1,6 +1,6 @@
 # 0000003 The first request is the connection test
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: a command in the table that tested the connection and reported the
   key, with no handler behind it
@@ -71,3 +71,7 @@ The preference that gets written is the model, and it is written without
 recording the model it replaced. A first request is a probe rather than a move,
 and treating it as one would send a reader back to a model they never chose. See
 0000004.
+
+## See also
+
+Supersedes nothing; describes behaviour still in the tree. Superseded by `UI-redesign.md`. See also adr-0000004, the companion record about the model choice, which refers back to this one.

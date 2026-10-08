@@ -44,6 +44,16 @@ type Config struct {
 	Model string `json:"model,omitempty"`
 
 	// Provider is the endpoint host, defaulting to the OpenRouter one.
+	//
+	// It is read as a plain string rather than validated against an enum,
+	// which is what lets "groq" be a legal value today with no change to this
+	// package: cmd/orcli is what reads this field to choose between its two
+	// transports (see cmd/orcli/provider.go's isGroqProvider), and this
+	// package's job stops at carrying whatever the reader wrote. The single
+	// APIKey field above is still read as the credential for whichever
+	// provider this names - this build holds one credential per session, for
+	// whichever one provider that session is configured to use, not one
+	// credential per provider at once.
 	Provider string `json:"provider,omitempty"`
 
 	// AttributionID names who asked, and is sent with every request so the
@@ -67,10 +77,37 @@ type Config struct {
 	// Bell reports whether the terminal bell is rung when a reply arrives.
 	Bell bool `json:"bell,omitempty"`
 
+	// BreakIntervalMinutes is how long a session runs before a screen-break
+	// reminder interrupts it, in minutes. It is validated in decode rather than
+	// at every use, on the same grounds as Approval: a file naming zero or a
+	// negative figure is reported by name rather than substituted for.
+	BreakIntervalMinutes int `json:"break_interval_minutes,omitempty"`
+
+	// BreakBell reports whether the terminal bell is rung when a screen break
+	// starts. It is separate from Bell above: a reader who wants to know a
+	// reply arrived but not be startled by a break reminder, or the reverse,
+	// is choosing between two different events and needs two different knobs.
+	BreakBell bool `json:"break_bell,omitempty"`
+
 	// Color reports whether colour output is on. Off is the default, and is
 	// decided by this file and by /color alone: NO_COLOR and every other
 	// environment variable are ignored, on the same terms as the API key.
 	Color bool `json:"color,omitempty"`
+
+	// PaneActiveColor is the colour (`#rrggbb`) the pane bar is drawn in while a
+	// worker is running at the shown pane. It is a second, distinct toggle from
+	// Color above: Color decides whether colour is written at all, and this and
+	// PaneDoneColor below decide which colour a pane's own state is shown in
+	// once it is. It only has an effect while Color is on.
+	PaneActiveColor string `json:"pane_active_color,omitempty"`
+
+	// PaneDoneColor is the colour (`#rrggbb`) the pane bar is drawn in once a
+	// worker at the shown pane has finished on its own, and stays in until
+	// another worker starts there (see tui.Session.PaneState). It is separate
+	// from PaneActiveColor for the reason the running and finished states are
+	// separate at all: a reader who glances at the bar has to tell "still
+	// working" from "done, come read it" apart without switching to the pane.
+	PaneDoneColor string `json:"pane_done_color,omitempty"`
 
 	// Verbosity is how much the model is asked to answer with, 0 to 6.
 	Verbosity int `json:"verbosity,omitempty"`
@@ -120,16 +157,32 @@ type Config struct {
 // design names as the default.
 func Default() Config {
 	return Config{
-		Model:         "",
-		Provider:      "openrouter.ai",
-		AttributionID: "",
-		Mouse:         false,
-		Bell:          false,
-		Color:         false,
-		Verbosity:     0,
-		Approval:      string(ApprovalAsk),
+		Model:                "",
+		Provider:             "openrouter.ai",
+		AttributionID:        "",
+		Mouse:                false,
+		Bell:                 false,
+		BreakIntervalMinutes: 22,
+		BreakBell:            false,
+		Color:                false,
+		PaneActiveColor:      DefaultPaneActiveColor,
+		PaneDoneColor:        DefaultPaneDoneColor,
+		Verbosity:            0,
+		Approval:             string(ApprovalAsk),
 	}
 }
+
+// DefaultPaneActiveColor and DefaultPaneDoneColor are the colours a reader
+// gets who has set neither. They are the same values internal/tui's own role
+// table already uses - RoleList's blue for a worker running, RoleSuccess's
+// green for one that finished - so a reader who has learned what those colours
+// mean elsewhere in this program is not handed two new ones to learn here.
+// Exported so cmd/orcli can name them in its own usage text, rather than
+// repeating the hex by hand in a second file.
+const (
+	DefaultPaneActiveColor = "#89b4fa"
+	DefaultPaneDoneColor   = "#a6e3a1"
+)
 
 // ApprovalMode is the parsed approval mode.
 //
@@ -240,8 +293,16 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readBool(value, &c.Mouse)
 		case "bell":
 			err = readBool(value, &c.Bell)
+		case "break_interval_minutes":
+			err = readInt(value, &c.BreakIntervalMinutes)
+		case "break_bell":
+			err = readBool(value, &c.BreakBell)
 		case "color":
 			err = readBool(value, &c.Color)
+		case "pane_active_color":
+			err = readString(value, &c.PaneActiveColor)
+		case "pane_done_color":
+			err = readString(value, &c.PaneDoneColor)
 		case "verbosity":
 			err = readInt(value, &c.Verbosity)
 		case "approval":
@@ -267,7 +328,46 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 	if _, err := parseApproval(c.Approval); err != nil {
 		return err
 	}
+
+	// A figure of zero or less has no reading as an interval, and substituting
+	// the default for it would do something other than what the reader wrote.
+	if c.BreakIntervalMinutes <= 0 {
+		return fmt.Errorf("break_interval_minutes: must be positive, got %d", c.BreakIntervalMinutes)
+	}
+
+	// A pane colour that is present but not `#rrggbb` is reported by name, on
+	// the same grounds as the approval mode above: a reader who mistyped one
+	// deserves to be told which field and what shape it wanted, not to have it
+	// silently dropped and find the pane bar uncoloured.
+	if c.PaneActiveColor != "" && !isHexColor(c.PaneActiveColor) {
+		return fmt.Errorf("pane_active_color: %q is not #rrggbb", c.PaneActiveColor)
+	}
+	if c.PaneDoneColor != "" && !isHexColor(c.PaneDoneColor) {
+		return fmt.Errorf("pane_done_color: %q is not #rrggbb", c.PaneDoneColor)
+	}
 	return nil
+}
+
+// isHexColor reports whether s is a `#rrggbb` value.
+//
+// It is written out here rather than taken from internal/tui, which has its
+// own RGBFromHex for the same shape: this package holds no dependency on the
+// interface package today, and a single string check is a smaller price than
+// the first import between them.
+func isHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, r := range s[1:] {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // checkMode refuses a file that is readable by anyone but its owner.

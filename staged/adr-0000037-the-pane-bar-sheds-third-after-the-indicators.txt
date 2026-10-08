@@ -76,3 +76,7 @@ not reopened here.
 
 Nothing in the tree has changed. There is no shed ladder and no pane bar in
 the tree.
+
+## See also
+
+Extends adr-0000016's shed order. Superseded by `UI-redesign.md`. See also adr-0000016 and adr-0000041, which extends this record in turn.

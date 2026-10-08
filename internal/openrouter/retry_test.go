@@ -3,8 +3,10 @@ package openrouter
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -235,8 +237,120 @@ func TestChatDoesNotRetryAnHTTPStatus(t *testing.T) {
 	if !mentions(events, "429") {
 		t.Errorf("the status did not reach the reader: %v", events)
 	}
-	if got := count(events, EventFinish); got != 0 {
-		t.Errorf("%d finish events, want 0: a refused request is not a cut stream", got)
+	finish, ok := last(events, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want exactly one: a caller driving state off EventFinish must not wait on this turn forever")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: a refused request is not a completed reply")
+	}
+	if got := count(events, EventFinish); got != 1 {
+		t.Errorf("%d finish events, want exactly 1", got)
+	}
+}
+
+// TestChatSendsOneFinishOnATransportError covers the other branch that used
+// to return before ever sending one: a dial failure, a DNS error, anything
+// http.Client.Do itself fails on rather than a response with a status on it.
+// A caller driving state off EventFinish must not be left waiting on a turn
+// that already stopped here just as much as on any other failure shape.
+func TestChatSendsOneFinishOnATransportError(t *testing.T) {
+	c := New("sk-or-v1-retry-test")
+	c.http = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	})}
+
+	events := retryEvents(t, c)
+
+	if !mentions(events, "connection refused") {
+		t.Errorf("the transport error did not reach the reader: %v", events)
+	}
+	finish, ok := last(events, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want exactly one")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: the request never reached the endpoint")
+	}
+	if got := count(events, EventFinish); got != 1 {
+		t.Errorf("%d finish events, want exactly 1", got)
+	}
+}
+
+// statusScript serves one scripted status per request, in order, with a
+// streamed success body once the script reaches a 200. Unlike retryScript,
+// this one varies the status code rather than the stream content, since the
+// behavior under test is decided before the stream is ever read.
+func statusScript(t *testing.T, codes ...int) (*Client, *atomic.Int64) {
+	t.Helper()
+
+	var calls atomic.Int64
+	c := New("sk-or-v1-retry-test")
+	c.http = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		n := int(calls.Add(1)) - 1
+		if n >= len(codes) {
+			n = len(codes) - 1
+		}
+		code := codes[n]
+		if code == http.StatusOK {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(sse(chunkOf("the answer"), "[DONE]"))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: code,
+			Status:     strconv.Itoa(code) + " " + http.StatusText(code),
+			Body:       http.NoBody,
+		}, nil
+	})}
+	return c, &calls
+}
+
+// TestChatRetriesAGatewayStatus covers the gap openrouter-cli's own client
+// left open too (it never attempted a retry on any status at all): 502, 503,
+// and 504 are the gateway or the upstream behind it stalling, not the
+// endpoint refusing the request, and a second attempt that then succeeds
+// should read to the reader as nothing more than an ordinary reply.
+func TestChatRetriesAGatewayStatus(t *testing.T) {
+	for _, code := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			c, calls := statusScript(t, code, http.StatusOK)
+			events := retryEvents(t, c)
+
+			if got, want := calls.Load(), int64(2); got != want {
+				t.Errorf("the endpoint was called %d times, want %d", got, want)
+			}
+			if got, want := deltas(events), "the answer"; got != want {
+				t.Errorf("reply text = %q, want %q", got, want)
+			}
+			if got := count(events, EventError); got != 0 {
+				t.Errorf("the reader was told about %d failures, want 0: the retry succeeded", got)
+			}
+		})
+	}
+}
+
+// TestChatStopsRetryingAGatewayStatusAtTheBound covers a gateway status that
+// never clears: the retry is bounded the same as an undelivered stream, and
+// the reader is told the status rather than left waiting past it.
+func TestChatStopsRetryingAGatewayStatusAtTheBound(t *testing.T) {
+	c, calls := statusScript(t, http.StatusServiceUnavailable)
+	events := retryEvents(t, c)
+
+	if got, want := calls.Load(), int64(6); got != want {
+		t.Errorf("the endpoint was called %d times, want %d: the retry is bounded", got, want)
+	}
+	if !mentions(events, "503") {
+		t.Errorf("the status did not reach the reader: %v", events)
+	}
+	finish, ok := last(events, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want one")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: no reply ever arrived")
 	}
 }
 

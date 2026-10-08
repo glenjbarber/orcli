@@ -93,12 +93,19 @@ func New(apiKey string) *Client {
 // tool call is never retried, since the reply was paid for and the text arriving
 // before a cut is kept rather than taken back.
 //
-// A failure carrying an HTTP status is not retried. The status is the endpoint
-// refusing the request rather than an upstream stalling behind it, and a second
-// request cannot satisfy a rejected credential or a malformed request.
+// A failure carrying an HTTP status is not retried, with one exception: 502,
+// 503, and 504 are the gateway or the upstream behind it stalling rather than
+// the endpoint refusing the request, and are retried the same as an
+// undelivered stream. Every other status - 401, 403, 429 included - is the
+// endpoint answering the request it was sent, and a second request cannot
+// satisfy a rejected credential or a malformed one.
 //
-// Exactly one [EventFinish] is delivered per call, whichever way it ends. The
-// stream parser stays silent about a failure it will be retried over, which means
+// Exactly one [EventFinish] is delivered per call, whichever way it ends - a
+// transport error, a non-retried HTTP status, and a stopped backoff wait each
+// pair their [EventError] with one, the same as a stream that ran out of
+// retries does, so a caller driving state off EventFinish alone never waits
+// on a turn that has actually already stopped. The stream parser stays
+// silent about a failure it will be retried over, which means
 // an attempt that was retried reports nothing and the reader is told the cause
 // and the unfinished turn here, once the attempts are exhausted.
 func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) error {
@@ -111,11 +118,12 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 
 	waits := retryWaits(retryBound)
 
-	var last *undeliveredError
+	var last error
 	for attempt := range retryBound {
 		if attempt > 0 {
 			if err := pause(ctx, waits[attempt-1]); err != nil {
 				onEvent(Event{Kind: EventError, Err: err})
+				onEvent(Event{Kind: EventFinish, Finished: false})
 				return nil
 			}
 		}
@@ -126,16 +134,23 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		resp, err := c.post(ctx, req)
 		if err != nil {
 			onEvent(Event{Kind: EventError, Err: err})
+			onEvent(Event{Kind: EventFinish, Finished: false})
 			return nil
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			err := boundedError(c, resp)
 			resp.Body.Close()
+			if retryableStatus(resp.StatusCode) {
+				last = err
+				continue
+			}
 			onEvent(Event{Kind: EventError, Err: err})
+			onEvent(Event{Kind: EventFinish, Finished: false})
 			return nil
 		}
 
+		var undelivered *undeliveredError
 		err = c.stream(ctx, resp.Body, onEvent)
 		resp.Body.Close()
 
@@ -147,7 +162,8 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 			// attempt at a request the reader abandoned is one they did not ask
 			// for.
 			return err
-		case errors.As(err, &last):
+		case errors.As(err, &undelivered):
+			last = err
 			continue
 		default:
 			return nil
@@ -160,6 +176,23 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 	onEvent(Event{Kind: EventError, Err: last})
 	onEvent(Event{Kind: EventFinish, Finished: false})
 	return nil
+}
+
+// retryableStatus reports whether a non-200 status is the gateway or the
+// upstream behind it stalling, rather than the endpoint refusing the
+// request.
+//
+// Only 502, 503, and 504 qualify - the three shapes of "unavailable right
+// now" that a second attempt with backoff can plausibly outlast. Every
+// other status, 401/403/429 included, is the endpoint's own answer to the
+// request it was sent, which a second attempt cannot change.
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // retryWaits returns the pause preceding each attempt after the first.
@@ -201,6 +234,43 @@ func pause(ctx context.Context, d time.Duration) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// get makes one GET request against path and decodes a successful body into out.
+//
+// It is the transport [Client.Models] and [Client.KeyUsage] share, the way [post] is
+// what [Client.Chat] alone uses: those two calls are not streamed, carry no body of
+// their own, and have no partial reply worth retrying around, so they do not belong
+// in [Client.Chat]'s own retry loop, which exists for exactly that partial-reply
+// case. A caller of this method gets back either a decoded value or an error with
+// the endpoint's own message quoted in it, never a half-decoded value with the
+// error swallowed.
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	if c.apiKey == "" {
+		return ErrNoAPIKey
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("openrouter: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("openrouter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return boundedError(c, resp)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("openrouter: decode %s: %w", path, err)
+	}
+	return nil
 }
 
 // Filter redacts the credential from a string bound for a diagnostic.

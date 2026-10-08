@@ -135,3 +135,7 @@ separate visible panes entirely: pane 0 stays as a logical broker role,
 independent requests keep their identities, and everything runs on one screen.
 A session per pane is the part of this record that survives, and the pane bar
 is gone.
+
+## See also
+
+Supersedes adr-0000001's pane arrangement. Superseded by `UI-redesign.md` (not by adr-0000008 or adr-0000010, which are themselves superseded).

@@ -1,6 +1,6 @@
 # 0000012 The message queue is in memory, behind an interface
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It answers a question 0000006 left open
 
@@ -79,3 +79,7 @@ their pending questions to be durable is not decided, and would need a store.
 
 Nothing in the tree has changed in writing this. There is no queue in the tree
 and no interface for one.
+
+## See also
+
+Settles a question adr-0000006 left open without changing it. Superseded by `UI-redesign.md`. See also adr-0000006.

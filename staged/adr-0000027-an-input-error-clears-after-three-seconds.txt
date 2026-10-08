@@ -1,6 +1,6 @@
 # 0000027 An input error clears after three seconds
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 15 in `QUESTIONS.md`
 
@@ -51,3 +51,7 @@ watched and found wrong, not because this one was incomplete.
 
 Nothing in the tree has changed. There is no input field in the tree built
 against this timeout.
+
+## See also
+
+Superseded by `UI-redesign.md`.

@@ -72,3 +72,7 @@ Nothing from this question. The shed ladder for bar 1 is unaffected.
 
 Nothing in the tree has changed. There is no status bar drawn in the tree
 yet; `DESIGN.md` section 2 is updated to match.
+
+## See also
+
+Extends adr-0000021, adr-0000016, and adr-0000037. Superseded by `UI-redesign.md`. See also adr-0000046, the current, unsuperseded record for status-bar collision behaviour in the same area.

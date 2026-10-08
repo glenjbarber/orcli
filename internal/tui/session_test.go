@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestSessionOpensOnARow covers what a reader sees first. A session that opens onto
@@ -90,6 +91,43 @@ func TestBeginEchoesTheQuestion(t *testing.T) {
 	}
 	if last.Text != "what does the log do?" {
 		t.Errorf("the row is %q, want the question as written", last.Text)
+	}
+}
+
+// TestBeginSilentWritesNoRow covers BeginSilent's one difference from Begin: the
+// question it is given reaches the model (the turn still starts, with the same
+// readiness check and state transition Begin gives), but it never appears in the
+// log as a question row the reader would read as something they typed.
+func TestBeginSilentWritesNoRow(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	before := s.Log().Len()
+
+	if _, err := s.BeginSilent(context.Background(), "greet the reader", 0); err != nil {
+		t.Fatalf("BeginSilent: %v", err)
+	}
+
+	if got := s.Log().Len(); got != before {
+		t.Errorf("the log holds %d rows after BeginSilent, want %d: no question row should be written", got, before)
+	}
+	if s.state != StateThinking {
+		t.Errorf("session state = %v, want StateThinking: BeginSilent should still start the turn", s.state)
+	}
+}
+
+// TestBeginSilentRefusesLikeBegin covers that BeginSilent shares Begin's
+// readiness and empty-question checks rather than skipping them along with the
+// row: a silent turn is still a turn, and must fail exactly where a normal one
+// would.
+func TestBeginSilentRefusesLikeBegin(t *testing.T) {
+	s := New(Options{})
+
+	if _, err := s.BeginSilent(context.Background(), "greet the reader", 0); !errors.Is(err, ErrNoModel) {
+		t.Errorf("BeginSilent returned %v, want ErrNoModel", err)
+	}
+
+	s = New(Options{Model: "some/model"})
+	if _, err := s.BeginSilent(context.Background(), "", 0); !errors.Is(err, ErrNoQuestion) {
+		t.Errorf("BeginSilent returned %v, want ErrNoQuestion", err)
 	}
 }
 
@@ -365,5 +403,207 @@ func TestScrollClampsAtBothEnds(t *testing.T) {
 	s.ScrollUp(100)
 	if got, want := s.ScrollOffset(), s.Log().Len(); got != want {
 		t.Errorf("scrolling up past the log's length gives %d, want the log's own length %d", got, want)
+	}
+}
+
+// TestBreakDueWaitsOutTheInterval covers the ordinary case: a break is not
+// due before the configured interval has passed, and is due once it has.
+func TestBreakDueWaitsOutTheInterval(t *testing.T) {
+	s := New(Options{BreakInterval: time.Minute})
+
+	if s.BreakDue(time.Now()) {
+		t.Error("a new session is already due a break")
+	}
+
+	s.lastBreak = time.Now().Add(-2 * time.Minute)
+	if !s.BreakDue(time.Now()) {
+		t.Error("a session whose interval has passed is not due a break")
+	}
+}
+
+// TestBreakDueIsOffByDefault covers a session built with no BreakInterval:
+// the zero value turns the reminder off rather than firing immediately.
+func TestBreakDueIsOffByDefault(t *testing.T) {
+	s := New(Options{})
+	s.lastBreak = time.Now().Add(-24 * time.Hour)
+
+	if s.BreakDue(time.Now()) {
+		t.Error("a session with no BreakInterval is due a break")
+	}
+}
+
+// TestBreakDueWaitsForIdle covers the rule that a break does not interrupt a
+// turn in flight. The interval having passed is not enough on its own.
+func TestBreakDueWaitsForIdle(t *testing.T) {
+	s := New(Options{Model: "some/model", BreakInterval: time.Minute})
+	s.lastBreak = time.Now().Add(-2 * time.Minute)
+	s.SetState(StateThinking, "")
+
+	if s.BreakDue(time.Now()) {
+		t.Error("a break is due while a turn is thinking")
+	}
+}
+
+// TestStartBreakClearsTheEditorAndRecordsANotice covers the approved
+// interaction: the prompt goes blank and the reader is told why.
+func TestStartBreakClearsTheEditorAndRecordsANotice(t *testing.T) {
+	s := New(Options{})
+	s.Editor().Insert('a')
+	before := s.Log().Len()
+
+	s.StartBreak(time.Now())
+
+	state, detail := s.State()
+	if state != StateBreak {
+		t.Errorf("state is %q, want %q", state, StateBreak)
+	}
+	if detail == "" {
+		t.Error("StartBreak left no countdown in the detail")
+	}
+	if !s.Editor().Empty() {
+		t.Error("StartBreak left text in the editor")
+	}
+	if got := s.Log().Len(); got != before+1 {
+		t.Errorf("the log holds %d rows after StartBreak, want %d", got, before+1)
+	}
+}
+
+// TestTickBreakCountsDownThenEnds covers the two things a tick does while a
+// break is running: update the countdown, and end the break once the
+// duration has passed, returning the session to idle and recording the
+// interval was reset from that moment.
+func TestTickBreakCountsDownThenEnds(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+
+	s.TickBreak(start.Add(30 * time.Second))
+	if state, _ := s.State(); state != StateBreak {
+		t.Fatalf("state after a partial tick is %q, want %q", state, StateBreak)
+	}
+
+	end := start.Add(breakDuration + time.Second)
+	s.TickBreak(end)
+
+	state, detail := s.State()
+	if state != StateIdle {
+		t.Errorf("state after the break ends is %q, want %q", state, StateIdle)
+	}
+	if detail != "" {
+		t.Errorf("detail after the break ends is %q, want empty", detail)
+	}
+	if !s.lastBreak.Equal(end) {
+		t.Errorf("lastBreak is %v, want %v", s.lastBreak, end)
+	}
+}
+
+// TestTickBreakHalvesOnceWhenTheReaderKeptTyping covers a reader who never
+// stopped: the first close does not end the break or say so, it halves the
+// remaining time and tries once more.
+func TestTickBreakHalvesOnceWhenTheReaderKeptTyping(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	before := s.Log().Len()
+
+	s.NoteBreakActivity()
+	end := start.Add(breakDuration + time.Second)
+	s.TickBreak(end)
+
+	state, detail := s.State()
+	if state != StateBreak {
+		t.Fatalf("state after the first close is %q, want %q", state, StateBreak)
+	}
+	if detail == "" {
+		t.Error("the halved break left no countdown in the detail")
+	}
+	if got := s.Log().Len(); got != before+1 {
+		t.Errorf("the halved break logged %d rows, want 1", got-before)
+	}
+	if rows := s.Log().Rows(); strings.Contains(rows[len(rows)-1].Text, "ended") {
+		t.Error("the halved break's own notice says the break ended")
+	}
+	if !s.breakEnd.Equal(end.Add(breakDuration / 2)) {
+		t.Errorf("breakEnd after halving is %v, want %v", s.breakEnd, end.Add(breakDuration/2))
+	}
+}
+
+// TestTickBreakEndsSilentlyOnTheSecondCloseIfStillTyping covers the rest of
+// that reader's break: the halved period gets no second halving, and still
+// says nothing about ending if they kept typing through it too, but does
+// reset lastBreak so the next full interval starts from here.
+func TestTickBreakEndsSilentlyOnTheSecondCloseIfStillTyping(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	s.NoteBreakActivity()
+	firstClose := start.Add(breakDuration + time.Second)
+	s.TickBreak(firstClose)
+
+	s.NoteBreakActivity()
+	before := s.Log().Len()
+	secondClose := firstClose.Add(breakDuration/2 + time.Second)
+	s.TickBreak(secondClose)
+
+	state, _ := s.State()
+	if state != StateIdle {
+		t.Errorf("state after the second close is %q, want %q", state, StateIdle)
+	}
+	if got := s.Log().Len(); got != before {
+		t.Errorf("the second close logged %d rows, want 0", got-before)
+	}
+	if !s.lastBreak.Equal(secondClose) {
+		t.Errorf("lastBreak is %v, want %v", s.lastBreak, secondClose)
+	}
+}
+
+// TestTickBreakEndsNormallyOnTheSecondCloseIfInputStopped covers a reader
+// who took the hint partway through: no further typing during the halved
+// period gets the ordinary "ended" notice back, same as a break nobody
+// interrupted at all.
+func TestTickBreakEndsNormallyOnTheSecondCloseIfInputStopped(t *testing.T) {
+	s := New(Options{})
+	start := time.Now()
+	s.StartBreak(start)
+	s.NoteBreakActivity()
+	firstClose := start.Add(breakDuration + time.Second)
+	s.TickBreak(firstClose)
+
+	before := s.Log().Len()
+	secondClose := firstClose.Add(breakDuration/2 + time.Second)
+	s.TickBreak(secondClose)
+
+	if got := s.Log().Len(); got != before+1 {
+		t.Fatalf("the second close logged %d rows, want 1", got-before)
+	}
+	if rows := s.Log().Rows(); !strings.Contains(rows[len(rows)-1].Text, "ended") {
+		t.Error("the second close did not say the break ended")
+	}
+}
+
+// TestNoteBreakActivityIsANoOpOutsideABreak covers the one thing that lets
+// every key reach it unconditionally: it does nothing unless a break is
+// actually running.
+func TestNoteBreakActivityIsANoOpOutsideABreak(t *testing.T) {
+	s := New(Options{})
+	s.NoteBreakActivity()
+	if s.breakInput {
+		t.Error("NoteBreakActivity set breakInput with no break running")
+	}
+}
+
+// TestTickBreakDoesNothingOutsideABreak covers a tick arriving while no
+// break is running, which is the ordinary case on every repaint.
+func TestTickBreakDoesNothingOutsideABreak(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	before := s.Log().Len()
+
+	s.TickBreak(time.Now())
+
+	if state, _ := s.State(); state != StateIdle {
+		t.Errorf("state is %q, want %q", state, StateIdle)
+	}
+	if got := s.Log().Len(); got != before {
+		t.Errorf("TickBreak with no break running appended a row")
 	}
 }

@@ -78,6 +78,68 @@ func TestParseReadsEveryNamedField(t *testing.T) {
 	}
 }
 
+// TestDefaultSetsThePaneColors covers the defaults a reader who has set neither
+// pane colour gets: the same blue and green internal/tui's own role table
+// already uses, rather than two unfamiliar colours.
+func TestDefaultSetsThePaneColors(t *testing.T) {
+	cfg := Default()
+
+	if cfg.PaneActiveColor != DefaultPaneActiveColor {
+		t.Errorf("PaneActiveColor is %q, want %q", cfg.PaneActiveColor, DefaultPaneActiveColor)
+	}
+	if cfg.PaneDoneColor != DefaultPaneDoneColor {
+		t.Errorf("PaneDoneColor is %q, want %q", cfg.PaneDoneColor, DefaultPaneDoneColor)
+	}
+}
+
+// TestParseReadsThePaneColors covers the two pane colours as a reader's own file
+// would carry them, apart from the plain Color on/off toggle.
+func TestParseReadsThePaneColors(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json", `{
+		"api_key": "sk-or-v1-a-key",
+		"color": true,
+		"pane_active_color": "#112233",
+		"pane_done_color": "#445566"
+	}`, FileMode)
+
+	cfg, err := Parse([]byte(`{
+		"api_key": "sk-or-v1-a-key",
+		"color": true,
+		"pane_active_color": "#112233",
+		"pane_done_color": "#445566"
+	}`), path)
+	if err != nil {
+		t.Fatalf("Parse returned %v, want nil", err)
+	}
+
+	if cfg.PaneActiveColor != "#112233" {
+		t.Errorf("PaneActiveColor is %q, want #112233", cfg.PaneActiveColor)
+	}
+	if cfg.PaneDoneColor != "#445566" {
+		t.Errorf("PaneDoneColor is %q, want #445566", cfg.PaneDoneColor)
+	}
+}
+
+// TestParseRefusesAMalformedPaneColor covers the report a reader who mistyped
+// one gets: the field named, rather than the colour silently dropped.
+func TestParseRefusesAMalformedPaneColor(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json", `{
+		"api_key": "sk-or-v1-a-key",
+		"pane_active_color": "blue"
+	}`, FileMode)
+
+	_, err := Parse([]byte(`{
+		"api_key": "sk-or-v1-a-key",
+		"pane_active_color": "blue"
+	}`), path)
+	if err == nil {
+		t.Fatal("Parse returned nil, want a refusal naming pane_active_color")
+	}
+	if !strings.Contains(err.Error(), "pane_active_color") {
+		t.Errorf("Parse error is %q, want it to name pane_active_color", err)
+	}
+}
+
 // TestParseIgnoresUnknownKeys covers a file written by a newer version.
 //
 // A reader whose configuration gained a key they do not understand must not be
@@ -375,5 +437,45 @@ func TestDefaultIsUsableWithoutAFile(t *testing.T) {
 	}
 	if cfg.APIKey != "" {
 		t.Errorf("APIKey is %q, want it empty", cfg.APIKey)
+	}
+	if cfg.BreakIntervalMinutes != 22 {
+		t.Errorf("BreakIntervalMinutes is %d, want 22", cfg.BreakIntervalMinutes)
+	}
+	if cfg.BreakBell {
+		t.Error("BreakBell is true, want it off by default")
+	}
+}
+
+// TestParseReadsBreakFields checks that the screen-break preferences are read
+// the way every other preference is.
+func TestParseReadsBreakFields(t *testing.T) {
+	path := write(t, t.TempDir(), "orcli.json",
+		`{"api_key":"k","break_interval_minutes":10,"break_bell":true}`, FileMode)
+
+	cfg, err := Parse([]byte(
+		`{"api_key":"k","break_interval_minutes":10,"break_bell":true}`), path)
+	if err != nil {
+		t.Fatalf("Parse returned %v, want nil", err)
+	}
+	if cfg.BreakIntervalMinutes != 10 {
+		t.Errorf("BreakIntervalMinutes is %d, want 10", cfg.BreakIntervalMinutes)
+	}
+	if !cfg.BreakBell {
+		t.Error("BreakBell is false, want true")
+	}
+}
+
+// TestParseRejectsNonPositiveBreakInterval checks that a file naming a
+// break_interval_minutes of zero or less is reported by name rather than
+// silently given the default instead.
+func TestParseRejectsNonPositiveBreakInterval(t *testing.T) {
+	for _, minutes := range []string{"0", "-5"} {
+		body := `{"api_key":"k","break_interval_minutes":` + minutes + `}`
+		path := write(t, t.TempDir(), "orcli.json", body, FileMode)
+
+		_, err := Parse([]byte(body), path)
+		if err == nil {
+			t.Errorf("Parse with break_interval_minutes %s returned nil, want an error", minutes)
+		}
 	}
 }

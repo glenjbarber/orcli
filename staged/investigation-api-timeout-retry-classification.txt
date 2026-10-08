@@ -1,0 +1,72 @@
+# Investigation: API timeouts reported as happening far too quickly
+
+Status: investigating, not yet fixed. Blocked on one reference this PR asks
+Glen to provide from a worktree no cloud session can reach.
+
+## The report
+
+Glen: "API timeouts are happening far too quickly." Reference requested:
+`openrouter-cli`'s own handling, as a precedent from before this project's
+rename - specifically, how `claude-sonnet-4.5` ("Space Bunny Alpha" in this
+project's own commit-attribution map, staged/adr-0000034) solved the same
+problem there, if it did.
+
+## What has been checked in the current tree
+
+`internal/openrouter/client.go`'s `Chat` is the whole of the request path a
+turn takes. Two things are already confirmed, not guessed:
+
+1. The `http.Client{}` built in `New` (client.go:70-76) sets no `Timeout`
+   field - the zero value, which is unlimited. Nothing in this client
+   imposes a Go-level deadline of its own. `internal/tui/run.go` only ever
+   wraps the turn's context in `context.WithCancel`, never `WithTimeout` or
+   `WithDeadline` (checked across the whole tree; no hit on either).
+
+2. `Chat`'s retry loop (client.go:104-163) only retries one case: a stream
+   that started and was cut off before `[DONE]` (`undeliveredError`). Two
+   other failure paths return immediately, zero retries, zero backoff:
+   - a transport error from `c.post` (client.go:126-130) - a dial failure,
+     a DNS hiccup, the caller's own context expiring;
+   - any non-200 HTTP status at all (client.go:132-137), including a 502,
+     503, or 504 from a flaky upstream. The doc comment above `Chat`
+     defends this on purpose: "A failure carrying an HTTP status is not
+     retried... a second request cannot satisfy a rejected credential or a
+     malformed request." That reasoning is sound for 401/403/422 and wrong
+     for 502/503/504, which are the upstream stalling, not the endpoint
+     refusing - and bucketing them together is the leading candidate for
+     what Glen is seeing: a transient gateway error on the first attempt
+     surfaces instantly, with no retry cushion, which reads as "timed out
+     far too quickly" from the terminal.
+
+This was seen live earlier in this same project: a `/model` request failed
+with "HTTP 502 Bad Gateway... provider_name: Nvidia" and surfaced
+immediately rather than being retried.
+
+## What is not yet known
+
+Whether `openrouter-cli` already solved exactly this - retrying a transient
+gateway status with backoff rather than giving up on attempt one - or
+whether it had the same gap. That codebase is not in any cloud session's
+reach: it exists only as `staged/openrouter-cli.tgz` / `staged/openrouter-cli/`,
+untracked, in Glen's own laptop working tree. A cloud session's clone of
+this repository never had it and cannot fetch it from here; the two
+filesystems are disjoint, not a permission this session is withholding.
+
+## What this PR is asking for
+
+Whoever has the laptop tree (Glen, or a local Claude session with
+filesystem access there) should pull the request/response status handling
+out of `openrouter-cli` - however it classified a retryable failure, and
+with what backoff - and post it on this PR as a comment, or push it as a
+commit here. Once that is in hand, the fix is either:
+
+- porting that precedent forward if it already drew the retryable/not
+  line in a better place than the current doc comment does, or
+- redrawing that line here from scratch (retry on 502/503/504 specifically,
+  leave 4xx alone) if no useful precedent exists, which is a real design
+  change to a path whose current shape was deliberately argued for in its
+  own comment, not an oversight to patch around quietly.
+
+## Next step
+
+Read back on this PR, in either direction.

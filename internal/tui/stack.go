@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -50,13 +51,23 @@ import (
 // `root@lolhost @ ` instead, deliberately; that disagreement is recorded in
 // staged/adr-index.txt rather than resolved there, and is resolved here in the string's
 // favour because the mockup built from this string is the one that was confirmed.
-const Prompt = "root@lolhost $ "
+//
+// Glen confirmed a further adjustment to this same string in this session
+// (2026-10-07): a leading space before the host name, so the prompt row's own text does
+// not start flush against the terminal's left edge. The space on each side of the dollar
+// sign from the 2026-10-06 mockup is unchanged; this only adds the one before "root".
+const Prompt = " root@lolhost $ "
 
 // barRows is how many fixed rows sit below the scrollback: the prompt, one blank
 // separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
 // bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
 // (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
 // cutting it, dropping it into bar two, or leaving it homeless.
+//
+// The separator line stays one row. Glen confirmed in this session (2026-10-07) that it
+// should carry two leading spaces rather than being left to the frame's own blank fill
+// (see Draw's separatorRow write); that is a change to what the row draws, not to how
+// many rows the stack has, so barRows is still five.
 const barRows = 5
 
 // barOneFields and barTwoFields choose which Status fields render on each status bar.
@@ -68,15 +79,19 @@ const barRows = 5
 // above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
-// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two.
-// The fifth, scrollback-on, is Session.AtLiveEdge - see renderBarTwo.
-var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldMouse}
+// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two,
+// plus fieldPreset. The fifth of the original five, scrollback-on, is
+// Session.AtLiveEdge - see renderBarTwo. fieldPreset is added rather than fitted into
+// the original five, since /level's active preset is the one thing today's build
+// already shows for a mode the reader set (mouse, bell) and the mockup predates
+// /level, so it was never going to name a field that was not built yet.
+var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldPreset, fieldMouse}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 20
+const StatusFields = 22
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -149,6 +164,14 @@ const (
 	// fieldPane is which pane is shown.
 	fieldPane
 
+	// fieldPaneState is whether a worker is running or has just finished at the
+	// shown pane: "running", "done", or "" for neither. It is not printed on any
+	// bar - fieldName gives it no text - and exists only to tell the pane bar
+	// which colour to draw in, which is a second configurable pair of colours
+	// kept apart from the plain on/off Color toggle (see config.PaneActiveColor
+	// and config.PaneDoneColor).
+	fieldPaneState
+
 	// fieldWorkers is how many workers are running.
 	fieldWorkers
 
@@ -163,6 +186,14 @@ const (
 
 	// fieldLevels is how many conversation levels exist.
 	fieldLevels
+
+	// fieldPreset is the /level preset in force, "-" when none is.
+	//
+	// Named fieldPreset rather than fieldLevel so it cannot be mistaken, reading
+	// this file, for fieldLevels just above it: that one counts conversation
+	// levels, and this one names a /level reply-style preset. See preset.go's
+	// doc comment for the same distinction from the command's side.
+	fieldPreset
 
 	// fieldPrompt is the prompt row, and it is the row the caret is on.
 	fieldPrompt
@@ -216,6 +247,8 @@ func fieldName(k int) string {
 		return "bell"
 	case fieldPane:
 		return "pane"
+	case fieldPaneState:
+		return ""
 	case fieldWorkers:
 		return "workers"
 	case fieldQueue:
@@ -226,6 +259,8 @@ func fieldName(k int) string {
 		return "folded"
 	case fieldLevels:
 		return "levels"
+	case fieldPreset:
+		return "level"
 	case fieldPrompt:
 		return ""
 	default:
@@ -365,7 +400,8 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 4 {
-			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width), chrome)
+			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width),
+				paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
 		}
 		return
 	}
@@ -378,9 +414,21 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	if end > len(f.log) {
 		end = len(f.log)
 	}
+	// shown is newest first, in physical lines rather than log rows: a row with a
+	// line break of its own folds into more than one entry here, each still
+	// counted against backlog the way a single-line row always was. f.scroll
+	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
+	// untouched) - only how many physical lines one row costs changes.
 	shown := make([]Row, 0, backlog)
-	for i := end - 1; i >= 0 && len(shown) < backlog; i-- {
-		shown = append(shown, PlainRow(f.log[i]))
+fill:
+	for i := end - 1; i >= 0; i-- {
+		lines := foldRowLines(PlainRow(f.log[i]), width)
+		for j := len(lines) - 1; j >= 0; j-- {
+			shown = append(shown, lines[j])
+			if len(shown) >= backlog {
+				break fill
+			}
+		}
 	}
 	// shown is newest first; it fills the scrollback upward from just above the prompt.
 	for i, row := range shown {
@@ -395,6 +443,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	promptRow := backlog
+	separatorRow := backlog + 1
 	barOneRow := backlog + 2
 	barTwoRow := backlog + 3
 	paneBarRow := backlog + 4
@@ -402,10 +451,34 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
 	f.showCaret(screen, x, y+promptRow, width)
 
+	// The separator row between the prompt and bar one. It was left to the base clear
+	// above (every cell already a space) rather than drawn; Glen asked, in this session
+	// (2026-10-07), that it carry two spaces explicitly, matching the indent he asked for
+	// on the prompt row above it, rather than being blank only because nothing writes to
+	// it. Two spaces at a width of two or more look identical to the blank fill they
+	// replace - the row was already all spaces - so this is a deliberate row of content
+	// rather than a visible change.
+	drawCellText(screen, x, y+separatorRow, width, "  ", chrome)
+
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
 	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
-	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width), chrome)
+	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
+		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+// paneBarStyle picks the style the pane bar draws in: a configured colour for
+// "running" or "done" when the palette has one, chrome otherwise - which is
+// how the bar drew before Status carried colour when the pane is active.
+// This is the renderPaneBar sibling adr-0000020's comment promised and the
+// stack.go history above never built; it is built here, as a configurable
+// pair of colours apart from the plain Color on/off toggle rather than as the
+// fixed colour the ADR assumed.
+func paneBarStyle(p Palette, chrome tcell.Style, state string) tcell.Style {
+	if style, ok := p.PaneStyle(state); ok {
+		return style
+	}
+	return chrome
 }
 
 // renderPaneBar builds the pane bar's text, truncated to width with an ellipsis rather
@@ -433,14 +506,26 @@ func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
 	screen.ShowCursor(x+column, y)
 }
 
-// drawBarOne draws bar one at row y, with the figure segment swept. Factored out of
-// Draw's main path so the shedding ladder below can draw the same row at whatever
-// height it survives to, rather than repeating the sweep arithmetic twice.
+// drawBarOne draws bar one at row y, with the figure segment swept while a turn is
+// running. Factored out of Draw's main path so the shedding ladder below can draw
+// the same row at whatever height it survives to, rather than repeating the sweep
+// arithmetic twice.
+//
+// The figure reads "idle" (literally [StateIdle]'s own value - the one word
+// [twiddleWord] never returns) whenever nothing is running, including through a
+// screen break, and that word is drawn in chrome like the rest of the bar rather
+// than swept: a sweep with nothing turning behind it is a colour with no figure to
+// explain it, and the reader is left wondering why one word in an otherwise plain
+// line is still lit.
 func (f *Frame) drawBarOne(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
 	prefix, figure, suffix := renderBarOne(f.bar.Status)
 	drawCellText(screen, x, y, width, prefix, chrome)
 	figureX := DisplayWidth(prefix)
-	drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	if figure == string(StateIdle) {
+		drawCellText(screen, x+figureX, y, width-figureX, figure, chrome)
+	} else {
+		drawSweepText(screen, x+figureX, y, width-figureX, figure, f.step, f.palette)
+	}
 	suffixX := figureX + DisplayWidth(figure)
 	if suffixX < width {
 		drawCellText(screen, x+suffixX, y, width-suffixX, suffix, chrome)
@@ -497,7 +582,187 @@ func renderBarTwo(status Status, atLiveEdge bool) string {
 	return strings.Join(parts, " · ")
 }
 
+// foldRowLines splits row into the physical lines a draw turns it into: one
+// per line break row.Text itself carries, the way this already worked, and
+// then, within each of those, one more split for any stretch still wider
+// than width once word-wrapped. This is the "folded when they are drawn"
+// promise [Row]'s own doc comment makes: a row is held and copied whole,
+// with every line break the model wrote intact, and is only turned into
+// more than one screen line here, at the one place that already knows how
+// tall and wide the terminal's scrollback is.
+//
+// width is the draw width this fold's caller already measured for the
+// scrollback column (Draw's own width, the same one every row is about to
+// be drawn into) - a row folded to some other width would wrap at a
+// boundary the screen it is about to be drawn on does not have. width <= 0
+// skips the word-wrap pass entirely and returns the newline-only fold, which
+// is what every caller before this pass existed already got; it exists so a
+// caller with no real width in hand - a test exercising only the newline
+// fold, say - is not forced to invent one.
+//
+// A row with no line break and no need to wrap returns a single-element
+// slice holding row unchanged, so the common case costs nothing extra.
+//
+// Spans are byte ranges into the whole of row.Text, so each line's own spans
+// are cut to that line's range and rebased to start at zero at both levels
+// of the split, the same rebaseSpans rule cutTail's own callers already
+// apply when a line is cut rather than folded.
+func foldRowLines(row Row, width int) []Row {
+	var physical []Row
+	if !strings.Contains(row.Text, "\n") {
+		physical = []Row{row}
+	} else {
+		lines := strings.Split(row.Text, "\n")
+		physical = make([]Row, len(lines))
+		offset := 0
+		for i, text := range lines {
+			start, end := offset, offset+len(text)
+			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level}
+			offset = end + 1 // +1 skips the '\n' this line was split on.
+		}
+	}
+
+	if width <= 0 {
+		return physical
+	}
+
+	out := make([]Row, 0, len(physical))
+	for _, pr := range physical {
+		out = append(out, wrapRowLine(pr, width)...)
+	}
+	return out
+}
+
+// rebaseSpans is the one place a span is cut to a sub-range of the text it
+// was measured against and rebased to start at zero within it - the rule
+// both levels of foldRowLines's split apply, and the rule factored out here
+// rather than written twice so a fix to it is a fix in one place rather
+// than two that can drift apart.
+func rebaseSpans(spans []Span, start, end int) []Span {
+	var out []Span
+	for _, sp := range spans {
+		if sp.End <= start || sp.Start >= end {
+			continue
+		}
+		s, e := max(sp.Start, start), min(sp.End, end)
+		out = append(out, Span{Start: s - start, End: e - start, Role: sp.Role})
+	}
+	return out
+}
+
+// wrapRowLine splits one already-newline-free row into further rows if its
+// own display width is over width, breaking only at a run of one or more
+// spaces so a word is never broken mid-word. A row already within width is
+// returned as the single element of a one-element slice, which costs
+// nothing beyond the slice itself and is the common case for most replies.
+//
+// A row that is entirely one RoleCode span - a line inside a fenced code
+// block, or a line that is nothing but a single inline code run - is left
+// unwrapped, full stop, on purpose: reflowing code changes what it says.
+// Breaking a line of Go, say, at whatever column the terminal happens to be
+// does not produce two shorter lines of the same code, it produces a line
+// that no longer parses and a continuation that looks like a second
+// statement. Every reader of code this codebase already defers to - a
+// terminal's own `less`, a browser's `<pre>`, this package's own cutTail -
+// handles an overlong line by scrolling or truncating it horizontally
+// rather than by reflowing it, and cutTail already does exactly that for
+// any row too wide for the terminal regardless of role. So a whole-line
+// code row is left for cutTail to truncate with its ellipsis, the same as
+// before this pass existed, rather than wrapped here.
+//
+// Prose mixed with a smaller run of inline code - "run `go test ./...`
+// before you push", say - is a different shape: the sentence around the
+// code is still prose a reader scans left to right, and the fix for an
+// overlong sentence is the fix for any overlong sentence, word-wrap. Only a
+// row that is nothing but code, where wrapping would cut into the code
+// itself with no prose on either side to break at instead, is withheld
+// from this.
+func wrapRowLine(row Row, width int) []Row {
+	if DisplayWidth(row.Text) <= width || isWholeLineCode(row) {
+		return []Row{row}
+	}
+
+	var out []Row
+	text := row.Text
+	offset := 0
+	for {
+		cut := wrapCut(text, width)
+		if cut >= len(text) {
+			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level})
+			break
+		}
+
+		piece := text[:cut]
+		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level})
+
+		rest := text[cut:]
+		trimmed := strings.TrimLeft(rest, " ")
+		offset += cut + (len(rest) - len(trimmed))
+		text = trimmed
+		if text == "" {
+			break
+		}
+	}
+	return out
+}
+
+// isWholeLineCode reports whether row is entirely one RoleCode span - the
+// shape ParseMarkdown gives a line inside a fenced code block, or a line
+// that opens and closes with its own inline code run and nothing else - the
+// one case wrapRowLine leaves unwrapped. A line that merely contains some
+// inline code alongside plain prose has more than this one span, or a span
+// that does not cover the whole line, and is word-wrapped like any other
+// line of prose.
+func isWholeLineCode(row Row) bool {
+	if len(row.Spans) != 1 {
+		return false
+	}
+	sp := row.Spans[0]
+	return sp.Role == RoleCode && sp.Start == 0 && sp.End == len(row.Text)
+}
+
+// wrapCut finds where wrapRowLine should cut text for one more line within
+// width columns: the byte offset of the space run nearest the width
+// boundary, so the cut falls at a word break rather than mid-word. text
+// itself, not yet cut, is returned via len(text) when text already fits.
+//
+// A single "word" wider than width on its own - a long URL with no spaces,
+// say - has no space to break at within budget. Rather than loop forever
+// offering the same unbroken word again, this falls back to CutColumn's own
+// rune-safe cut at the width boundary, which is the one case this still
+// breaks mid-word: there being no other option left, a broken word reads
+// better than a line that never ends or a line that silently overruns the
+// width this exists to respect.
+func wrapCut(text string, width int) int {
+	if DisplayWidth(text) <= width {
+		return len(text)
+	}
+
+	fit, _ := CutColumn(text, width)
+	cut := len(fit)
+	if sp := strings.LastIndexByte(fit, ' '); sp >= 0 {
+		return sp
+	}
+	if cut == 0 {
+		// width itself cannot hold even one rune (e.g. a wide rune in a
+		// one-column budget); advance by one rune's worth of bytes so the
+		// caller always makes progress.
+		if r, size := utf8.DecodeRuneInString(text); size > 0 {
+			_ = r
+			return size
+		}
+		return 1
+	}
+	return cut
+}
+
+// drawSweepText draws the twiddle, each column coloured from sweepColors for the
+// palette's own ground, and scrolling left to right: the colour at column c on step
+// is the one that sat at column c-1 on step-1, so a colour travels rightward one
+// column per step rather than every column turning in place together.
 func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, p Palette) {
+	colors := sweepColors(p.Ground())
+	n := len(colors)
 	col := 0
 	for _, r := range text {
 		w := runewidth(r)
@@ -510,8 +775,8 @@ func drawSweepText(screen tcell.Screen, x, y, width int, text string, step int, 
 		if col+w > width {
 			break
 		}
-		red, green, blue := hueRGB(float64(sweepStepDegrees*step + col))
-		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(red), int32(green), int32(blue)))
+		c := colors[(((col-step)%n)+n)%n]
+		style := p.BaseStyle().Foreground(tcell.NewRGBColor(int32(c.R), int32(c.G), int32(c.B)))
 		screen.SetContent(x+col, y, r, nil, style)
 		col += w
 	}

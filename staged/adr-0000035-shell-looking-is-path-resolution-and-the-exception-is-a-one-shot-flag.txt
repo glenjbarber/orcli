@@ -1,6 +1,6 @@
 # 0000035 A shell-looking line is one PATH resolves, and the exception is a one-shot flag
 
-- Status: accepted
+- Status: accepted, and SUPERCEDED by `UI-redesign.md`, which Notion's record lists as superseding this record in full
 - Date: 2026-10-05
 - Supersedes: nothing. It settles question 21 in `QUESTIONS.md`
 
@@ -79,3 +79,7 @@ Nothing from question 21.
 
 Nothing in the tree has changed. There is no shell-looking check and no
 one-shot flag in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`.

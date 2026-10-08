@@ -141,6 +141,70 @@ func TestHomeAndEndGoToTheEnds(t *testing.T) {
 	}
 }
 
+// TestSetTextReplacesTheFieldAndPutsTheCaretAtTheEnd covers what the history walk does
+// to the field. A caret left wherever it happened to be before the walk would put the
+// reader editing the middle of a line they did not type there.
+func TestSetTextReplacesTheFieldAndPutsTheCaretAtTheEnd(t *testing.T) {
+	e := NewEditor()
+	for _, r := range "abc" {
+		e.Insert(r)
+	}
+	e.Home()
+
+	e.SetText("an older line")
+
+	if got, want := e.Text(), "an older line"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := e.Caret(), len([]rune("an older line")); got != want {
+		t.Errorf("the caret is at %d, want the end at %d", got, want)
+	}
+}
+
+// TestEraseWordBeforeRemovesTheWordAndItsGap covers Ctrl+W. A reader who erases a word
+// is erasing what they just typed and the space before it, not leaving a gap the next
+// word they type would sit against.
+func TestEraseWordBeforeRemovesTheWordAndItsGap(t *testing.T) {
+	e := NewEditor()
+	for _, r := range "one two" {
+		e.Insert(r)
+	}
+
+	e.EraseWordBefore()
+	if got, want := e.Text(), "one"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := e.Caret(), 3; got != want {
+		t.Errorf("the caret is at %d, want %d", got, want)
+	}
+
+	e.EraseWordBefore()
+	if got, want := e.Text(), ""; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	e.EraseWordBefore()
+	if got, want := e.Text(), ""; got != want {
+		t.Errorf("a word erase on an empty field changed it to %q, want %q", got, want)
+	}
+}
+
+// TestEraseWordBeforeStopsAtTheCaretNotTheEnd covers erasing mid-line, so the text
+// after the caret survives the way Backspace and Delete already leave it alone.
+func TestEraseWordBeforeStopsAtTheCaretNotTheEnd(t *testing.T) {
+	e := NewEditor()
+	for _, r := range "one two three" {
+		e.Insert(r)
+	}
+	// Caret is after "one two", before " three".
+	e.caret = len([]rune("one two"))
+
+	e.EraseWordBefore()
+	if got, want := e.Text(), "one three"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 // TestResetClearsTheFieldAndTheCaret covers what happens after a line is submitted. A
 // field carrying the previous question is a field the reader has to clear by hand.
 func TestResetClearsTheFieldAndTheCaret(t *testing.T) {

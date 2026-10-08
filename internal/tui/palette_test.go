@@ -442,3 +442,111 @@ func TestThemeNamesSaysWhatWasAskedFor(t *testing.T) {
 		}
 	}
 }
+
+// TestPaneStyleFallsBackWithNoColoursConfigured covers the default a session built
+// with neither PaneActiveColor nor PaneDoneColor gets: the pane bar colours exactly
+// as it did before this existed, which is not at all.
+func TestPaneStyleFallsBackWithNoColoursConfigured(t *testing.T) {
+	p := NewPalette(true, GroundDark, nil)
+
+	for _, state := range []string{"running", "done", "", "something else"} {
+		if _, ok := p.PaneStyle(state); ok {
+			t.Errorf("PaneStyle(%q) with no pane colours configured reports ok, want false", state)
+		}
+	}
+}
+
+// TestPaneStyleUsesTheConfiguredColours covers the two states a reader can configure,
+// and that they are not the same colour as each other or as no colour at all.
+func TestPaneStyleUsesTheConfiguredColours(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	done := RGB{R: 0x44, G: 0x55, B: 0x66}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, &done)
+
+	runningStyle, ok := p.PaneStyle("running")
+	if !ok {
+		t.Fatal(`PaneStyle("running") reports ok = false, want true`)
+	}
+	if fg, _, _ := runningStyle.Decompose(); fg != active.TCellColor() {
+		t.Errorf("running foreground = %v, want %v", fg, active.TCellColor())
+	}
+
+	doneStyle, ok := p.PaneStyle("done")
+	if !ok {
+		t.Fatal(`PaneStyle("done") reports ok = false, want true`)
+	}
+	if fg, _, _ := doneStyle.Decompose(); fg != done.TCellColor() {
+		t.Errorf("done foreground = %v, want %v", fg, done.TCellColor())
+	}
+
+	if _, ok := p.PaneStyle(""); ok {
+		t.Error(`PaneStyle("") reports ok = true, want false: neither state applies`)
+	}
+}
+
+// TestPaneStyleIsOffWithColourOff covers the rule every other role already follows:
+// a palette with colour off writes no colour, and the pane bar is not an exception
+// carved out of it.
+func TestPaneStyleIsOffWithColourOff(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(false, GroundDark, nil).WithPaneColors(&active, &active)
+
+	if _, ok := p.PaneStyle("running"); ok {
+		t.Error("PaneStyle reports ok = true with colour off, want false")
+	}
+}
+
+// TestSweepColorsDropDarkBlueOnDarkGroundOnly covers the one difference between the
+// two grounds' twiddle lists: dark blue is too close to a dark terminal's own
+// background to read as a colour there, so a dark ground drops it, and a light
+// ground - where the same value reads fine - keeps every entry.
+func TestSweepColorsDropDarkBlueOnDarkGroundOnly(t *testing.T) {
+	darkBlue := RGB{R: 0x1a, G: 0x1a, B: 0x6e}
+
+	for _, c := range sweepColors(GroundDark) {
+		if c == darkBlue {
+			t.Fatal("dark blue is in the dark ground's sweep list, want it dropped")
+		}
+	}
+
+	found := false
+	for _, c := range sweepColors(GroundLight) {
+		if c == darkBlue {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("dark blue is missing from the light ground's sweep list, want it kept")
+	}
+
+	if got, want := len(sweepColors(GroundDark))+1, len(sweepColors(GroundLight)); got != want {
+		t.Fatalf("dark ground has %d colours, light has %d, want dark to have exactly one fewer",
+			len(sweepColors(GroundDark)), len(sweepColors(GroundLight)))
+	}
+}
+
+// TestDrawSweepTextScrollsLeftToRight covers the twiddle's own motion: the colour
+// at a column on one step is the colour that sat one column to its left on the
+// step before, so a colour travels rightward across the figure as steps advance
+// rather than every column turning in place together.
+func TestDrawSweepTextScrollsLeftToRight(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(20, 5)
+	p := NewPalette(true, GroundDark, nil)
+
+	drawSweepText(screen, 0, 0, 10, "working", 0, p)
+	_, _, before, _ := screen.GetContent(3, 0)
+	beforeFG, _, _ := before.Decompose()
+
+	drawSweepText(screen, 0, 0, 10, "working", 1, p)
+	_, _, after, _ := screen.GetContent(4, 0)
+	afterFG, _, _ := after.Decompose()
+
+	if beforeFG != afterFG {
+		t.Fatalf("colour at column 3, step 0 (%v) did not scroll to column 4, step 1 (%v)",
+			beforeFG, afterFG)
+	}
+}

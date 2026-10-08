@@ -46,7 +46,9 @@ func TestAShortTerminalHasNoScrollback(t *testing.T) {
 func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
 	for _, height := range []int{1, 2, barRows - 1} {
 		screen := drawSimulationFrame(t, height, 40, Bar{Field: "hi"}, nil, Palette{})
-		r, _, _, _ := screen.GetContent(0, 0)
+		// Prompt now has a leading space (see stack.go's Prompt doc comment), so column
+		// 0 is that space and column 1 is "r" of "root@lolhost".
+		r, _, _, _ := screen.GetContent(1, 0)
 		if r != 'r' {
 			t.Errorf("on a %d row terminal the prompt is not on row 0 (got %q)", height, r)
 		}
@@ -81,7 +83,8 @@ func TestTheSheddingLadderDropsInGlensOrder(t *testing.T) {
 
 	// Height 1: bar one is shed too; only the prompt remains.
 	screen = drawSimulationFrame(t, 1, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
-	r, _, _, _ := screen.GetContent(0, 0)
+	// Prompt now has a leading space (see stack.go's Prompt doc comment).
+	r, _, _, _ := screen.GetContent(1, 0)
 	if r != 'r' {
 		t.Errorf("at height 1 the only row is %q, want the prompt", string(r))
 	}
@@ -125,13 +128,13 @@ func TestEveryFieldIsOneCharacter(t *testing.T) {
 func TestTheFrameCarriesTheLogBesideIt(t *testing.T) {
 	var s Status
 	s[fieldCwd] = "."
-	rows := []Row{{Text: "orcli, a log and nothing else yet"}, {Text: "the newest row"}}
+	rows := []Row{{Text: "orcli, a log with a frame around it"}, {Text: "the newest row"}}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s}, rows, Palette{})
 	got := simulationText(screen)
 	if !strings.Contains(got, "the newest row") {
 		t.Errorf("the newest log row is not on the screen:\n%q", got)
 	}
-	if !strings.Contains(got, "orcli, a log and nothing else yet") {
+	if !strings.Contains(got, "orcli, a log with a frame around it") {
 		t.Errorf("the oldest log row is not on the screen:\n%q", got)
 	}
 }
@@ -200,7 +203,7 @@ func TestThePromptRowCarriesTheFieldNotALogRow(t *testing.T) {
 	rows := []Row{{Text: "a log row"}}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Status: s, Field: "a question"}, rows, Palette{})
 	got := simulationText(screen)
-	if !strings.Contains(got, "root@lolhost $ a question") {
+	if !strings.Contains(got, " root@lolhost $ a question") {
 		t.Errorf("the prompt row does not carry the prompt and the typed text:\n%q", got)
 	}
 }
@@ -309,8 +312,13 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
 	}
 
+	// 56 rather than 40: bar two now carries fieldPreset (/level's active preset)
+	// alongside the fields the figure of 40 was sized for, and the assertions
+	// below are against text past the point 40 columns used to cut.
+	const width = 56
+
 	frame := NewFrame()
-	frame.SetRect(0, 0, 40, 20)
+	frame.SetRect(0, 0, width, 20)
 	frame.SetContent(Bar{}, log, plainPalette())
 	promptRow := scrollbackRows(20)
 
@@ -318,7 +326,7 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if err := live.Init(); err != nil {
 		t.Fatal(err)
 	}
-	live.SetSize(40, 20)
+	live.SetSize(width, 20)
 	frame.Draw(live)
 	if got := rowAt(live, promptRow-1); got != "row 9" {
 		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
@@ -332,7 +340,7 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if err := back.Init(); err != nil {
 		t.Fatal(err)
 	}
-	back.SetSize(40, 20)
+	back.SetSize(width, 20)
 	frame.Draw(back)
 	if got := rowAt(back, promptRow-1); got != "row 6" {
 		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)
@@ -352,6 +360,49 @@ func TestThePaneBarIsItsOwnRowBelowBarTwo(t *testing.T) {
 
 	if got := rowAt(screen, promptRow+4); got != "main" {
 		t.Errorf("the pane bar is %q, want %q", got, "main")
+	}
+}
+
+// TestThePaneBarDrawsTheConfiguredPaneColour covers the wiring from a configured
+// colour through to the cell the reader actually sees: fieldPaneState set to
+// "running" draws the pane bar row in the palette's configured active colour
+// rather than in chrome.
+func TestThePaneBarDrawsTheConfiguredPaneColour(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, nil)
+
+	var s Status
+	s[fieldPane] = "main"
+	s[fieldPaneState] = "running"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
+	promptRow := scrollbackRows(20)
+
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	gotFG, _, _ := gotStyle.Decompose()
+	if gotFG != active.TCellColor() {
+		t.Errorf("the pane bar's foreground is %v, want the configured active colour %v",
+			gotFG, active.TCellColor())
+	}
+}
+
+// TestThePaneBarDrawsChromeWithNoWorkerState covers the pane bar's default: with
+// fieldPaneState empty, the bar draws in chrome even though a pane colour is
+// configured, since neither state applies.
+func TestThePaneBarDrawsChromeWithNoWorkerState(t *testing.T) {
+	active := RGB{R: 0x11, G: 0x22, B: 0x33}
+	p := NewPalette(true, GroundDark, nil).WithPaneColors(&active, nil)
+
+	var s Status
+	s[fieldPane] = "main"
+	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
+	promptRow := scrollbackRows(20)
+
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	gotFG, _, _ := gotStyle.Decompose()
+	wantFG, _, _ := frameStyle(p, RoleChrome).Decompose()
+	if gotFG != wantFG {
+		t.Errorf("the pane bar's foreground with no worker state is %v, want chrome %v",
+			gotFG, wantFG)
 	}
 }
 

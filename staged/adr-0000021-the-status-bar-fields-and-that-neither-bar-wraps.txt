@@ -64,3 +64,7 @@ active pane were already settled; this record adds only the wrap answer.
 ## Notes
 
 Nothing in the tree has changed. There is no status bar in the tree.
+
+## See also
+
+Superseded by `UI-redesign.md`. See also adr-0000041, which extends this record's fields, and adr-0000046, the current, unsuperseded record for status-bar collision behaviour.
