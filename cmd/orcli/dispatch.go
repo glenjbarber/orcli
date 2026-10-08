@@ -374,26 +374,53 @@ func (d *dispatcher) Run(ctx context.Context, line string) (tui.Result, error) {
 }
 
 func (d *dispatcher) plugin(ctx context.Context, name, args string) (tui.Result, error) {
-	if strings.TrimSpace(args) == "" {
-		args = "help"
-	}
-	action, rest, _ := strings.Cut(strings.TrimSpace(args), " ")
-	if action == "help" {
+	request := strings.TrimSpace(args)
+	if request == "help" {
 		return tui.Result{Ask: pluginHelpPrompt(name)}, nil
 	}
+	if request == "" {
+		return tui.Result{Ask: pluginRequestPrompt(name, "")}, nil
+	}
+	action, rest, _ := strings.Cut(request, " ")
 	if !containsString(tui.PluginSubcommands(name), action) {
-		return tui.Result{}, fmt.Errorf("@%s %s is not a subcommand; use @%s help", name, action, name)
+		if name == "cloudflare" {
+			return tui.Result{}, fmt.Errorf("@cloudflare has no free-form API tool; use @cloudflare dns or @cloudflare confirm, or ask @cloudflare help for guidance")
+		}
+		if name == "apiary" && !d.apiaryReady() {
+			return tui.Result{Ask: fmt.Sprintf("The reader explicitly requested @apiary for this task, but the Apiary Viewer tools are not configured. Explain setup using the facts below; do not attempt an API call. Task: %s\nFacts: %s", request, pluginHelpPrompt(name))}, nil
+		}
+		return tui.Result{Ask: pluginRequestPrompt(name, request)}, nil
 	}
 	if name == "cloudflare" {
 		return d.cloudflare(ctx, args)
 	}
-	if name == "apiary" {
-		baseURL, viewerToken, err := d.cfg.ApiarySettings()
-		if err != nil || baseURL == "" || viewerToken == "" {
-			return tui.Result{Ask: fmt.Sprintf("The reader requested @apiary %s, but the Apiary Viewer tools are not configured for this session. Explain how to set up the local configuration using the facts in this instruction, and do not attempt the query. Facts: %s", strings.TrimSpace(args), pluginHelpPrompt(name))}, nil
-		}
+	if name == "apiary" && !d.apiaryReady() {
+		return tui.Result{Ask: fmt.Sprintf("The reader explicitly requested @apiary for this task, but the Apiary Viewer tools are not configured. Explain setup using the facts below; do not attempt an API call. Task: %s\nFacts: %s", request, pluginHelpPrompt(name))}, nil
 	}
-	return tui.Result{Ask: fmt.Sprintf("The reader selected plugin @%s subcommand %q. Use only the %s plugin tools listed in your available tool schemas. Interpret the remaining text as that operation's input: %s. Complete the requested operation and report the result clearly. Never ask the reader to paste a secret into chat, and do not reveal or reproduce credentials.", name, action, name, strings.TrimSpace(rest))}, nil
+	return tui.Result{Ask: pluginRequestPrompt(name, fmt.Sprintf("Use the %q operation. %s", action, strings.TrimSpace(rest)))}, nil
+}
+
+func (d *dispatcher) apiaryReady() bool {
+	baseURL, viewerToken, err := d.cfg.ApiarySettings()
+	return err == nil && baseURL != "" && viewerToken != ""
+}
+
+func pluginRequestPrompt(name, request string) string {
+	if strings.TrimSpace(request) == "" {
+		return fmt.Sprintf("The reader explicitly invoked @%s to request use of that plugin. Ask what they would like done with %s; do not make a call until they provide a task.", name, pluginDisplayName(name))
+	}
+	return fmt.Sprintf("The reader explicitly requested @%s for this task. Treat this as an instruction to use the %s plugin, not as a general question. Use only the %s plugin tools listed in your available tool schemas. Task: %s. Complete the request and report the result clearly. Never ask the reader to paste a secret into chat, and do not reveal or reproduce credentials.", name, pluginDisplayName(name), name, request)
+}
+
+func pluginDisplayName(name string) string {
+	switch name {
+	case "notion":
+		return "Notion"
+	case "apiary":
+		return "Apiary Viewer"
+	default:
+		return name
+	}
 }
 
 func containsString(values []string, value string) bool {

@@ -37,6 +37,18 @@ func TestCompletionAcceptsTheSlashAndTheBareName(t *testing.T) {
 	}
 }
 
+func TestAtPluginTriggerKeepsTheFreeFormTask(t *testing.T) {
+	for _, line := range []struct {
+		input string
+		args  string
+	}{{"@notion", ""}, {"@notion find a page", "find a page"}} {
+		name, args, ok := IsCommand(line.input)
+		if !ok || name != "@notion" || args != line.args {
+			t.Errorf("IsCommand(%q) = %q, %q, %v", line.input, name, args, ok)
+		}
+	}
+}
+
 // TestCompletionOnAWholeNameIsWhole is the case the space exists for: the name is
 // already typed, so the only thing missing is the separator.
 func TestCompletionOnAWholeNameIsWhole(t *testing.T) {

@@ -372,8 +372,8 @@ func TestCapabilitiesReflectsCloudflareEitherWay(t *testing.T) {
 func TestCapabilitiesNamesPluginCommands(t *testing.T) {
 	s := tui.New(tui.Options{Model: "some/model"})
 	got := capabilities(s, nil, nil)
-	if !strings.Contains(got, "@notion") || !strings.Contains(got, "@<plugin> help") {
-		t.Errorf("capabilities = %q, want plugin invocation and help syntax", got)
+	if !strings.Contains(got, "@notion") || !strings.Contains(got, "explicitly request") || !strings.Contains(got, "@<plugin> help") {
+		t.Errorf("capabilities = %q, want explicit plugin trigger and help syntax", got)
 	}
 	if strings.Contains(got, "@apiary") {
 		t.Errorf("capabilities = %q, lists Apiary without configured tools", got)

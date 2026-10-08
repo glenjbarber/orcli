@@ -359,7 +359,7 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 			break
 		}
 	}
-	b.WriteString("Plugins: use " + strings.Join(plugins, ", ") + " followed by a subcommand; use @<plugin> help for capabilities and setup guidance.\n")
+	b.WriteString("Plugins: prefix a request with " + strings.Join(plugins, ", ") + " to explicitly request that plugin; structured subcommands are also available. Use @<plugin> help for capabilities and setup guidance.\n")
 
 	// /level's active preset, when there is one, is written as its own sentence
 	// rather than folded into the paragraph above: it is an instruction about how

@@ -112,6 +112,30 @@ func TestPluginSubcommandSelectsToolOperation(t *testing.T) {
 	}
 }
 
+func TestPluginTriggerForwardsFreeFormTaskToTheNamedPlugin(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@notion find the roadmap page")
+	if err != nil {
+		t.Fatalf("plugin trigger: %v", err)
+	}
+	for _, want := range []string{"explicitly requested @notion", "instruction to use the notion plugin", "find the roadmap page", "notion plugin tools"} {
+		if !strings.Contains(strings.ToLower(out.Ask), strings.ToLower(want)) {
+			t.Errorf("plugin request prompt %q does not include %q", out.Ask, want)
+		}
+	}
+}
+
+func TestBarePluginTriggerAsksWhatTheUserWants(t *testing.T) {
+	d := newDispatcherFor(config.Config{})
+	out, err := d.Run(context.Background(), "@notion")
+	if err != nil {
+		t.Fatalf("bare plugin trigger: %v", err)
+	}
+	if !strings.Contains(out.Ask, "Ask what they would like done with Notion") {
+		t.Fatalf("bare plugin prompt = %q", out.Ask)
+	}
+}
+
 func TestUnconfiguredApiaryActionRequestsSetupGuidance(t *testing.T) {
 	d := newDispatcherFor(config.Config{})
 	out, err := d.Run(context.Background(), "@apiary query status")
