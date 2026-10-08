@@ -13,8 +13,8 @@ import (
 // The frame, as it is now: the program owns the screen, and the screen is five fixed rows
 // below a scrollback that takes whatever height is left.
 //
-// Bottom to top: the pane bar, bar two (the longer-term fields - provider, model,
-// verbosity, mouse, and whether the viewport is at the live edge), bar one (the live,
+// Bottom to top: the pane bar, bar two (hostname, credits, cost, context, input and
+// output tokens, autosave, stealth and approval), bar one (the live,
 // fast-changing fields - state, the sweeping figure, queue depth; see
 // barOneFields/barTwoFields), one blank separator line, and the prompt - this order
 // confirmed by Glen (2026-10-06). Everything above those five rows is scrollback: the
@@ -79,19 +79,14 @@ const barRows = 5
 // above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
 
-// barTwoFields is four of the five fields loreloom/UI-redesign.md names for bar two,
-// plus fieldPreset. The fifth of the original five, scrollback-on, is
-// Session.AtLiveEdge - see renderBarTwo. fieldPreset is added rather than fitted into
-// the original five, since /level's active preset is the one thing today's build
-// already shows for a mode the reader set (mouse, bell) and the mockup predates
-// /level, so it was never going to name a field that was not built yet.
-var barTwoFields = []int{fieldProvider, fieldModel, fieldVerbosity, fieldPreset, fieldMouse}
+// barTwoFields is the user-confirmed field order from the active status-bar task.
+var barTwoFields = []int{fieldHost, fieldCredits, fieldCost, fieldContext, fieldInput, fieldOutput, fieldAutosave, fieldStealth, fieldApproval}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
 // (see barRows and scrollbackRows for that) - it only sizes the Status array below, so a
 // field added to the fieldXxx list and the array that holds its value cannot drift apart.
-const StatusFields = 22
+const StatusFields = 31
 
 // FieldIndent is how far in the prompt row's own text sits behind the prompt.
 //
@@ -197,16 +192,18 @@ const (
 
 	// fieldPrompt is the prompt row, and it is the row the caret is on.
 	fieldPrompt
+	fieldHost
+	fieldCredits
+	fieldCost
+	fieldContext
+	fieldInput
+	fieldOutput
+	fieldAutosave
+	fieldStealth
 )
 
-// statusCount is how many fields exist, named so a loop and an array agree.
-//
-// It is one more than fieldPrompt, since the prompt row is a field like the rest and is the
-// last of them, and it is what makes the count twenty rather than nineteen.
-//
-// It is written as StatusFields rather than as the field index, and the two agreeing is the
-// check: a field added above the prompt without the count moving is a frame one row taller
-// than the height the reader asked for.
+// statusCount sizes the fixed array of status values, including fields used by
+// renderers and bookkeeping that are not all visible at once.
 const statusCount = StatusFields
 
 // The name each field reads as, in the same order as the fields above.
@@ -263,6 +260,22 @@ func fieldName(k int) string {
 		return "level"
 	case fieldPrompt:
 		return ""
+	case fieldHost:
+		return "hostname"
+	case fieldCredits:
+		return "credits"
+	case fieldCost:
+		return "cost"
+	case fieldContext:
+		return "context"
+	case fieldInput:
+		return "in"
+	case fieldOutput:
+		return "out"
+	case fieldAutosave:
+		return "autosave"
+	case fieldStealth:
+		return "stealth"
 	default:
 		return ""
 	}
@@ -396,7 +409,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 3 {
-			drawCellText(screen, x, y+row, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+			f.drawBarTwo(screen, x, y+row, width, chrome)
 			row++
 		}
 		if height >= 4 {
@@ -462,7 +475,7 @@ fill:
 
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
-	drawCellText(screen, x, y+barTwoRow, width, renderBarTwo(f.bar.Status, f.scroll <= 0), chrome)
+	f.drawBarTwo(screen, x, y+barTwoRow, width, chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
 		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
 }
@@ -562,24 +575,98 @@ func renderBarOne(status Status) (prefix, figure, suffix string) {
 	return prefix, figure, suffix
 }
 
-// renderBarTwo builds the longer-term status bar: the four Status fields in barTwoFields,
-// plus whether the viewport is at the live edge, which is DESIGN.md §5's fact (read fresh
-// each draw, not a stored setting - see Session.AtLiveEdge) standing in for the
-// scrollback-on field loreloom/UI-redesign.md names.
-//
-// Provider and model are written bare, as a reader would say them; the rest are named,
-// matching the mockup confirmed this session (`openrouter · claude-sonnet-5 ·
-// verbosity:0 · mouse:on · scroll:on`).
-func renderBarTwo(status Status, atLiveEdge bool) string {
-	parts := []string{status[fieldProvider], status[fieldModel]}
+// renderBarTwo builds the confirmed status field sequence as a plain string, which
+// also gives tests a stable way to check the ordering independently of screen width.
+func renderBarTwo(status Status) string {
+	parts := make([]string, 0, len(barTwoFields))
 	for _, k := range barTwoFields {
-		if k == fieldProvider || k == fieldModel {
-			continue
-		}
 		parts = append(parts, fieldName(k)+":"+status[k])
 	}
-	parts = append(parts, "scroll:"+onOff(atLiveEdge, "live", "back"))
 	return strings.Join(parts, " · ")
+}
+
+// drawBarTwo lays the requested fields out from both edges. When the two halves
+// meet, the left half fades toward the collision point before the right half is
+// drawn over it, making the overlap visible without changing field order.
+func (f *Frame) drawBarTwo(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
+	leftFields := []int{fieldHost, fieldCredits, fieldCost, fieldContext, fieldInput}
+	rightFields := []int{fieldOutput, fieldAutosave, fieldStealth, fieldApproval}
+	left := statusFieldsText(f.bar.Status, leftFields)
+	right := statusFieldsText(f.bar.Status, rightFields)
+	lw := DisplayWidth(left)
+	// The two runs each own one half of the row. The right run starts at the
+	// center even when its full text would not fit, so an overlong run can
+	// collide visibly instead of silently erasing the entire left side.
+	rightStart := width / 2
+	drawCellText(screen, x, y, width, left, chrome)
+	collision := lw - rightStart
+	if collision > 0 && rightStart > 0 {
+		fade := collision
+		if fade > rightStart {
+			fade = rightStart
+		}
+		start := rightStart - fade
+		segment := sliceDisplayWidth(left, start, fade)
+		drawFadedText(screen, x+start, y, fade, segment, chrome, f.palette.Style(RoleDim))
+	}
+	drawCellText(screen, x+rightStart, y, width-rightStart, right, chrome)
+}
+
+func statusFieldsText(status Status, fields []int) string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		value := status[field]
+		if value == "" {
+			value = "unavailable"
+		}
+		parts = append(parts, fieldName(field)+":"+value)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func sliceDisplayWidth(text string, start, width int) string {
+	var b strings.Builder
+	col := 0
+	for _, r := range text {
+		rw := runewidth(r)
+		if col >= start && col+rw <= start+width {
+			b.WriteRune(r)
+		}
+		col += rw
+	}
+	return b.String()
+}
+
+func drawFadedText(screen tcell.Screen, x, y, width int, text string, from, to tcell.Style) {
+	fromFG, bg, attrs := from.Decompose()
+	toFG, _, _ := to.Decompose()
+	fr, fg, fb := fromFG.RGB()
+	tr, tg, tb := toFG.RGB()
+	if fr < 0 || tr < 0 {
+		if fromFG == tcell.ColorDefault || toFG == tcell.ColorDefault {
+			to = from.Dim(true)
+		}
+		drawCellText(screen, x, y, width, text, to)
+		return
+	}
+	col := 0
+	for _, r := range text {
+		if col >= width {
+			break
+		}
+		rw := runewidth(r)
+		if rw < 1 {
+			continue
+		}
+		if col+rw > width {
+			break
+		}
+		progress := float64(col) / float64(max(1, width-1))
+		blend := func(a, b int32) int32 { return a + int32(float64(b-a)*progress) }
+		style := tcell.StyleDefault.Foreground(tcell.NewRGBColor(blend(fr, tr), blend(fg, tg), blend(fb, tb))).Background(bg).Attributes(attrs)
+		screen.SetContent(x+col, y, r, nil, style)
+		col += rw
+	}
 }
 
 // foldRowLines splits row into the physical lines a draw turns it into: one

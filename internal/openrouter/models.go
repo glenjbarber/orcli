@@ -26,6 +26,9 @@ type ModelInfo struct {
 	// scan.
 	Name string `json:"name"`
 
+	// ContextLength is the maximum context window the provider reports.
+	ContextLength int `json:"context_length"`
+
 	// Pricing is what the endpoint charges per token for this model. It decides
 	// what [ModelInfo.Free] answers, which is the one thing /freemodels exists to
 	// filter on.
