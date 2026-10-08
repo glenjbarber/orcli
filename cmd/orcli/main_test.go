@@ -547,6 +547,7 @@ func withHome(t *testing.T, body func()) {
 	t.Helper()
 
 	home := t.TempDir()
+	t.Setenv("HOME", home)
 
 	restoreOrder := config.SearchOrder
 	config.SearchOrder = []string{filepath.Join(home, "orcli.json")}

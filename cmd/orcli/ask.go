@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glenjbarber/orcli/internal/notion"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
 	"github.com/glenjbarber/orcli/internal/tui"
@@ -65,8 +66,8 @@ type chatClient interface {
 // The two are kept separate because they come from different places and change for
 // different reasons: one reflects this session's live configuration, the other is
 // whatever the reader put in a file.
-func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool) tui.AskFunc {
-	toolset := newToolset(s.Options().WorkingDir)
+func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model string, silent bool), cloudflareReady func() bool, capture *debugLog, notionToken string) tui.AskFunc {
+	toolset := newToolset(s.Options().WorkingDir, notionToken)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
 	docs := documentation(s.Options().WorkingDir)
@@ -118,13 +119,13 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 			messages = append(messages, openrouter.Message{Role: "system", Content: docs})
 		}
 		messages = append(messages, openrouter.Message{Role: "user", Content: question})
-
 		for round := 0; round < maxToolRounds; round++ {
 			var reply strings.Builder
 			var calls []openrouter.ToolCall
 			var reason string
 			var finished bool
 			var failed error
+			capture.record("request", map[string]any{"model": model, "messages": messages, "tools": schemas})
 
 			err := c.Chat(turnCtx, openrouter.Request{
 				Model:         model,
@@ -136,11 +137,19 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				switch e.Kind {
 				case openrouter.EventDelta:
 					reply.WriteString(e.Text)
+					capture.record("assistant_delta", e.Text)
 
 				case openrouter.EventTool:
 					if e.ToolCall != nil {
 						calls = append(calls, *e.ToolCall)
+						capture.record("tool_call", *e.ToolCall)
 					}
+
+				case openrouter.EventUsage:
+					capture.record("usage", e.Usage)
+
+				case openrouter.EventDone:
+					capture.record("stream_done", nil)
 
 				case openrouter.EventError:
 					// The text that arrived before a failure is kept and the
@@ -149,6 +158,7 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 					// an error has nothing to read.
 					deliver(reply.String(), level)
 					if e.Err != nil {
+						capture.record("stream_error", e.Err.Error())
 						notice(e.Err.Error(), level, tui.RoleFailure)
 						failed = e.Err
 					}
@@ -156,9 +166,11 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				case openrouter.EventFinish:
 					reason = e.Reason
 					finished = e.Finished
+					capture.record("finish", map[string]any{"reason": reason, "finished": finished})
 				}
 			})
 			if err != nil {
+				capture.record("request_error", err.Error())
 				notice(err.Error(), level, tui.RoleFailure)
 				finishedFn("failed")
 				return nil
@@ -195,10 +207,12 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				ToolCalls: calls,
 			})
 			for _, call := range calls {
+				result := runTool(toolset, approval, call)
+				capture.record("tool_result", map[string]string{"call_id": call.ID, "name": call.Function.Name, "content": result})
 				messages = append(messages, openrouter.Message{
 					Role:       "tool",
 					ToolCallID: call.ID,
-					Content:    runTool(toolset, approval, call),
+					Content:    result,
 				})
 			}
 		}
@@ -214,11 +228,12 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 // Filesystem tools are omitted, not fatal, if the root cannot be opened - a session
 // without them is a session with less in it rather than one that cannot run, the same
 // rule NewFilesystem's own doc comment states for its caller.
-func newToolset(dir string) []tools.Tool {
+func newToolset(dir, notionToken string) []tools.Tool {
 	set := []tools.Tool{tools.NewGit(dir), tools.NewShell(dir)}
 	if fs, err := tools.NewFilesystem(dir); err == nil {
 		set = append(set, fs.Tools()...)
 	}
+	set = append(set, notion.New(notionToken).ToolSet()...)
 	return set
 }
 
@@ -259,6 +274,8 @@ func runTool(toolset []tools.Tool, approval string, call openrouter.ToolCall) st
 			c.Approval = approval
 		case *tools.Shell:
 			c.Approval = approval
+		case interface{ SetApproval(string) }:
+			c.SetApproval(approval)
 		}
 		result := t.Run(json.RawMessage(call.Function.Arguments))
 		if result.Err != nil {

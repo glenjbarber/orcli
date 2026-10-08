@@ -147,6 +147,13 @@ cannot see. Git and shell use subprocesses, so they compare the resolved path
 against the resolved working directory instead. Neither ever reaches a shell:
 arguments go to the process as an array.
 
+Notion uses a workspace integration token in the `notion.api_key` configuration
+member. The model can search and read pages, work with blocks, pages, databases,
+data sources, comments, users and file-upload metadata through the public REST
+API. `notion_api` exposes the remaining documented JSON operations by name.
+Binary file transfer and connector-hosted features such as mail, agent sessions,
+and AI memory are not part of the standalone REST client.
+
 Permission is three levels in increasing precedence: an allowlist bounds what may
 be proposed, an approval mode settles every call a file rule does not, and a file
 rule under `OPENROUTER_TOOLS` settles a call whatever the mode says. The nearest
@@ -186,6 +193,20 @@ The colour writer is the interesting one. It does not re-encode the file. It
 changes the value of a top-level member, or adds one in the file's own style,
 matching indentation, line separator, and colon spacing, and preserving key
 order, whitespace, escapes, and a missing final newline.
+
+The optional `notion` block carries its integration credential and is preserved
+as raw JSON so unknown members survive configuration reads. For example:
+
+```json
+{"notion":{"api_key":"your-integration-token"}}
+```
+
+With `orcli --debug`, the interaction stream is written to
+`.orcli-debug.jsonl` in the working directory. It records user and assistant
+messages, tool calls and results, request errors, and stream completion. The
+file is mode `0600`; configured provider credentials, secret-bearing fields,
+known token formats, and long opaque token-like strings are redacted before
+each record is written.
 
 ### Compaction and cost
 

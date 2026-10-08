@@ -261,7 +261,11 @@ func (d *dispatcher) tools() (tui.Result, error) {
 	}
 
 	dir := d.session.Options().WorkingDir
-	toolset := newToolset(dir)
+	notionToken, err := d.cfg.NotionToken()
+	if err != nil {
+		return tui.Result{}, err
+	}
+	toolset := newToolset(dir, notionToken)
 
 	if len(toolset) == 0 {
 		return tui.Result{Text: fmt.Sprintf("no tools are available, contained to %s", dir)}, nil

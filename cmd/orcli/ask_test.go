@@ -60,7 +60,7 @@ func TestAskSendsTheQuestionAlone(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "a question", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAskRunsAToolCallAndReplays(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "do something", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAskStopsAfterTooManyToolRounds(t *testing.T) {
 	}
 	fake := &fakeChat{rounds: rounds, discardRequests: true}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "loop forever", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestIntroductionCarriesAgentsMD(t *testing.T) {
 		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestNoIntroductionWithoutAgentsMD(t *testing.T) {
 		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestRunToolNamesAnUnknownTool(t *testing.T) {
 // to openrouter.Tool: every tool in the set gets a schema, by the same name.
 func TestToolSchemasCoverTheWholeSet(t *testing.T) {
 	dir := t.TempDir()
-	toolset := newToolset(dir)
+	toolset := newToolset(dir, "")
 	schemas := toolSchemas(toolset)
 
 	if len(schemas) != len(toolset) {
@@ -305,7 +305,7 @@ func TestCapabilitiesNamesAnAbsentModel(t *testing.T) {
 // description, not a hand-written paraphrase.
 func TestCapabilitiesListsEveryToolByName(t *testing.T) {
 	dir := t.TempDir()
-	toolset := newToolset(dir)
+	toolset := newToolset(dir, "")
 	s := tui.New(tui.Options{Model: "some/model"})
 	got := capabilities(s, toolset, nil)
 
@@ -419,7 +419,7 @@ func TestAskSendsDocumentationAsAThirdSystemMessage(t *testing.T) {
 		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "hi", 0, false); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestHELOQuestionAsksForAnIntroduction(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), heloQuestion, 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestSilentTurnHidesOnlyTheQuestion(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil, nil)
+	a := ask(s, fake, "", nil, nil, nil, "")
 	if err := a(context.Background(), "a quiet question", 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestSilentTurnStillConfirmsTheModel(t *testing.T) {
 		gotModel, gotSilent = model, silent
 	}
 
-	a := ask(s, fake, "", confirmed, nil)
+	a := ask(s, fake, "", confirmed, nil, nil, "")
 	if err := a(context.Background(), "a quiet question", 0, true); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
