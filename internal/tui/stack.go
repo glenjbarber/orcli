@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -421,7 +422,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	shown := make([]Row, 0, backlog)
 fill:
 	for i := end - 1; i >= 0; i-- {
-		lines := foldRowLines(PlainRow(f.log[i]))
+		lines := foldRowLines(PlainRow(f.log[i]), width)
 		for j := len(lines) - 1; j >= 0; j-- {
 			shown = append(shown, lines[j])
 			if len(shown) >= backlog {
@@ -581,42 +582,178 @@ func renderBarTwo(status Status, atLiveEdge bool) string {
 	return strings.Join(parts, " · ")
 }
 
-// foldRowLines splits row into the physical lines a draw turns it into, one
-// per line break row.Text itself carries. This is the "folded when they are
-// drawn" promise [Row]'s own doc comment makes: a row is held and copied
-// whole, with every line break the model wrote intact, and is only turned
-// into more than one screen line here, at the one place that already knows
-// how tall the terminal's scrollback is.
+// foldRowLines splits row into the physical lines a draw turns it into: one
+// per line break row.Text itself carries, the way this already worked, and
+// then, within each of those, one more split for any stretch still wider
+// than width once word-wrapped. This is the "folded when they are drawn"
+// promise [Row]'s own doc comment makes: a row is held and copied whole,
+// with every line break the model wrote intact, and is only turned into
+// more than one screen line here, at the one place that already knows how
+// tall and wide the terminal's scrollback is.
 //
-// A row with no line break returns a single-element slice holding row
-// unchanged, so every existing caller's single-line case costs nothing extra
-// and behaves exactly as it did before this existed.
+// width is the draw width this fold's caller already measured for the
+// scrollback column (Draw's own width, the same one every row is about to
+// be drawn into) - a row folded to some other width would wrap at a
+// boundary the screen it is about to be drawn on does not have. width <= 0
+// skips the word-wrap pass entirely and returns the newline-only fold, which
+// is what every caller before this pass existed already got; it exists so a
+// caller with no real width in hand - a test exercising only the newline
+// fold, say - is not forced to invent one.
+//
+// A row with no line break and no need to wrap returns a single-element
+// slice holding row unchanged, so the common case costs nothing extra.
 //
 // Spans are byte ranges into the whole of row.Text, so each line's own spans
-// are cut to that line's range and rebased to start at zero, the same rule
-// cutTail's own callers already apply when a line is cut rather than folded.
-func foldRowLines(row Row) []Row {
+// are cut to that line's range and rebased to start at zero at both levels
+// of the split, the same rebaseSpans rule cutTail's own callers already
+// apply when a line is cut rather than folded.
+func foldRowLines(row Row, width int) []Row {
+	var physical []Row
 	if !strings.Contains(row.Text, "\n") {
+		physical = []Row{row}
+	} else {
+		lines := strings.Split(row.Text, "\n")
+		physical = make([]Row, len(lines))
+		offset := 0
+		for i, text := range lines {
+			start, end := offset, offset+len(text)
+			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level}
+			offset = end + 1 // +1 skips the '\n' this line was split on.
+		}
+	}
+
+	if width <= 0 {
+		return physical
+	}
+
+	out := make([]Row, 0, len(physical))
+	for _, pr := range physical {
+		out = append(out, wrapRowLine(pr, width)...)
+	}
+	return out
+}
+
+// rebaseSpans is the one place a span is cut to a sub-range of the text it
+// was measured against and rebased to start at zero within it - the rule
+// both levels of foldRowLines's split apply, and the rule factored out here
+// rather than written twice so a fix to it is a fix in one place rather
+// than two that can drift apart.
+func rebaseSpans(spans []Span, start, end int) []Span {
+	var out []Span
+	for _, sp := range spans {
+		if sp.End <= start || sp.Start >= end {
+			continue
+		}
+		s, e := max(sp.Start, start), min(sp.End, end)
+		out = append(out, Span{Start: s - start, End: e - start, Role: sp.Role})
+	}
+	return out
+}
+
+// wrapRowLine splits one already-newline-free row into further rows if its
+// own display width is over width, breaking only at a run of one or more
+// spaces so a word is never broken mid-word. A row already within width is
+// returned as the single element of a one-element slice, which costs
+// nothing beyond the slice itself and is the common case for most replies.
+//
+// A row that is entirely one RoleCode span - a line inside a fenced code
+// block, or a line that is nothing but a single inline code run - is left
+// unwrapped, full stop, on purpose: reflowing code changes what it says.
+// Breaking a line of Go, say, at whatever column the terminal happens to be
+// does not produce two shorter lines of the same code, it produces a line
+// that no longer parses and a continuation that looks like a second
+// statement. Every reader of code this codebase already defers to - a
+// terminal's own `less`, a browser's `<pre>`, this package's own cutTail -
+// handles an overlong line by scrolling or truncating it horizontally
+// rather than by reflowing it, and cutTail already does exactly that for
+// any row too wide for the terminal regardless of role. So a whole-line
+// code row is left for cutTail to truncate with its ellipsis, the same as
+// before this pass existed, rather than wrapped here.
+//
+// Prose mixed with a smaller run of inline code - "run `go test ./...`
+// before you push", say - is a different shape: the sentence around the
+// code is still prose a reader scans left to right, and the fix for an
+// overlong sentence is the fix for any overlong sentence, word-wrap. Only a
+// row that is nothing but code, where wrapping would cut into the code
+// itself with no prose on either side to break at instead, is withheld
+// from this.
+func wrapRowLine(row Row, width int) []Row {
+	if DisplayWidth(row.Text) <= width || isWholeLineCode(row) {
 		return []Row{row}
 	}
 
-	lines := strings.Split(row.Text, "\n")
-	out := make([]Row, len(lines))
+	var out []Row
+	text := row.Text
 	offset := 0
-	for i, text := range lines {
-		start, end := offset, offset+len(text)
-		var spans []Span
-		for _, sp := range row.Spans {
-			if sp.End <= start || sp.Start >= end {
-				continue
-			}
-			s, e := max(sp.Start, start), min(sp.End, end)
-			spans = append(spans, Span{Start: s - start, End: e - start, Role: sp.Role})
+	for {
+		cut := wrapCut(text, width)
+		if cut >= len(text) {
+			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level})
+			break
 		}
-		out[i] = Row{Text: text, Spans: spans, Kind: row.Kind, Level: row.Level}
-		offset = end + 1 // +1 skips the '\n' this line was split on.
+
+		piece := text[:cut]
+		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level})
+
+		rest := text[cut:]
+		trimmed := strings.TrimLeft(rest, " ")
+		offset += cut + (len(rest) - len(trimmed))
+		text = trimmed
+		if text == "" {
+			break
+		}
 	}
 	return out
+}
+
+// isWholeLineCode reports whether row is entirely one RoleCode span - the
+// shape ParseMarkdown gives a line inside a fenced code block, or a line
+// that opens and closes with its own inline code run and nothing else - the
+// one case wrapRowLine leaves unwrapped. A line that merely contains some
+// inline code alongside plain prose has more than this one span, or a span
+// that does not cover the whole line, and is word-wrapped like any other
+// line of prose.
+func isWholeLineCode(row Row) bool {
+	if len(row.Spans) != 1 {
+		return false
+	}
+	sp := row.Spans[0]
+	return sp.Role == RoleCode && sp.Start == 0 && sp.End == len(row.Text)
+}
+
+// wrapCut finds where wrapRowLine should cut text for one more line within
+// width columns: the byte offset of the space run nearest the width
+// boundary, so the cut falls at a word break rather than mid-word. text
+// itself, not yet cut, is returned via len(text) when text already fits.
+//
+// A single "word" wider than width on its own - a long URL with no spaces,
+// say - has no space to break at within budget. Rather than loop forever
+// offering the same unbroken word again, this falls back to CutColumn's own
+// rune-safe cut at the width boundary, which is the one case this still
+// breaks mid-word: there being no other option left, a broken word reads
+// better than a line that never ends or a line that silently overruns the
+// width this exists to respect.
+func wrapCut(text string, width int) int {
+	if DisplayWidth(text) <= width {
+		return len(text)
+	}
+
+	fit, _ := CutColumn(text, width)
+	cut := len(fit)
+	if sp := strings.LastIndexByte(fit, ' '); sp >= 0 {
+		return sp
+	}
+	if cut == 0 {
+		// width itself cannot hold even one rune (e.g. a wide rune in a
+		// one-column budget); advance by one rune's worth of bytes so the
+		// caller always makes progress.
+		if r, size := utf8.DecodeRuneInString(text); size > 0 {
+			_ = r
+			return size
+		}
+		return 1
+	}
+	return cut
 }
 
 // drawSweepText draws the twiddle, each column coloured from sweepColors for the
