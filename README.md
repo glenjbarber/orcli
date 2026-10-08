@@ -201,6 +201,17 @@ as raw JSON so unknown members survive configuration reads. For example:
 {"notion":{"api_key":"your-integration-token"}}
 ```
 
+The optional `github` block carries an `api_key` string and preserves unknown
+members in the same way:
+
+```json
+{"github":{"api_key":"your-github-token"}}
+```
+
+The value is treated as an opaque string. This adds configuration support only;
+it does not enable GitHub API requests or other GitHub operations. Keep the
+configuration file at mode `0600`.
+
 With `orcli --debug`, the interaction stream is written to
 `.orcli-debug.jsonl` in the working directory from startup. During a session,
 `/trace` starts capture, `/trace status` reports whether it is active, and
