@@ -43,3 +43,38 @@ func TestNotionTokenRejectsWrongShape(t *testing.T) {
 		t.Fatal("NotionToken accepted a non-string credential")
 	}
 }
+
+func TestNotionTaskSettingsBindOneSourceAndAssignee(t *testing.T) {
+	h := home(t)
+	writeConfigAt(t, h, `{"api_key":"openrouter","notion":{"api_key":"ntn_secret","task_data_source_id":"12345678-1234-1234-1234-123456789abc","task_assignee_property":"Assignee","task_assignee_id":"abcdefab-cdef-abcd-efab-cdefabcdefab","task_status_property":"Status","future":"keep"}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, property, assignee, status, err := cfg.NotionTaskSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source != "12345678-1234-1234-1234-123456789abc" || property != "Assignee" || assignee != "abcdefab-cdef-abcd-efab-cdefabcdefab" || status != "Status" {
+		t.Fatalf("NotionTaskSettings = (%q, %q, %q, %q)", source, property, assignee, status)
+	}
+}
+
+func TestNotionTaskSettingsRejectPartialOrInvalidConfiguration(t *testing.T) {
+	for _, settings := range []string{
+		`{"task_data_source_id":"12345678-1234-1234-1234-123456789abc"}`,
+		`{"task_data_source_id":"../../pages","task_assignee_property":"Assignee","task_assignee_id":"abcdefab-cdef-abcd-efab-cdefabcdefab","task_status_property":"Status"}`,
+	} {
+		t.Run(settings, func(t *testing.T) {
+			h := home(t)
+			writeConfigAt(t, h, `{"api_key":"openrouter","notion":`+settings+`}`)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, _, err := cfg.NotionTaskSettings(); err == nil {
+				t.Fatal("NotionTaskSettings accepted partial or invalid task scope")
+			}
+		})
+	}
+}
