@@ -212,6 +212,11 @@ Every commit carries the trailer:
 Co-Authored-By:	Space Bunny Alpha
 ```
 
+After opening a pull request, ensure the account that opened it is subscribed
+to its notifications. GitHub automatically subscribes the pull request author;
+when the connection does not expose subscription controls, rely on that default
+and report it rather than claiming a separate watcher was added.
+
 Push the requested branch after the user explicitly asks, then report the remote
 result. Do not push unrelated branches or uncommitted changes.
 
