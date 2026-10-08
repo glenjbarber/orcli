@@ -148,10 +148,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	cfg, err := config.Load()
 	switch {
 	case err == nil:
-	case errors.Is(err, config.ErrNoAPIKey), errors.Is(err, config.ErrNotFound):
-		// Neither absence stops startup. An interface that refuses to open leaves
-		// nothing on screen to explain why, and the remedy for both is a key in a
-		// file the reader already knows the path of.
+	case errors.Is(err, config.ErrNoAPIKey):
+		// A missing key does not stop startup. Keep an explicit empty member in the
+		// file the reader can edit, and let the interface report the missing value.
+		if err := config.EnsureAPIKeyStub(config.Path()); err != nil {
+			return err
+		}
+		cfg = config.Default()
+	case errors.Is(err, config.ErrNotFound):
 		cfg = config.Default()
 	default:
 		// Everything else is a fault: a bad mode, a malformed body, a directory

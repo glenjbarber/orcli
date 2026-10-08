@@ -57,9 +57,37 @@ func InstallDefault() error {
 	return nil
 }
 
+// EnsureAPIKeyStub adds an explicit empty api_key member when the configuration
+// file has no api_key member. It leaves an existing member, including an empty
+// one, and every unrelated byte untouched.
+func EnsureAPIKeyStub(path string) error {
+	if err := checkMode(path); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("config: read %s: %w", path, err)
+	}
+	if !isObject(data) {
+		return fmt.Errorf("config: %s: %w", path, ErrNotAnObject)
+	}
+	if _, found := findMember(data, "api_key"); found {
+		return nil
+	}
+	const emptyString = `""`
+	edited, err := setMember(data, "api_key", emptyString)
+	if err != nil {
+		return err
+	}
+	if err := checkMember(edited, "api_key", emptyString); err != nil {
+		return fmt.Errorf("config: the edit did not verify: %w", err)
+	}
+	return osWriteFile(path, edited)
+}
+
 // AddTrusted records directories in the trusted list.
 //
-// It is the second of the three writers, between InstallDefault and WriteColor. It
+// It is one of the runtime writers, alongside AddTrusted and WriteColor. It
 // is a writer here rather than in the command that asked, because the file holds a
 // credential and a writer outside this package is a second thing that can corrupt
 // it. The edit copies the file as bytes rather than re-encoding it, for the reason

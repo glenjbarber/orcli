@@ -1,9 +1,42 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestEnsureAPIKeyStubAddsOnlyMissingMember(t *testing.T) {
+	h := home(t)
+	body := "{\n  \"model\": \"some/model\",\n  \"future\": {\"keep\": true}\n}"
+	path := writeConfigAt(t, h, body)
+	if err := EnsureAPIKeyStub(path); err != nil {
+		t.Fatalf("EnsureAPIKeyStub: %v", err)
+	}
+	got := string(readConfig(t, path))
+	for _, want := range []string{`"api_key": ""`, `"model": "some/model"`, `"future": {"keep": true}`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config %s does not contain %s", got, want)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != FileMode {
+		t.Fatalf("config mode = %v, %v; want %04o", info, err, FileMode)
+	}
+}
+
+func TestEnsureAPIKeyStubDoesNotChangeExistingKeyOrEmptyStub(t *testing.T) {
+	h := home(t)
+	for _, body := range []string{`{"api_key":"keep-me","other":true}`, `{"api_key":"","other":true}`} {
+		path := writeConfigAt(t, h, body)
+		if err := EnsureAPIKeyStub(path); err != nil {
+			t.Fatalf("EnsureAPIKeyStub(%s): %v", body, err)
+		}
+		if got := string(readConfig(t, path)); got != body {
+			t.Errorf("config changed from %q to %q", body, got)
+		}
+	}
+}
 
 // TestWriteColorAddsAMember covers the case the design leads with: a file that
 // has never carried the key.

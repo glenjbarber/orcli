@@ -20,9 +20,10 @@
 // Everything else is fatal: a bad mode, a malformed body, a top level that is
 // not an object, or a path that is a directory.
 //
-// There are exactly three writers, and no others:
+// There are exactly four writers, and no others:
 //
 //	InstallDefault   startup, only when absent, exclusive create, 0600
+//	EnsureAPIKeyStub adds an empty api_key member when it is absent
 //	Trust            adds a directory to ORCLI_TRUSTED
 //	WriteColor       sets the top-level color key
 //
