@@ -54,6 +54,19 @@ root@lolhost $ <input>
 pane bar       0 | 1 | 2
 ```
 
+Status bar 2 uses two halves. Hostname, Credits, Cost, Context and In begin at
+the left edge; Out, Autosave, Stealth and Approval begin at the right edge.
+When the halves overlap, the right half draws over the left and the visible
+left text fades in foreground color toward the collision point.
+
+Cost and token counts are accumulated from provider usage events for this
+session. Credits are the remaining account balance when the provider exposes
+it to the configured key; Context is the latest prompt's share of the model's
+reported context limit, shown as a percentage.
+Unavailable provider data reads `unavailable`. Autosave and Stealth report
+their current toggles. `/stealth` is the visible command name; `/cognito`
+remains a hidden compatibility alias.
+
 **The two status bars do not swap.** An earlier draft had them reversed and the
 reader wrote "hold the swapping".
 
