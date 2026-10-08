@@ -20,12 +20,13 @@
 // Everything else is fatal: a bad mode, a malformed body, a top level that is
 // not an object, or a path that is a directory.
 //
-// There are exactly four writers, and no others:
+// There are exactly five writers, and no others:
 //
 //	InstallDefault   startup, only when absent, exclusive create, 0600
 //	EnsureAPIKeyStub adds an empty api_key member when it is absent
 //	Trust            adds a directory to ORCLI_TRUSTED
 //	WriteColor       sets the top-level color key
+//	WriteTrace       sets the top-level trace key
 //
 // Neither runtime writer ever creates the file. A file made by a command would
 // hold no credential and would suppress first-time setup, which is worse than

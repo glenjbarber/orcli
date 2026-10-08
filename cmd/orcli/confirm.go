@@ -50,6 +50,10 @@ import (
 // has already written, or already found nothing to do, is not asked again on a later
 // turn.
 func confirmModel(s *tui.Session) func(string, bool) {
+	return confirmModelAt(s, configPath)
+}
+
+func confirmModelAt(s *tui.Session, pathForSession func() (string, error)) func(string, bool) {
 	written := false
 
 	return func(model string, silent bool) {
@@ -64,7 +68,7 @@ func confirmModel(s *tui.Session) func(string, bool) {
 		// same reasoning that un-silenced the HELO's reply itself.
 		notice := s.Notice
 
-		path, err := configPath()
+		path, err := pathForSession()
 		if err != nil {
 			notice(fmt.Sprintf("the model is %s, and the configuration file could not be found: %v",
 				model, err), 0, tui.RoleFailure)
@@ -110,8 +114,11 @@ const lastModel = "last"
 // The session is told about the change as well as the file, since the frame draws the
 // model and a command that wrote the file without changing what the session is
 // answering with would leave the two disagreeing until the next turn.
-func modelHandler(s *tui.Session, args string) (tui.Result, error) {
-	path, err := configPath()
+func modelHandler(s *tui.Session, args string, path string) (tui.Result, error) {
+	var err error
+	if path == "" {
+		path, err = configPath()
+	}
 	if err != nil {
 		return tui.Result{}, err
 	}

@@ -194,6 +194,10 @@ changes the value of a top-level member, or adds one in the file's own style,
 matching indentation, line separator, and colon spacing, and preserving key
 order, whitespace, escapes, and a missing final newline.
 
+`--config PATH` reads and writes the named file for the current session. It does
+not create or rewrite the default file, and a later run without the flag uses the
+ordinary search order. The selected file must already exist and be mode `0600`.
+
 The optional `notion` block carries its integration credential and is preserved
 as raw JSON so unknown members survive configuration reads. For example:
 
@@ -216,6 +220,9 @@ With `orcli --debug`, the interaction stream is written to
 `.orcli-debug.jsonl` in the working directory from startup. During a session,
 `/trace` starts capture, `/trace status` reports whether it is active, and
 `/trace off` stops it. Runtime capture records from the moment it is enabled.
+The enabled state is saved in the active configuration file and restored at the
+next startup; an older file without a `trace` member keeps the default, disabled
+state.
 The stream includes user and assistant messages, slash commands, tool calls and
 results, request errors, and stream completion. The file is mode `0600`;
 configured provider credentials, secret-bearing fields, known token formats,

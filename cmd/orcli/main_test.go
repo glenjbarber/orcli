@@ -32,7 +32,7 @@ func runIn(t *testing.T, trusted bool, args ...string) (stdout, stderr string, e
 	t.Helper()
 
 	stand := func() {
-		gate = func(string, config.Config, io.Reader, io.Writer, io.Writer) bool { return trusted }
+		gate = func(string, config.Config, io.Reader, io.Writer, io.Writer, string) bool { return trusted }
 	}
 	stand()
 	t.Cleanup(stand)
@@ -116,8 +116,10 @@ func TestHelpFlagAndSubcommandAgree(t *testing.T) {
 	if flagged != subbed {
 		t.Error("--help and help printed different usage")
 	}
-	if !strings.Contains(flagged, "--bootstrap") {
-		t.Error("the usage does not list --bootstrap")
+	for _, want := range []string{"--bootstrap", "--config PATH"} {
+		if !strings.Contains(flagged, want) {
+			t.Errorf("the usage does not list %s", want)
+		}
 	}
 }
 
@@ -198,6 +200,101 @@ func TestSessionReportsWhatItResolved(t *testing.T) {
 			t.Errorf("the report does not show the tools as on:\n%s", out)
 		}
 	})
+}
+
+func TestConfigFlagUsesSelectedFileAndLeavesDefaultUntouched(t *testing.T) {
+	withHome(t, func() {
+		defaultPath := writeConfig(t, `{"api_key":"default","note":"keep"}`)
+		defaultBefore, err := os.ReadFile(defaultPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selectedPath := filepath.Join(t.TempDir(), "config folder", "orcli config.json")
+		if err := os.MkdirAll(filepath.Dir(selectedPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(selectedPath, []byte(`{"api_key":"selected","model":"selected/model"}`), config.FileMode); err != nil {
+			t.Fatal(err)
+		}
+
+		out, _, err := runIn(t, false, "--config", selectedPath, "--dir", t.TempDir())
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(out, "configuration  "+selectedPath) || !strings.Contains(out, "model          selected/model") {
+			t.Fatalf("startup did not use the selected file:\n%s", out)
+		}
+		defaultAfter, err := os.ReadFile(defaultPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(defaultAfter) != string(defaultBefore) {
+			t.Fatalf("--config changed the default file from %q to %q", defaultBefore, defaultAfter)
+		}
+	})
+}
+
+func TestMissingExplicitConfigDoesNotInstallDefault(t *testing.T) {
+	withHome(t, func() {
+		selectedPath := filepath.Join(t.TempDir(), "missing config.json")
+		_, _, err := runIn(t, false, "--config", selectedPath)
+		if err == nil || !strings.Contains(err.Error(), selectedPath) {
+			t.Fatalf("missing --config path error = %v, want it to name %s", err, selectedPath)
+		}
+		if _, err := os.Stat(config.SearchOrder[0]); !os.IsNotExist(err) {
+			t.Fatalf("explicit missing config installed the default file: stat error %v", err)
+		}
+	})
+}
+
+func TestTraceSettingRestoresAndUsesActiveConfigPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace preferences.json")
+	if err := os.WriteFile(path, []byte(`{"api_key":"k"}`), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
+	d := newDispatcherFor(config.Config{})
+	d.configFile = path
+	d.capture = newDebugLog(t.TempDir(), "k")
+	d.withSession(tui.New(tui.Options{APIKey: "k"}))
+	if out, err := d.Run(context.Background(), "/trace"); err != nil || !strings.HasPrefix(out.Text, "trace is on: ") {
+		t.Fatalf("/trace on = %+v, %v", out, err)
+	}
+	if cfg, _, err := config.LoadFromPath(path); err != nil || !cfg.Trace {
+		t.Fatalf("saved trace setting = %v, %v; want enabled", cfg.Trace, err)
+	}
+	if _, err := d.Run(context.Background(), "/trace off"); err != nil {
+		t.Fatalf("/trace off: %v", err)
+	}
+	if cfg, _, err := config.LoadFromPath(path); err != nil || cfg.Trace {
+		t.Fatalf("saved trace setting after off = %v, %v; want disabled", cfg.Trace, err)
+	}
+
+	oldDraw := draw
+	var restored bool
+	draw = func(_ context.Context, _ *tui.Session, _ config.Config, _ io.Reader, _ io.Writer, capture *debugLog, _ string) error {
+		restored = capture.enabled()
+		return nil
+	}
+	t.Cleanup(func() { draw = oldDraw })
+	withHome(t, func() {
+		if _, _, err := runIn(t, false, "--config", path, "--dir", t.TempDir()); err != nil {
+			t.Fatalf("run with trace disabled: %v", err)
+		}
+	})
+	if restored {
+		t.Fatal("startup enabled trace capture when the saved setting was false")
+	}
+	if err := os.WriteFile(path, []byte(`{"api_key":"k","trace":true}`), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
+	withHome(t, func() {
+		if _, _, err := runIn(t, false, "--config", path, "--dir", t.TempDir()); err != nil {
+			t.Fatalf("run with trace enabled: %v", err)
+		}
+	})
+	if !restored {
+		t.Fatal("startup did not restore enabled trace capture")
+	}
 }
 
 // TestSessionReportsTheTrustAnswer covers the case that matters most in the report: a
@@ -312,7 +409,7 @@ func TestAnAbsentBootstrapDocumentIsRefusedBeforeTheTrustQuestion(t *testing.T) 
 		asked := false
 		restore := gate
 		t.Cleanup(func() { gate = restore })
-		gate = func(string, config.Config, io.Reader, io.Writer, io.Writer) bool {
+		gate = func(string, config.Config, io.Reader, io.Writer, io.Writer, string) bool {
 			asked = true
 			return false
 		}

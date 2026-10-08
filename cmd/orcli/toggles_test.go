@@ -45,6 +45,10 @@ func TestHelpListsEveryNameAndSkipsHiddenOnes(t *testing.T) {
 func TestTraceCommandCapturesSessionCommands(t *testing.T) {
 	d := togglesDispatcher(t)
 	d.capture = newDebugLog(t.TempDir(), "configured-secret")
+	d.configFile = filepath.Join(t.TempDir(), "trace config.json")
+	if err := os.WriteFile(d.configFile, []byte(`{"api_key":"k"}`), config.FileMode); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	out, err := d.Run(context.Background(), "/trace")
 	if err != nil || !strings.HasPrefix(out.Text, "trace is on: ") {
@@ -59,6 +63,37 @@ func TestTraceCommandCapturesSessionCommands(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "trace_started") || !strings.Contains(string(data), "trace_stopped") || !strings.Contains(string(data), "/trace off") {
 		t.Fatalf("trace does not include command activity: %s", data)
+	}
+	cfg, _, err := config.LoadFromPath(d.configFile)
+	if err != nil || cfg.Trace {
+		t.Fatalf("trace setting after /trace off = %v, %v; want false", cfg.Trace, err)
+	}
+}
+
+func TestTraceCommandReportsWhenItsSettingCannotBeSaved(t *testing.T) {
+	d := togglesDispatcher(t)
+	d.configFile = filepath.Join(t.TempDir(), "unwritable config.json")
+	if err := os.WriteFile(d.configFile, []byte(`{"api_key":"k"}`), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(d.configFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.capture = newDebugLog(t.TempDir(), "k")
+
+	out, err := d.Run(context.Background(), "/trace")
+	if err != nil {
+		t.Fatalf("/trace: %v", err)
+	}
+	if !strings.Contains(out.Text, "saving the trace setting") || strings.Contains(out.Text, "saved to") {
+		t.Fatalf("trace save failure was not reported accurately: %q", out.Text)
+	}
+	data, err := os.ReadFile(d.configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"trace"`) {
+		t.Fatalf("failed trace setting write changed config: %s", data)
 	}
 }
 

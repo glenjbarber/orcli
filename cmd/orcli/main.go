@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,6 +90,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	var (
 		showVersion     = fs.Bool("version", false, "print the version and stop")
 		showHelp        = fs.Bool("help", false, "print the usage and stop")
+		configFile      = fs.String("config", "", "read and write this configuration file for the session")
 		bootstrap       = fs.String("bootstrap", "", "read a document from this path")
 		mouse           = fs.Bool("mouse", false, "report the mouse")
 		bell            = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
@@ -131,32 +134,44 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 	}
 
-	// ~/.orcli is ensured before anything else, so it exists from the moment
-	// orcli starts rather than only appearing once some later feature - a save,
-	// a /begin, cognito - happens to write beneath it as a side effect of its
-	// own first write.
-	if err := config.EnsureDir(); err != nil {
-		return err
+	var cfg config.Config
+	var activeConfigPath string
+	var err error
+	if *configFile == "" {
+		// The default directory and file are prepared only for ordinary startup.
+		// Selecting a file is scoped to this run and must leave the default alone.
+		if err := config.EnsureDir(); err != nil {
+			return err
+		}
+		if err := config.InstallDefault(); err != nil {
+			return err
+		}
+		activeConfigPath, err = config.DefaultPath()
+		if err == nil {
+			cfg, err = config.Load()
+		}
+	} else {
+		selectedPath := *configFile
+		if !strings.HasPrefix(selectedPath, "~/") && !filepath.IsAbs(selectedPath) {
+			selectedPath, err = filepath.Abs(selectedPath)
+			if err != nil {
+				return fmt.Errorf("resolve --config path: %w", err)
+			}
+		}
+		cfg, activeConfigPath, err = config.LoadFromPath(selectedPath)
 	}
-
-	// A missing configuration file is installed before it is loaded, so the report
-	// a first-time reader gets names a file that exists rather than one they have to
-	// create themselves.
-	if err := config.InstallDefault(); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load()
 	switch {
 	case err == nil:
 	case errors.Is(err, config.ErrNoAPIKey):
 		// A missing key does not stop startup. Keep an explicit empty member in the
 		// file the reader can edit, and let the interface report the missing value.
-		if err := config.EnsureAPIKeyStub(config.Path()); err != nil {
+		if err := config.EnsureAPIKeyStub(activeConfigPath); err != nil {
 			return err
 		}
-		cfg = config.Default()
 	case errors.Is(err, config.ErrNotFound):
+		if *configFile != "" {
+			return err
+		}
 		cfg = config.Default()
 	default:
 		// Everything else is a fault: a bad mode, a malformed body, a directory
@@ -212,6 +227,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return err
 		}
 		capture.record("session", map[string]any{"directory": workDir, "version": version})
+	} else if cfg.Trace {
+		if err := capture.enable(false); err != nil {
+			return fmt.Errorf("restore trace capture: %w", err)
+		}
 	}
 
 	s := session{
@@ -226,17 +245,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		PaneActiveColor:      firstNonEmpty(*paneActiveColor, cfg.PaneActiveColor),
 		PaneDoneColor:        firstNonEmpty(*paneDoneColor, cfg.PaneDoneColor),
 		WorkingDir:           workDir,
+		ConfigPath:           activeConfigPath,
 	}
 
 	// A refusal is not a failure. A reader who does not want to approve a directory
 	// can still use the interface; it has no tools, since a tool acts on their
 	// behalf and this directory is not theirs.
-	s.HasTools = gate(workDir, cfg, stdin, stdout, stderr)
+	s.HasTools = gate(workDir, cfg, stdin, stdout, stderr, activeConfigPath)
 
 	// The interface is opened here, between the trust question and the report, so the
 	// directory the reader just answered about is the one the session carries.
 	//
-	if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout, capture); err != nil {
+	if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout, capture, activeConfigPath); err != nil {
 		if !errors.Is(err, tui.ErrNoTerminal) {
 			return err
 		}
@@ -269,6 +289,7 @@ type session struct {
 	PaneDoneColor        string
 	Bootstrap            string
 	WorkingDir           string
+	ConfigPath           string
 }
 
 // tuiSession builds the interface's own session from what startup resolved.
@@ -373,7 +394,7 @@ func tuiApproval(mode config.Approval) tui.Approval {
 // interface that opens and tells them so when they type a question, rather than one
 // that refused to start.
 func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
-	stdin io.Reader, stdout io.Writer, capture *debugLog) error {
+	stdin io.Reader, stdout io.Writer, capture *debugLog, configFile string) error {
 
 	in, inOK := stdin.(*os.File)
 	out, outOK := stdout.(*os.File)
@@ -383,6 +404,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 
 	d := newDispatcherFor(cfg)
 	d.capture = capture
+	d.configFile = configFile
 	d.canAsk = func() bool { return canAsk(s) }
 	notionToken, err := cfg.NotionToken()
 	if err != nil {
@@ -411,14 +433,14 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	if canAsk(s) {
 		helo = heloQuestion
 	}
-	confirmations := map[*tui.Session]func(string, bool){s: confirmModel(s)}
+	confirmations := map[*tui.Session]func(string, bool){s: confirmModelAt(s, d.activeConfigPath)}
 	var confirmationMu sync.Mutex
 	askForSession := func(target *tui.Session) tui.AskFunc {
 		confirmationMu.Lock()
 		defer confirmationMu.Unlock()
 		confirmed, ok := confirmations[target]
 		if !ok {
-			confirmed = confirmModel(target)
+			confirmed = confirmModelAt(target, d.activeConfigPath)
 			confirmations[target] = confirmed
 		}
 		return ask(target, newTransport(cfg), cfg.AttributionID, confirmed, d.cloudflareReady, capture, notionToken, apiaryURL, apiaryToken)
@@ -472,7 +494,7 @@ func refreshStatusData(ctx context.Context, s *tui.Session, d *dispatcher) {
 // printSession reports a session as plain text.
 func printSession(w io.Writer, s session) {
 	fmt.Fprintf(w, "orcli %s\n", version)
-	fmt.Fprintf(w, "  configuration  %s\n", orNone(config.Path()))
+	fmt.Fprintf(w, "  configuration  %s\n", orNone(s.ConfigPath))
 	fmt.Fprintf(w, "  credential     %s\n", credential(s.Config.APIKey))
 	fmt.Fprintf(w, "  provider       %s\n", orNone(s.Config.Provider))
 	fmt.Fprintf(w, "  model          %s\n", orNone(s.Config.Model))
@@ -512,13 +534,13 @@ func credential(key string) string {
 // A directory already listed is not asked about again. A refusal returns false and
 // records nothing, since an empty line, a key pressed for another reason and a
 // non-interactive reader are all the same answer, which is no.
-func ensureTrusted(dir string, cfg config.Config, stdin io.Reader, stdout, stderr io.Writer) bool {
+func ensureTrusted(dir string, cfg config.Config, stdin io.Reader, stdout, stderr io.Writer, path string) bool {
 	t := config.Trust{
 		In:    stdin,
 		Out:   stdout,
 		Warn:  func(err error) { fmt.Fprintln(stderr, "orcli:", err) },
 		Read:  func() (config.Config, error) { return cfg, nil },
-		Write: func(updated config.Config) error { return writeTrust(updated) },
+		Write: func(updated config.Config) error { return writeTrust(updated, path) },
 	}
 	return t.EnsureTrusted(dir)
 }
@@ -528,11 +550,7 @@ func ensureTrusted(dir string, cfg config.Config, stdin io.Reader, stdout, stder
 // The path is resolved here rather than inside internal/config so a caller can see
 // which file is being written, and the edit is delegated so the byte-level work
 // stays with the package that owns the file.
-func writeTrust(cfg config.Config) error {
-	path, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
+func writeTrust(cfg config.Config, path string) error {
 	if err := config.AddTrusted(path, cfg.Trusted); err != nil {
 		return fmt.Errorf("record the trusted directory in %s: %w", path, err)
 	}
@@ -593,6 +611,7 @@ usage:
 flags:
   --version              print the version and stop
   --help                 print this message and stop
+  --config PATH          read and write this configuration file for this session
   --bootstrap PATH       read a document from PATH
   --mouse                report the mouse
   --bell                 ring the terminal bell when a reply arrives
@@ -608,7 +627,7 @@ configuration:
   A credential is read from the configuration file and from nowhere else.
   OPENROUTER_API_KEY is ignored even when set. The file is found at
   ~/.orcli.json and then at ~/.config/orcli/orcli.json, and the first match wins.
-  It must be mode 0600.
+  It must be mode 0600. --config selects a different file for this session only.
 
 in the interface:
   Type a question and press enter. There is no /connect: your first question is
@@ -617,7 +636,8 @@ in the interface:
   choose one and /model last to go back to the one before it. Type /cloudflare
   to manage DNS records, and /cloudflare confirm to apply a change it showed you.
   /trace enables redacted stream capture after a problem; /trace status reports
-  whether it is active, and /trace off stops it. /quit leaves.
+  whether it is active, and /trace off stops it. Its setting is saved in the
+  active configuration file and restored next time. /quit leaves.
 
 tools:
   A directory is asked about once and the answer is recorded. A reader who

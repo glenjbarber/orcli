@@ -75,6 +75,17 @@ func (d *dispatcher) trace(args string) (tui.Result, error) {
 	if err != nil {
 		return tui.Result{}, err
 	}
+	if strings.TrimSpace(args) == "status" {
+		return tui.Result{Text: text}, nil
+	}
+	path, err := d.activeConfigPath()
+	if err != nil {
+		return tui.Result{Text: fmt.Sprintf("%s, and the trace setting could not be saved: %v", text, err)}, nil
+	}
+	d.cfg.Trace = d.capture.enabled()
+	if err := config.WriteTrace(path, d.cfg.Trace); err != nil {
+		return tui.Result{Text: fmt.Sprintf("%s, and saving the trace setting to %s failed: %v", text, path, err)}, nil
+	}
 	return tui.Result{Text: text}, nil
 }
 
@@ -249,7 +260,7 @@ func (d *dispatcher) color(args string) (tui.Result, error) {
 
 	d.session.SetColor(on)
 
-	path, err := configPath()
+	path, err := d.activeConfigPath()
 	if err != nil {
 		return tui.Result{Text: fmt.Sprintf(
 			"colour is %s, and the configuration file could not be found so the choice is not saved: %v",
