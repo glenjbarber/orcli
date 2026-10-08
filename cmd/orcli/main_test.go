@@ -567,3 +567,19 @@ func writeConfig(t *testing.T, body string) string {
 	}
 	return path
 }
+
+func TestMissingAPIKeyLeavesAnEmptyConfigStub(t *testing.T) {
+	withHome(t, func() {
+		_, _, err := runIn(t, false)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		data, readErr := os.ReadFile(config.SearchOrder[0])
+		if readErr != nil {
+			t.Fatalf("read config: %v", readErr)
+		}
+		if !strings.Contains(string(data), `"api_key": ""`) {
+			t.Fatalf("config has no empty API-key stub: %s", data)
+		}
+	})
+}
