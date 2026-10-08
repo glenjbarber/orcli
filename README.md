@@ -202,11 +202,13 @@ as raw JSON so unknown members survive configuration reads. For example:
 ```
 
 With `orcli --debug`, the interaction stream is written to
-`.orcli-debug.jsonl` in the working directory. It records user and assistant
-messages, tool calls and results, request errors, and stream completion. The
-file is mode `0600`; configured provider credentials, secret-bearing fields,
-known token formats, and long opaque token-like strings are redacted before
-each record is written.
+`.orcli-debug.jsonl` in the working directory from startup. During a session,
+`/trace` starts capture, `/trace status` reports whether it is active, and
+`/trace off` stops it. Runtime capture records from the moment it is enabled.
+The stream includes user and assistant messages, slash commands, tool calls and
+results, request errors, and stream completion. The file is mode `0600`;
+configured provider credentials, secret-bearing fields, known token formats,
+and long opaque token-like strings are redacted before each record is written.
 
 ### Compaction and cost
 
