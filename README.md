@@ -212,9 +212,40 @@ members in the same way:
 {"github":{"api_key":"your-github-token"}}
 ```
 
-The value is treated as an opaque string. This adds configuration support only;
-it does not enable GitHub API requests or other GitHub operations. Keep the
+The value is treated as an opaque string. Task operations also require an
+account login and explicit repository allowlist:
+
+```json
+{"github":{"api_key":"your-fine-grained-token","login":"your-login","repositories":["owner/repo"]}}
+```
+
+The token needs Issues read/write and Metadata read access on each listed
+repository. `@github tasks` reads assigned issues and comments and can create,
+update, change state, and comment on issues. Pull requests are excluded from
+task listings. `github_tasks` is not added to the tool set unless all three
+settings are valid. The app never expands the repository allowlist. Keep the
 configuration file at mode `0600`.
+
+Task operations in Notion require the integration token to be shared with the
+task data source, plus explicit IDs/property names that bind task operations to
+one source and one assignee:
+
+```json
+{"notion":{"api_key":"your-integration-token","task_data_source_id":"00000000-0000-0000-0000-000000000000","task_assignee_property":"Assignee","task_assignee_id":"00000000-0000-0000-0000-000000000000","task_status_property":"Status"}}
+```
+
+`@notion tasks` lists tasks assigned to that person, fetches their page and
+content, and supports creation, property/title updates, status changes, and
+comments. New tasks are placed in the configured data source and assigned to
+the configured person. Explicit page operations first verify the page belongs
+to that data source. Both integrations use Orcli's own configured credentials;
+they do not inherit ChatGPT or other connector credentials. Tool approval and
+`OPENROUTER_TOOLS` file rules continue to control writes. Writes are not retried
+automatically: a transport or server failure can leave an unknown outcome, so
+inspect the issue/task before trying again.
+
+The current integration inventory, exact permissions, gaps, and verification
+limits are recorded in [the GitHub and Notion task integration audit](doc/github-notion-task-integration-audit.md).
 
 With `orcli --debug`, the interaction stream is written to
 `.orcli-debug.jsonl` in the working directory from startup. During a session,
