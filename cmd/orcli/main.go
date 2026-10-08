@@ -72,6 +72,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		bell        = fs.Bool("bell", false, "ring the terminal bell when a reply arrives")
 		color       = fs.Bool("color", false, "write colour")
 		dir         = fs.String("dir", "", "run in this directory rather than the current directory")
+		debug       = fs.Bool("debug", false, "capture the conversation stream in .orcli-debug.jsonl")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -141,6 +142,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return fmt.Errorf("read the working directory: %w", err)
 		}
 	}
+	var capture *debugLog
+	if *debug {
+		notionToken, _ := cfg.NotionToken()
+		cloudflareToken, _ := cfg.CloudflareAPIKey()
+		capture, err = openDebugLog(workDir, cfg.APIKey, notionToken, cloudflareToken)
+		if err != nil {
+			return err
+		}
+		defer capture.close()
+		capture.record("session", map[string]any{"directory": workDir, "version": version})
+	}
 
 	s := session{
 		Config:     cfg,
@@ -160,7 +172,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	// The interface is opened here, between the trust question and the report, so the
 	// directory the reader just answered about is the one the session carries.
 	//
-	if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout); err != nil {
+	if err := draw(ctx, s.tuiSession(), s.Config, stdin, stdout, capture); err != nil {
 		if !errors.Is(err, tui.ErrNoTerminal) {
 			return err
 		}
@@ -253,7 +265,7 @@ func tuiApproval(mode config.Approval) tui.Approval {
 // interface that opens and tells them so when they type a question, rather than one
 // that refused to start.
 func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
-	stdin io.Reader, stdout io.Writer) error {
+	stdin io.Reader, stdout io.Writer, capture *debugLog) error {
 
 	in, inOK := stdin.(*os.File)
 	out, outOK := stdout.(*os.File)
@@ -263,6 +275,10 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 
 	d := newDispatcherFor(cfg)
 	d.canAsk = func() bool { return canAsk(s) }
+	notionToken, err := cfg.NotionToken()
+	if err != nil {
+		return err
+	}
 
 	// The dispatcher needs the session so `/model` can change the model the next turn
 	// is sent with, not only the one written to the file.
@@ -273,7 +289,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// is what writes the model, and that is the connection there is no command for.
 	return tui.Start(ctx, s,
 		d.Run,
-		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
+		ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s), capture, notionToken),
 	)
 }
 
@@ -403,6 +419,7 @@ flags:
   --bell                 ring the terminal bell when a reply arrives
   --color                write colour
   --dir DIR              run in DIR rather than the current directory
+  --debug                capture the conversation in .orcli-debug.jsonl
 
 configuration:
   A credential is read from the configuration file and from nowhere else.

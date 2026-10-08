@@ -108,6 +108,9 @@ type Config struct {
 	// client does not name survives a read and a write untouched. See
 	// cloudflare.go for why that matters in a file holding a credential.
 	Cloudflare *Cloudflare `json:"cloudflare,omitempty"`
+
+	// Notion is the block holding the Notion integration token.
+	Notion *Notion `json:"notion,omitempty"`
 }
 
 // Default is the configuration a session runs with when nothing is on disk.
@@ -249,6 +252,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readStrings(value, &c.Readable)
 		case cloudflareKey:
 			c.Cloudflare, err = readCloudflare(value)
+		case notionKey:
+			c.Notion, err = readNotion(value)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
