@@ -73,3 +73,9 @@ question with its own context, and not yet ratified.
 implemented.**
 
 **31. Notion API integration.**
+
+**32. Investigate the shared documentation directory.** `adr-index.txt` and
+related docs appear to be created under a shared directory rather than under
+`doc/`; the same behavior has been seen on two machines, and the cause is
+unknown. Keep the move pending investigation. If the intended relocation is
+confirmed, use `git mv` to preserve file history.

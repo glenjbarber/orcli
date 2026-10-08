@@ -109,89 +109,11 @@ so a machine without git or SQLite can still run the suite.
 `go test` alone is not the gate. `bmake check` is, because it runs the race
 detector and that is what catches a session or a spinner.
 
-## The work log and its lock
+## Handoffs and task status
 
-A worker records what it is doing in `.orcli.log` at the root of its own worktree,
-and takes `.orcli.log.lock` beside it before every write. The log and the lock are
-ignored, untracked and never committed, at every depth, since the ignore rules use
-a bare name.
-
-**`read_file` needs no lock.** Only a write does. A read takes nothing and blocks
-nothing.
-
-**Before writing, check for the lock.** If it is there, do not write and do not
-proceed with the write that needed it: say that the ledger is held, name the lock,
-and carry on with the rest of the task or stop. A lock older than the work it
-belongs to is a lock left behind, and it is reported rather than broken.
-
-**The entry carries four fields**, three of them the abridged view and the fourth
-the state of the work rather than of the reader:
-
-```
-Module: 0
-Worker ID: 0
-Merged: notready
-Status: <what this worker is doing, in one line>
-```
-
-**`Merged` is one of six values**, and it says whether the work on this worktree's
-branch has landed on the main line. It is not a boolean, because "did you merge it"
-and "could you merge it" and "are you merging it" are three different questions
-and a pair of booleans cannot hold all three without being ambiguous in one of
-them.
-
-| Value | Means |
-| --- | --- |
-| `n/a` | This worker wrote no branch. A change made on the main line, or an observation with nothing committed, has no merge to wait for and saying `notready` about it would report a problem that does not exist. |
-| `notready` | The branch exists but the work is not finished. Commits may be there or not; the unit is incomplete. This is the value at the start of a piece of work, since a branch that has just been created is not ready by any reading. |
-| `ready` | The unit is complete, the gates pass, and it is waiting on a decision to merge. Nothing further will happen to it without one. |
-| `inprogress` | The merge is running now. It is the value to write while a merge is in flight and not after, since a worker that wrote `ready` and then merged has described a moment rather than a state. |
-| `pending` | A merge has been refused or has failed on a conflict, and the decision is owed. Distinct from `notready`: the work is finished and what is outstanding is a resolution, not more writing. |
-| `started` | The branch has been created and work has begun, but nothing has been committed and nothing is finished. Distinct from `notready`, which covers a branch holding work that is incomplete rather than a branch holding none. |
-| `done` | The work is on the main line. A worker that writes `done` is finished, and a reader seeing `done` knows nothing is outstanding from this worker. |
-
-**A worker moves forward through them and no further back.** `notready` and
-`started` are early, `ready` is the point of asking, `inprogress` covers the merge
-itself, and `pending` and `done` are the two ways it ends. Going backwards means
-the work reopened, which is a thing to say out loud rather than to express by
-rewriting an earlier word.
-
-**`done` is written by the worker whose work merged, not by whoever ran the merge.**
-A merge carried out in the main worktree on another worker's behalf leaves that
-worker's entry saying `ready` until it writes `done` itself, which is correct: the
-entry is the worker's account of its own work, and a worker that reported itself as
-merged on the strength of somebody else's action would be reporting an inference
-rather than a fact.
-
-**The entry is written on start and again at the end**, so a reader arriving
-mid-session sees a worker running and a reader arriving after sees one that has
-stopped. An entry written only at the start is a record of intention, and a ledger
-whose entries describe what a worker meant to do is not a ledger.
-
-**A superseded entry is kept and is marked, never removed.** A ledger whose
-entries are deleted when they go stale is a ledger nobody can check, and the entry
-that recorded a stale belief is the evidence that the belief was corrected rather
-than never held. An entry that has been overtaken carries `SUPERCEDED` in its
-`Status` line, and the entry that overtook it names the one it overtook in its
-own, so a reader holding either learns about the other without opening both.
-
-```
-Worker ID: 8
-Merged: done
-Status: SUPERCEDED by Worker ID: 14. The seven-row frame this entry describes
-was replaced by the twenty-row one.
-```
-
-**The words are the ones the decision records use.** `SUPERCEDED` and
-`SUPERCEDES` mean the same thing in an entry and in a record: a thing that was
-taken and has been replaced by a later one that names it.
-`staged/adr-status-vocabulary.txt` is where they are defined, and a worker that
-has read the record workflow knows them already.
-
-**A `Merged` field is never changed to record a supersession.** `done` means the
-work is on the main line and that stays true whatever came after it, so an entry
-whose work has since been replaced still reads `done`. Supersession is about the
-decision, and the branch is still merged.
+Use the relevant Notion handoff as the source of task instructions and status.
+Keep progress and completion updates with that handoff. Do not create or maintain
+a local work log or lockfile for task status.
 
 ## Committing
 

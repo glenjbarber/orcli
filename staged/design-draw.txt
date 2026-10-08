@@ -5,7 +5,7 @@ Status: drawing the log on feature/tui-run-draw
 
 # Design: Run draws the log
 
-Recorded at the start of the work, from the spec in the root `.orcli.log`.
+Recorded at the start of the work, from the task handoff.
 Branch `feature/tui-run-draw`, off `3fb7032`. Implementation, documentation and
 tests as separate commits in that order.
 
