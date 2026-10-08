@@ -54,7 +54,7 @@ func TestAskSendsTheQuestionAlone(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil)
+	a := ask(s, fake, "", nil, nil, "")
 	if err := a(context.Background(), "a question", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestAskRunsAToolCallAndReplays(t *testing.T) {
 		},
 	}}
 
-	a := ask(s, fake, "", nil)
+	a := ask(s, fake, "", nil, nil, "")
 	if err := a(context.Background(), "do something", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestAskStopsAfterTooManyToolRounds(t *testing.T) {
 	}
 	fake := &fakeChat{rounds: rounds}
 
-	a := ask(s, fake, "", nil)
+	a := ask(s, fake, "", nil, nil, "")
 	if err := a(context.Background(), "loop forever", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestIntroductionCarriesContextMD(t *testing.T) {
 		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
 	}}
 
-	a := ask(s, fake, "", nil)
+	a := ask(s, fake, "", nil, nil, "")
 	if err := a(context.Background(), "hi", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestNoIntroductionWithoutContextMD(t *testing.T) {
 		{{Kind: openrouter.EventFinish, Reason: "stop", Finished: true}},
 	}}
 
-	a := ask(s, fake, "", nil)
+	a := ask(s, fake, "", nil, nil, "")
 	if err := a(context.Background(), "hi", 0); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestRunToolNamesAnUnknownTool(t *testing.T) {
 // to openrouter.Tool: every tool in the set gets a schema, by the same name.
 func TestToolSchemasCoverTheWholeSet(t *testing.T) {
 	dir := t.TempDir()
-	toolset := newToolset(dir)
+	toolset := newToolset(dir, "")
 	schemas := toolSchemas(toolset)
 
 	if len(schemas) != len(toolset) {
