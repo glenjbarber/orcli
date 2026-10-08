@@ -88,6 +88,23 @@ func TestAskSendsTheQuestionAlone(t *testing.T) {
 	}
 }
 
+func TestAskAccumulatesProviderUsage(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestSession(dir)
+	in1, out1, cost1 := 12, 7, 0.003
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{{Kind: openrouter.EventUsage, Usage: &openrouter.Usage{PromptTokens: &in1, CompletionTokens: &out1, Cost: &cost1}}, {Kind: openrouter.EventFinish, Finished: true}},
+	}}
+	if err := ask(s, fake, "", nil, nil, nil, "")(context.Background(), "question", 0, false); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	s.AddUsage(3, 2, 0.001, true, true, true)
+	got := s.Usage()
+	if !got.HasUsage || !got.HasInput || !got.HasOutput || !got.HasCost || got.InputTokens != 15 || got.OutputTokens != 9 || got.CostUSD != 0.004 {
+		t.Errorf("usage metrics = %+v, want 15 input, 9 output, $0.004", got)
+	}
+}
+
 // TestAskRunsAToolCallAndReplays covers the round trip: the model calls a tool that
 // does not exist (deliberately, so the test needs no subprocess), and the second
 // request replays the assistant's call and the tool's answer, paired by ID.

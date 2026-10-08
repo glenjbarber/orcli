@@ -209,6 +209,7 @@ type Session struct {
 	history History
 
 	mu     sync.RWMutex
+	usage  UsageMetrics
 	state  State
 	detail string
 
@@ -295,6 +296,78 @@ type Session struct {
 	queue []string
 }
 
+// UsageMetrics is the accounting reported by the active provider streams.
+type UsageMetrics struct {
+	InputTokens      int
+	OutputTokens     int
+	ContextTokens    int
+	ContextLimit     int
+	CostUSD          float64
+	HasUsage         bool
+	HasInput         bool
+	HasOutput        bool
+	HasContextTokens bool
+	HasCost          bool
+	Credits          string
+	Context          string
+	Autosave         bool
+}
+
+// AddUsage accumulates one provider-reported response without retaining its content.
+func (s *Session) AddUsage(input, output int, cost float64, hasInput, hasOutput, hasCost bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if hasInput {
+		s.usage.InputTokens += input
+		s.usage.HasInput = true
+		s.usage.ContextTokens = input
+		s.usage.HasContextTokens = true
+		updateContextUsage(&s.usage)
+	}
+	if hasOutput {
+		s.usage.OutputTokens += output
+		s.usage.HasOutput = true
+	}
+	if hasCost {
+		s.usage.CostUSD += cost
+		s.usage.HasCost = true
+	}
+	s.usage.HasUsage = true
+}
+
+// SetUsageDetails updates provider-supplied status details without holding a
+// provider client in the TUI package.
+func (s *Session) SetUsageDetails(credits string, contextLimit int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage.Credits = credits
+	s.usage.ContextLimit = contextLimit
+	updateContextUsage(&s.usage)
+}
+
+func updateContextUsage(metrics *UsageMetrics) {
+	if !metrics.HasContextTokens || metrics.ContextLimit <= 0 {
+		metrics.Context = ""
+		return
+	}
+	percent := float64(metrics.ContextTokens) * 100 / float64(metrics.ContextLimit)
+	metrics.Context = fmt.Sprintf("%.1f%%", percent)
+}
+
+// SetAutosave updates the displayed autosave toggle.
+func (s *Session) SetAutosave(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage.Autosave = on
+}
+
+// Usage returns a concurrency-safe copy of accumulated provider usage.
+func (s *Session) Usage() UsageMetrics {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.usage
+}
+
 // State is what the client is doing, and it is one of four.
 //
 // The four are named rather than derived from a progress flag, because a reader
@@ -354,7 +427,11 @@ func (s *Session) Log() *Log { return &s.log }
 //
 // It is a copy rather than the field, so a caller cannot reach into the session's
 // own options and change what a turn is sent as.
-func (s *Session) Options() Options { return s.opts }
+func (s *Session) Options() Options {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.opts
+}
 
 // SetModel changes the model a turn is sent to.
 //
@@ -377,6 +454,10 @@ func (s *Session) SetModel(model string) error {
 
 	s.mu.Lock()
 	s.opts.Model = model
+	s.usage.Context = ""
+	s.usage.ContextLimit = 0
+	s.usage.ContextTokens = 0
+	s.usage.HasContextTokens = false
 	s.mu.Unlock()
 	return nil
 }

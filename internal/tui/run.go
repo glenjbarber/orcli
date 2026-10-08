@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -415,6 +416,34 @@ func (l *interfaceLoop) status(state State, detail, figure string) Status {
 	s[fieldState] = string(state) + detailSuffix(detail)
 	s[fieldFigure] = figure
 	s[fieldApproval] = orNone(string(opts.Approval))
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unavailable"
+	}
+	s[fieldHost] = host
+	metrics := l.session.Usage()
+	s[fieldCredits] = metrics.Credits
+	if s[fieldCredits] == "" {
+		s[fieldCredits] = "unavailable"
+	}
+	s[fieldCost] = "unavailable"
+	s[fieldInput] = "unavailable"
+	s[fieldOutput] = "unavailable"
+	if metrics.HasInput {
+		s[fieldInput] = strconv.Itoa(metrics.InputTokens)
+	}
+	if metrics.HasOutput {
+		s[fieldOutput] = strconv.Itoa(metrics.OutputTokens)
+	}
+	if metrics.HasCost {
+		s[fieldCost] = fmt.Sprintf("$%.4f", metrics.CostUSD)
+	}
+	s[fieldContext] = metrics.Context
+	if s[fieldContext] == "" {
+		s[fieldContext] = "unavailable"
+	}
+	s[fieldAutosave] = onOff(metrics.Autosave, "on", "off")
+	s[fieldStealth] = onOff(opts.Cognito, "on", "off")
 	s[fieldVerbosity] = strconv.Itoa(opts.Verbosity)
 	s[fieldPreset] = orNone(l.session.Preset())
 	s[fieldCognito] = onOff(opts.Cognito, "on", "off")

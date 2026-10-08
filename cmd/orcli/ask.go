@@ -147,6 +147,23 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 
 				case openrouter.EventUsage:
 					capture.record("usage", e.Usage)
+					if e.Usage != nil {
+						input, output := 0, 0
+						hasInput, hasOutput := e.Usage.PromptTokens != nil, e.Usage.CompletionTokens != nil
+						if hasInput {
+							input = *e.Usage.PromptTokens
+						}
+						if hasOutput {
+							output = *e.Usage.CompletionTokens
+						}
+						cost, hasCost := 0.0, false
+						if e.Usage.CostUSD != nil {
+							cost, hasCost = *e.Usage.CostUSD, true
+						} else if e.Usage.Cost != nil {
+							cost, hasCost = *e.Usage.Cost, true
+						}
+						s.AddUsage(input, output, cost, hasInput, hasOutput, hasCost)
+					}
 
 				case openrouter.EventDone:
 					capture.record("stream_done", nil)

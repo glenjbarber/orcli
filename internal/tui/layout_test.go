@@ -303,10 +303,9 @@ func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
 	}
 }
 
-// TestScrollMovesTheWindowAndBarTwoSaysSo covers Frame drawing the scroll offset: a
-// nonzero offset shows an older window of the log and bar two reads "scroll:back"
-// instead of "scroll:live".
-func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
+// TestScrollMovesTheWindowWithoutChangingUsageFields covers the scroll offset and
+// keeps the confirmed usage fields independent of transcript navigation.
+func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	log := make([]Row, 10)
 	for i := range log {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
@@ -331,8 +330,8 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if got := rowAt(live, promptRow-1); got != "row 9" {
 		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
 	}
-	if !strings.Contains(rowAt(live, promptRow+3), "scroll:live") {
-		t.Errorf("bar two at the live edge is %q, want it to say scroll:live", rowAt(live, promptRow+3))
+	if !strings.Contains(rowAt(live, promptRow+3), "hostname:unavailable") || !strings.Contains(rowAt(live, promptRow+3), "out:") {
+		t.Errorf("bar two fields are %q, want the confirmed live usage fields", rowAt(live, promptRow+3))
 	}
 
 	frame.SetScroll(3)
@@ -345,8 +344,57 @@ func TestScrollMovesTheWindowAndBarTwoSaysSo(t *testing.T) {
 	if got := rowAt(back, promptRow-1); got != "row 6" {
 		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)
 	}
-	if !strings.Contains(rowAt(back, promptRow+3), "scroll:back") {
-		t.Errorf("bar two scrolled back is %q, want it to say scroll:back", rowAt(back, promptRow+3))
+	if !strings.Contains(rowAt(back, promptRow+3), "hostname:unavailable") {
+		t.Errorf("bar two changed while scrolling: %q", rowAt(back, promptRow+3))
+	}
+}
+
+func TestBarTwoFieldOrder(t *testing.T) {
+	var status Status
+	for _, field := range barTwoFields {
+		status[field] = fieldName(field)
+	}
+	got := renderBarTwo(status)
+	want := "hostname:hostname · credits:credits · cost:cost · context:context · in:in · out:out · autosave:autosave · stealth:stealth · approval:approval"
+	if got != want {
+		t.Fatalf("renderBarTwo = %q, want %q", got, want)
+	}
+}
+
+func TestBarTwoFadesLeftTextWhereTheHalvesCollide(t *testing.T) {
+	var status Status
+	status[fieldHost] = "local"
+	status[fieldCredits] = "$1"
+	status[fieldCost] = "$0"
+	status[fieldContext] = "4k"
+	status[fieldInput] = "5"
+	status[fieldOutput] = "67890"
+	status[fieldAutosave] = "on"
+	status[fieldStealth] = "off"
+	status[fieldApproval] = "ask"
+	palette := NewPalette(true, GroundDark, nil)
+	frame := NewFrame()
+	frame.SetRect(0, 0, 80, 5)
+	frame.SetContent(Bar{Status: status}, nil, palette)
+	screen := tcell.NewSimulationScreen("UTF-8")
+	if err := screen.Init(); err != nil {
+		t.Fatal(err)
+	}
+	screen.SetSize(80, 5)
+	frame.Draw(screen)
+	leftFG, _, _ := palette.Style(RoleChrome).Decompose()
+	fadedFG, _, _ := palette.Style(RoleDim).Decompose()
+	first, _, firstStyle, _ := screen.GetContent(0, 3)
+	nearCollision, _, fadeStyle, _ := screen.GetContent(39, 3)
+	nearFG, _, _ := fadeStyle.Decompose()
+	if first == 0 || nearCollision == 0 {
+		t.Fatalf("bar two cells were blank: first=%q near collision=%q", first, nearCollision)
+	}
+	if got, _, _ := firstStyle.Decompose(); got != leftFG {
+		t.Errorf("left field starts with foreground %v, want chrome %v", got, leftFG)
+	}
+	if nearFG != fadedFG {
+		t.Errorf("left field at collision has foreground %v, want faded %v", nearFG, fadedFG)
 	}
 }
 

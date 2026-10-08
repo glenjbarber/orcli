@@ -332,9 +332,15 @@ func (d *dispatcher) autosave(args string) (tui.Result, error) {
 		return tui.Result{Text: reportOnOff("autosave", d.autosaveOn)}, nil
 	case "on":
 		d.autosaveOn = true
+		if d.session != nil {
+			d.session.SetAutosave(true)
+		}
 		return tui.Result{Text: reportOnOff("autosave", true)}, nil
 	case "off":
 		d.autosaveOn = false
+		if d.session != nil {
+			d.session.SetAutosave(false)
+		}
 		return tui.Result{Text: reportOnOff("autosave", false)}, nil
 	case "now":
 		// /save has no handler in d.commands yet (see the separate save/load

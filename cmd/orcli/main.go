@@ -386,6 +386,9 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// The dispatcher needs the session so `/model` can change the model the next turn
 	// is sent with, not only the one written to the file.
 	d.withSession(s)
+	statusCtx, stopStatus := context.WithCancel(ctx)
+	defer stopStatus()
+	go refreshStatusData(statusCtx, s, newDispatcherFor(cfg))
 
 	// The confirmation is wired here rather than in ask, since the writer belongs to
 	// main and the interface holds no configuration. A turn that came back with text
@@ -404,6 +407,42 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 		ask(s, newTransport(cfg), cfg.AttributionID, confirmModel(s), d.cloudflareReady, capture, notionToken),
 		helo,
 	)
+}
+
+// refreshStatusData reads provider-owned balance and context information outside
+// the renderer. Unsupported or refused endpoints remain explicitly unavailable.
+func refreshStatusData(ctx context.Context, s *tui.Session, d *dispatcher) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		if client, err := d.catalogClient(); err == nil {
+			credits := "unavailable"
+			if cc, ok := client.(interface {
+				Credits(context.Context) (openrouter.CreditInfo, error)
+			}); ok {
+				if info, err := cc.Credits(ctx); err == nil {
+					credits = fmt.Sprintf("$%.2f", info.Remaining())
+				}
+			}
+			contextLimit := 0
+			if models, err := client.Models(ctx); err == nil {
+				for _, model := range models {
+					if model.ID == s.Options().Model && model.ContextLength > 0 {
+						contextLimit = model.ContextLength
+						break
+					}
+				}
+			}
+			s.SetUsageDetails(credits, contextLimit)
+		} else {
+			s.SetUsageDetails("unavailable", 0)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // printSession reports a session as plain text.
