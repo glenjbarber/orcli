@@ -195,7 +195,7 @@ func TestParseMarkdownSurvivesFoldingAcrossPhysicalLines(t *testing.T) {
 	text := "# Heading\n- item with `code`\n> a quote"
 	row := Row{Kind: KindReply, Text: text, Spans: ParseMarkdown(text)}
 
-	lines := foldRowLines(row)
+	lines := foldRowLines(row, 0)
 	if len(lines) != 3 {
 		t.Fatalf("got %d folded lines, want 3: %v", len(lines), lines)
 	}
@@ -247,5 +247,103 @@ func TestDeliverAttachesMarkdownSpans(t *testing.T) {
 	row := rows[len(rows)-1]
 	if _, ok := findRole(row.Spans, RoleHeading); !ok {
 		t.Errorf("delivered row carries no heading span: %v", row.Spans)
+	}
+}
+
+// TestParseMarkdownSpansEveryRoleAcrossAMultiParagraphReply is the
+// multi-paragraph case the task asked for directly: a heading, a quote, a
+// list item with inline code, and a link, each in its own paragraph, each
+// read correctly out of the one AST goldmark builds for the whole reply
+// rather than guessed line by line.
+func TestParseMarkdownSpansEveryRoleAcrossAMultiParagraphReply(t *testing.T) {
+	text := "# Plan\n\n> worth remembering\n\n- run `go test ./...`\n\nsee [the docs](https://example.com) for more"
+	spans := ParseMarkdown(text)
+
+	for _, role := range []Role{RoleHeading, RoleQuote, RoleList, RoleCode, RoleLink} {
+		if _, ok := findRole(spans, role); !ok {
+			t.Errorf("role %s never fired on %q: %v", RoleName(role), text, spans)
+		}
+	}
+}
+
+// TestParseMarkdownGetsLazyContinuationRightWhereALineScannerCannot is the
+// case a line-by-line scanner cannot get right by construction: a list
+// item's paragraph can continue onto a line with no marker of its own
+// (CommonMark's "lazy continuation"), and that continuation line is still
+// part of the list item's own paragraph, not a plain line sitting after it.
+// A parser that decides what a line is from that line's own leading bytes
+// has nothing on the second line that says "list item"; a real AST knows
+// because it tracked the block structure across both lines while parsing.
+//
+// This does not assert a span lands on the continuation line itself (there
+// is nothing in it for RoleList, RoleCode etc. to colour) - it asserts the
+// one thing the old scanner would have gotten wrong if it had tried: the
+// list marker is still found on the first line, undisturbed by the
+// continuation line that follows it with no marker of its own.
+func TestParseMarkdownGetsLazyContinuationRightWhereALineScannerCannot(t *testing.T) {
+	text := "- first line of the item\ncontinuation with no marker of its own"
+	spans := ParseMarkdown(text)
+
+	sp, ok := findRole(spans, RoleList)
+	if !ok {
+		t.Fatalf("no list span in %v", spans)
+	}
+	if got, want := spanText(text, sp), "-"; got != want {
+		t.Errorf("list span covers %q, want %q", got, want)
+	}
+}
+
+// TestParseMarkdownSpansInlineCodeInsideANestedListItem is the nested-depth
+// case: a list item one level inside another list still gets RoleList on
+// its own marker and RoleCode on the inline code inside it, which the old
+// hand-rolled scanner could only get right by accident (it read every
+// line's own leading bytes the same way regardless of nesting) rather than
+// because it understood the structure.
+func TestParseMarkdownSpansInlineCodeInsideANestedListItem(t *testing.T) {
+	text := "- outer item\n  - inner item with `code`"
+	spans := ParseMarkdown(text)
+
+	var listSpans []Span
+	for _, sp := range spans {
+		if sp.Role == RoleList {
+			listSpans = append(listSpans, sp)
+		}
+	}
+	if len(listSpans) != 2 {
+		t.Fatalf("got %d list spans, want 2 (outer and inner): %v", len(listSpans), spans)
+	}
+
+	codeSp, ok := findRole(spans, RoleCode)
+	if !ok {
+		t.Fatalf("no code span in %v", spans)
+	}
+	if got, want := spanText(text, codeSp), "`code`"; got != want {
+		t.Errorf("code span covers %q, want %q", got, want)
+	}
+}
+
+// TestParseMarkdownEmphasisSurvivesBeingInsideALink covers a shape the
+// hand-rolled parser's single linear scan over a line could not nest:
+// emphasis inside a link's own text. The AST has an Emphasis node as a
+// child of the Link node, so both spans exist independently rather than
+// one swallowing the other.
+func TestParseMarkdownEmphasisSurvivesBeingInsideALink(t *testing.T) {
+	text := "[*important*](https://example.com/x)"
+	spans := ParseMarkdown(text)
+
+	linkSp, ok := findRole(spans, RoleLink)
+	if !ok {
+		t.Fatalf("no link span in %v", spans)
+	}
+	if got, want := spanText(text, linkSp), "https://example.com/x"; got != want {
+		t.Errorf("link span covers %q, want %q", got, want)
+	}
+
+	emSp, ok := findRole(spans, RoleEmphasis)
+	if !ok {
+		t.Fatalf("no emphasis span in %v", spans)
+	}
+	if got, want := spanText(text, emSp), "*important*"; got != want {
+		t.Errorf("emphasis span covers %q, want %q", got, want)
 	}
 }

@@ -211,7 +211,7 @@ func TestFrameFoldsSpansWithTheirOwnLine(t *testing.T) {
 	start := strings.Index(text, "BOLD")
 	row := Row{Text: text, Spans: []Span{{Start: start, End: start + len("BOLD"), Role: RoleEmphasis}}}
 
-	lines := foldRowLines(row)
+	lines := foldRowLines(row, 0)
 	if len(lines) != 3 {
 		t.Fatalf("foldRowLines returned %d lines, want 3", len(lines))
 	}
@@ -231,11 +231,102 @@ func TestFrameFoldsSpansWithTheirOwnLine(t *testing.T) {
 // into a new slice just to hold the same row.
 func TestFoldRowLinesLeavesASingleLineRowUnchanged(t *testing.T) {
 	row := Row{Text: "no line break here", Spans: []Span{{Start: 0, End: 2, Role: RoleCode}}}
-	lines := foldRowLines(row)
+	lines := foldRowLines(row, 0)
 	if len(lines) != 1 {
 		t.Fatalf("foldRowLines returned %d lines, want 1", len(lines))
 	}
 	if lines[0].Text != row.Text {
 		t.Errorf("text = %q, want %q", lines[0].Text, row.Text)
+	}
+}
+
+// TestFoldRowLinesWordWrapsALongPlainLineAtTheRightBoundary covers the
+// word-wrap pass directly: a line with no newline of its own, too wide for
+// width, breaks at the space nearest the boundary rather than mid-word and
+// rather than not breaking at all.
+func TestFoldRowLinesWordWrapsALongPlainLineAtTheRightBoundary(t *testing.T) {
+	row := Row{Text: "one two three four five six seven eight"}
+	lines := foldRowLines(row, 10)
+
+	if len(lines) < 2 {
+		t.Fatalf("foldRowLines returned %d lines, want more than one for a line this long at width 10: %v", len(lines), lines)
+	}
+	for i, l := range lines {
+		if w := DisplayWidth(l.Text); w > 10 {
+			t.Errorf("line %d (%q) is %d columns wide, want at most 10", i, l.Text, w)
+		}
+		if strings.HasPrefix(l.Text, " ") || strings.HasSuffix(l.Text, " ") {
+			t.Errorf("line %d (%q) carries the space the break was made at", i, l.Text)
+		}
+	}
+	if got, want := strings.Join(func() []string {
+		s := make([]string, len(lines))
+		for i, l := range lines {
+			s[i] = l.Text
+		}
+		return s
+	}(), " "), row.Text; got != want {
+		t.Errorf("rejoining the wrapped lines with a space gives %q, want the original %q", got, want)
+	}
+	// The break has to land at a word boundary, not partway through "three":
+	// width 10 fits "one two " (8 columns) plus part of "three", so the cut
+	// must fall before "three" rather than inside it.
+	if lines[0].Text != "one two" {
+		t.Errorf("first wrapped line = %q, want %q", lines[0].Text, "one two")
+	}
+}
+
+// TestFoldRowLinesDoesNotWordWrapAWholeLineOfCode covers the other half of
+// the same design decision, stated in wrapRowLine's own doc comment: a line
+// that is nothing but one RoleCode span - the shape a fenced code block's
+// own content line carries - is left exactly as it was, however far past
+// width it runs, because reflowing code changes what it says.
+func TestFoldRowLinesDoesNotWordWrapAWholeLineOfCode(t *testing.T) {
+	text := "func reallyLongFunctionNameThatRunsRightPastTheTerminalWidth() error {"
+	row := Row{Text: text, Spans: []Span{{Start: 0, End: len(text), Role: RoleCode}}}
+
+	lines := foldRowLines(row, 20)
+	if len(lines) != 1 {
+		t.Fatalf("foldRowLines wrapped a whole-line code row into %d lines, want 1 (unwrapped): %v", len(lines), lines)
+	}
+	if lines[0].Text != text {
+		t.Errorf("code line text = %q, want the original %q unchanged", lines[0].Text, text)
+	}
+}
+
+// TestFoldRowLinesWordWrapsProseThatHappensToContainInlineCode covers the
+// line wrapRowLine's doc comment distinguishes from a whole-line code row:
+// a sentence that merely contains a shorter inline code run still reads as
+// prose a reader scans left to right, and is word-wrapped like any other
+// overlong sentence. The two together are the task's "both parts at once"
+// case: the role spans ParseMarkdown produced have to still point at the
+// right bytes once the line has also been split into more than one row.
+func TestFoldRowLinesWordWrapsProseThatHappensToContainInlineCode(t *testing.T) {
+	text := "please remember to run `go test ./...` before you push this"
+	row := Row{Kind: KindReply, Text: text, Spans: ParseMarkdown(text)}
+
+	lines := foldRowLines(row, 20)
+	if len(lines) < 2 {
+		t.Fatalf("foldRowLines returned %d lines, want more than one: %v", len(lines), lines)
+	}
+	for i, l := range lines {
+		if w := DisplayWidth(l.Text); w > 20 {
+			t.Errorf("line %d (%q) is %d columns wide, want at most 20", i, l.Text, w)
+		}
+	}
+
+	var found bool
+	for _, l := range lines {
+		sp, ok := findRole(l.Spans, RoleCode)
+		if !ok {
+			continue
+		}
+		found = true
+		if got, want := spanText(l.Text, sp), "`go test ./...`"; got != want {
+			t.Errorf("code span on line %q covers %q, want %q", l.Text, got, want)
+		}
+	}
+	if !found {
+		t.Fatalf("no wrapped line carries the inline-code span: %v", lines)
 	}
 }
