@@ -83,6 +83,8 @@ const (
 	KeyMouse
 	KeyScrollUp
 	KeyScrollDown
+	KeyScrollPageUp
+	KeyScrollPageDown
 	KeyCtrlA
 	KeyCtrlW
 	KeyCtrlU
@@ -111,7 +113,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		return errors.New("tui: Start was given no way to run a command")
 	}
 
-	app := tview.NewApplication().EnableMouse(false).EnablePaste(true)
+	app := tview.NewApplication().EnableMouse(s.Options().Mouse).EnablePaste(true)
 	frame := NewFrame()
 	app.SetRoot(frame, true)
 	l := &interfaceLoop{
@@ -152,6 +154,20 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		}
 		l.paint()
 		return nil
+	})
+	app.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		switch action {
+		case tview.MouseScrollUp:
+			l.act(ctx, KeyScrollUp, 0)
+			l.paint()
+			return nil, tview.MouseConsumed
+		case tview.MouseScrollDown:
+			l.act(ctx, KeyScrollDown, 0)
+			l.paint()
+			return nil, tview.MouseConsumed
+		default:
+			return event, action
+		}
 	})
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -364,6 +380,16 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 			return KeyScrollDown, 0
 		}
 		return KeyDown, 0
+	case tcell.KeyPgUp:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollPageUp, 0
+		}
+		return KeyNone, 0
+	case tcell.KeyPgDn:
+		if event.Modifiers()&tcell.ModShift != 0 {
+			return KeyScrollPageDown, 0
+		}
+		return KeyNone, 0
 	case tcell.KeyHome:
 		return KeyHome, 0
 	case tcell.KeyEnd:
@@ -659,6 +685,12 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 
 	case KeyScrollDown:
 		l.session.ScrollDown(1)
+
+	case KeyScrollPageUp:
+		l.session.ScrollUp(l.frame.ScrollPageSize())
+
+	case KeyScrollPageDown:
+		l.session.ScrollDown(l.frame.ScrollPageSize())
 	}
 
 	return false
