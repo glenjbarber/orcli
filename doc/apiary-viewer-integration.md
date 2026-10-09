@@ -19,5 +19,5 @@ your deployment; do not send a Viewer token over an untrusted network.
 The model can query `status`, `health`, `vms`, `vm`, `jails`, `jail`, and
 `networks`. `vm` and `jail` require an ID. The connector uses fixed HTTP GET
 routes only; it cannot create, update, migrate, delete, access consoles, or
-change permissions. The Apiary deployment must have API-key authentication
+change permissions. The Apiary deployment must have API key authentication
 enabled so its Viewer role is enforced.
