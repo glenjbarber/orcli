@@ -213,6 +213,26 @@ func TestFinishedReturnsToIdleWhateverTheReason(t *testing.T) {
 	}
 }
 
+// TestContextUsageIsPromptPlusCompletionNotPromptAlone covers a bug where
+// ContextTokens was overwritten with the latest prompt tokens alone, so the
+// displayed percentage dropped every time a reply streamed in and only
+// caught up once the next request reported its own prompt tokens - making
+// the figure appear to change unexpectedly rather than track what the
+// context window actually holds.
+func TestContextUsageIsPromptPlusCompletionNotPromptAlone(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.SetUsageDetails("", 1000)
+	s.AddUsage(700, 300, 0, true, true, false)
+
+	got := s.Usage()
+	if got.ContextTokens != 1000 {
+		t.Errorf("ContextTokens = %d, want 1000 (700 prompt + 300 completion)", got.ContextTokens)
+	}
+	if got.Context != "100.0%" {
+		t.Errorf("Context = %q, want 100.0%%", got.Context)
+	}
+}
+
 // TestRowsAtCoversEveryRowOfALevel covers what `/copy N` copies. It is a level and not
 // a row number, since a fold changes how many rows there are and a reader who counted
 // them would be counting something that moves.
