@@ -426,11 +426,17 @@ func capabilities(s *tui.Session, toolset []tools.Tool, cloudflareReady func() b
 // own coordination documents and no claim on this role. A missing file is silence,
 // not a failure: most working directories have none, and a session without one
 // sends no introduction at all rather than an empty one.
+//
+// A successful read is also recorded into globalContextLog, so /context can later
+// tell a reader which path actually grounded the session, in addition to this
+// function sending its contents to the model.
 func introduction(dir string) string {
-	text, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	path := filepath.Join(dir, "AGENTS.md")
+	text, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
+	globalContextLog.record(path)
 	return string(text)
 }
 
