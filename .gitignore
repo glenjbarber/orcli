@@ -33,8 +33,5 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Worktrees
-worktrees/
-
 # Build output
 staged/bin/
