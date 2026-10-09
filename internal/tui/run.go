@@ -384,10 +384,12 @@ func keyEvent(event *tcell.EventKey) (Key, rune) {
 		if event.Modifiers()&tcell.ModShift != 0 {
 			return KeyScrollPageUp, 0
 		}
+		return KeyNone, 0
 	case tcell.KeyPgDn:
 		if event.Modifiers()&tcell.ModShift != 0 {
 			return KeyScrollPageDown, 0
 		}
+		return KeyNone, 0
 	case tcell.KeyHome:
 		return KeyHome, 0
 	case tcell.KeyEnd:
