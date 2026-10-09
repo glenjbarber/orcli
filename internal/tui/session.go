@@ -320,13 +320,15 @@ func (s *Session) AddUsage(input, output int, cost float64, hasInput, hasOutput,
 	if hasInput {
 		s.usage.InputTokens += input
 		s.usage.HasInput = true
-		s.usage.ContextTokens = input
-		s.usage.HasContextTokens = true
-		updateContextUsage(&s.usage)
 	}
 	if hasOutput {
 		s.usage.OutputTokens += output
 		s.usage.HasOutput = true
+	}
+	if hasInput || hasOutput {
+		s.usage.ContextTokens = input + output
+		s.usage.HasContextTokens = true
+		updateContextUsage(&s.usage)
 	}
 	if hasCost {
 		s.usage.CostUSD += cost

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +103,31 @@ func TestAskAccumulatesProviderUsage(t *testing.T) {
 	got := s.Usage()
 	if !got.HasUsage || !got.HasInput || !got.HasOutput || !got.HasCost || got.InputTokens != 15 || got.OutputTokens != 9 || got.CostUSD != 0.004 {
 		t.Errorf("usage metrics = %+v, want 15 input, 9 output, $0.004", got)
+	}
+}
+
+// TestAskReturnsToIdleOnAStreamError covers a bug where a stream error (an
+// upstream idle timeout, for example) left the session stuck mid-turn: ask
+// returned without ever calling finishedFn, so the state never went back to
+// idle and the reader had to force a restart to get the prompt back.
+func TestAskReturnsToIdleOnAStreamError(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestSession(dir)
+	fake := &fakeChat{rounds: [][]openrouter.Event{
+		{
+			{Kind: openrouter.EventDelta, Text: "partial reply"},
+			{Kind: openrouter.EventError, Err: errors.New("openrouter: Upstream idle timeout exceeded")},
+			{Kind: openrouter.EventFinish, Reason: "error", Finished: false},
+		},
+	}}
+
+	if err := ask(s, fake, "", nil, nil, nil, "")(context.Background(), "question", 0, false); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	state, _ := s.State()
+	if state != tui.StateIdle {
+		t.Errorf("state after a stream error is %q, want idle", state)
 	}
 }
 
