@@ -227,6 +227,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 				return nil
 			}
 			if failed != nil {
+				finishedFn("failed")
 				return nil
 			}
 
