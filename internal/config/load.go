@@ -158,6 +158,12 @@ type Config struct {
 
 	// Apiary holds the base URL and existing read-only Viewer credential.
 	Apiary *Apiary `json:"apiary,omitempty"`
+
+	// MCP holds the Model Context Protocol servers the reader has
+	// configured. It is stored as raw JSON so a member written by a future
+	// version survives configuration reads, on the same grounds GitHub and
+	// Apiary give for doing the same.
+	MCP *MCP `json:"mcp,omitempty"`
 }
 
 // Default is the configuration a session runs with when nothing is on disk.
@@ -349,6 +355,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			c.GitHub, err = readGitHub(value)
 		case apiaryKey:
 			c.Apiary, err = readApiary(value)
+		case mcpKey:
+			c.MCP, err = readMCP(value)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
