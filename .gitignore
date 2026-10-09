@@ -52,3 +52,4 @@ staged/*.md
 # covered at any depth, beside the files it belongs to.
 .orcli-design/
 .orcli.md
+.orcli-debug.jsonl
