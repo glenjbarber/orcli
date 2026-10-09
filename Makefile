@@ -81,6 +81,10 @@ build:
 		echo "no main package yet, so nothing is placed at $(BIN)"; \
 	fi
 
+install:
+	@mkdir -p ${HOME}/${BINDIR}
+	install -m 555 ${BIN} ${HOME}/${BINDIR}
+
 test:
 	$(GO) test ./...
 
