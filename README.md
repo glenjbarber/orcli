@@ -226,6 +226,23 @@ task listings. `github_tasks` is not added to the tool set unless all three
 settings are valid. The app never expands the repository allowlist. Keep the
 configuration file at mode `0600`.
 
+The optional `mcp` block names Model Context Protocol servers to launch as
+subprocesses and speak to over their standard input and output:
+
+```json
+{"mcp":{"servers":[{"name":"files","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/path"],"env":{"API_KEY":"value"}}]}}
+```
+
+Each server needs a unique `name` and a `command`; `args` and `env` are
+optional. `env` is the only source of a server's environment beyond `PATH`:
+nothing is inherited from the orcli process, on the same grounds the API key
+is never read from it. A server is not started until the model calls
+`mcp_list_resources` or `mcp_read_resource` naming it, and is kept running for
+reuse by later calls in the same session once it is. Only resource listing
+and reading are offered; a server's own tools and prompts are not surfaced,
+and a remote server reached over HTTP or SSE rather than launched locally is
+not supported today.
+
 Task operations in Notion require the integration token to be shared with the
 task data source, plus explicit IDs/property names that bind task operations to
 one source and one assignee:

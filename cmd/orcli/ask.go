@@ -11,6 +11,7 @@ import (
 	"github.com/glenjbarber/orcli/internal/apiary"
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/github"
+	"github.com/glenjbarber/orcli/internal/mcp"
 	"github.com/glenjbarber/orcli/internal/notion"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
@@ -82,6 +83,7 @@ type taskIntegrationSettings struct {
 	NotionAssigneeProp string
 	NotionAssigneeID   string
 	NotionStatusProp   string
+	MCPServers         []config.MCPServer
 }
 
 func taskIntegrationsFrom(cfg config.Config) taskIntegrationSettings {
@@ -96,6 +98,9 @@ func taskIntegrationsFrom(cfg config.Config) taskIntegrationSettings {
 		if err == nil {
 			settings.NotionToken = token
 		}
+	}
+	if servers, err := cfg.MCPServers(); err == nil {
+		settings.MCPServers = servers
 	}
 	return settings
 }
@@ -283,7 +288,22 @@ func newToolsetWithTasks(dir, notionToken string, apiarySettings []string, integ
 	if integrations.NotionToken != "" && integrations.NotionDataSourceID != "" && integrations.NotionAssigneeProp != "" && integrations.NotionAssigneeID != "" && integrations.NotionStatusProp != "" {
 		set = append(set, notion.New(integrations.NotionToken).TaskTool(integrations.NotionDataSourceID, integrations.NotionAssigneeProp, integrations.NotionAssigneeID, integrations.NotionStatusProp))
 	}
+	if len(integrations.MCPServers) > 0 {
+		set = append(set, newMCPManager(integrations.MCPServers).ToolSet()...)
+	}
 	return set
+}
+
+// newMCPManager adapts the configuration's server list to the mcp package's
+// own Server type, so internal/config carries no dependency on
+// internal/mcp - the same separation internal/config keeps from every other
+// package whose tools it merely supplies credentials to.
+func newMCPManager(servers []config.MCPServer) *mcp.Manager {
+	set := make([]mcp.Server, 0, len(servers))
+	for _, s := range servers {
+		set = append(set, mcp.Server{Name: s.Name, Command: s.Command, Args: s.Args, Env: s.Env})
+	}
+	return mcp.NewManager(set)
 }
 
 // newToolset builds the tools a turn may call, contained to dir.
