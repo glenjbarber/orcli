@@ -367,6 +367,15 @@ func (f *Frame) SetSweepStep(step int) { f.step = step }
 // SetScroll records how many rows back from the live edge the viewport sits.
 func (f *Frame) SetScroll(scroll int) { f.scroll = scroll }
 
+// ScrollPageSize reports how many log rows fit in the current viewport.
+func (f *Frame) ScrollPageSize() int {
+	_, _, _, height := f.GetRect()
+	if rows := scrollbackRows(height); rows > 0 {
+		return rows
+	}
+	return 1
+}
+
 // SetPasteHandler installs the handler for text pasted into the prompt.
 func (f *Frame) SetPasteHandler(handler func(string)) { f.paste = handler }
 
