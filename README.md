@@ -317,6 +317,15 @@ arm64, with `CGO_ENABLED=0`. DragonFly is absent because the SQLite driver
 cannot be built for it, and Windows is absent because the bootstrap loader
 compares devices through `syscall.Stat_t`.
 
+Both `make build` and `make crossbuild` stamp the binary with a UUID
+generated fresh for that invocation (`-ldflags -X main.buildID=...`), shown
+alongside the version by `orcli version`, `orcli --version`, and the
+startup report. The version alone cannot tell two builds of the same commit
+apart; the build ID can, which is what answers whether the binary in front
+of a reader debugging a session is the one a given build actually produced.
+A plain `go build ./...` with no `-ldflags` leaves it unset, and the version
+report omits it rather than print a mark that was never stamped in.
+
 The binary is not produced yet, because there is no `cmd/orcli` in the tree. The
 build target reports that rather than failing, so the library packages still
 build and vet.
