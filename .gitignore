@@ -17,6 +17,7 @@ coverage.*
 !coverage.go
 *.coverprofile
 profile.cov
+.orcli-debug.jsonl
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -38,18 +39,3 @@ worktrees/
 # Build output
 staged/bin/
 
-# Local preferences and memory
-.OPENROUTER.md
-
-# The work log and its lock, at the root and named with the program rather
-# than with the ledger convention above. Local observation only, like those two.
-.orcli.log
-.orcli.log.lock
-DESIGN-NOTES.md
-staged/*.md
-
-# Local design and workflow records. A bare name, so a worker's own copy is
-# covered at any depth, beside the files it belongs to.
-.orcli-design/
-.orcli.md
-.orcli-debug.jsonl
