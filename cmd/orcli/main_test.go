@@ -85,6 +85,28 @@ func TestVersionFlagPrintsAndStops(t *testing.T) {
 	}
 }
 
+// TestVersionStringCarriesTheBuildIDWhenSet covers versionString's own two
+// shapes: a build with no -ldflags has nothing to report beyond the version,
+// and a build that set buildID - what `make build` and `make crossbuild` do
+// for every build, so a reader comparing a running session against a pull
+// request can tell one build from another at the same version - has it
+// printed alongside, not silently dropped.
+func TestVersionStringCarriesTheBuildIDWhenSet(t *testing.T) {
+	orig := buildID
+	defer func() { buildID = orig }()
+
+	buildID = ""
+	if got := versionString(); strings.Contains(got, "build") {
+		t.Errorf("versionString() = %q, want no build mark with buildID unset", got)
+	}
+
+	buildID = "11111111-2222-3333-4444-555555555555"
+	got := versionString()
+	if !strings.Contains(got, version) || !strings.Contains(got, buildID) {
+		t.Errorf("versionString() = %q, want both the version and %q", got, buildID)
+	}
+}
+
 // TestVersionSubcommandIsTheSameAnswer checks that the flag and the subcommand
 // agree. Two spellings of one question that can disagree is a script that works
 // against one of them and not the other.

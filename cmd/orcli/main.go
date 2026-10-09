@@ -25,6 +25,32 @@ import (
 // be told apart from another is a build nobody can report a fault against.
 var version = "0.0.0-dev"
 
+// buildID distinguishes one build from another at the same version.
+//
+// `make build` and `make crossbuild` set it with -ldflags to a UUID generated
+// fresh for that invocation, so a binary built for one pull request carries a
+// mark no other build - not even one made from the same commit a minute
+// later - also carries. That is the question version alone cannot answer: a
+// reader debugging a session against a PR wants to know not just which
+// commit they are running, which a stale binary on PATH can share with a
+// fresh one, but whether the binary in front of them is the one that build
+// actually produced. A plain `go build` with no -ldflags leaves it empty,
+// and versionString below leaves it out of the report rather than print a
+// mark that is not there.
+var buildID = ""
+
+// versionString renders the one line every version report prints.
+//
+// It is a function rather than three copies of the same Sprintf, so `orcli
+// version`, `--version`, and the startup report cannot drift into three
+// different ideas of what a build is identified by.
+func versionString() string {
+	if buildID == "" {
+		return fmt.Sprintf("orcli %s", version)
+	}
+	return fmt.Sprintf("orcli %s (build %s)", version, buildID)
+}
+
 // gate is the trust question, as a variable rather than a call.
 //
 // This is the seam a test stands in, and it is also what keeps the wiring visible
@@ -113,7 +139,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 	switch {
 	case *showVersion:
-		fmt.Fprintf(stdout, "orcli %s\n", version)
+		fmt.Fprintf(stdout, "%s\n", versionString())
 		return nil
 	case *showHelp:
 		printUsage(stdout)
@@ -494,7 +520,7 @@ func refreshStatusData(ctx context.Context, s *tui.Session, d *dispatcher) {
 
 // printSession reports a session as plain text.
 func printSession(w io.Writer, s session) {
-	fmt.Fprintf(w, "orcli %s\n", version)
+	fmt.Fprintf(w, "%s\n", versionString())
 	fmt.Fprintf(w, "  configuration  %s\n", orNone(s.ConfigPath))
 	fmt.Fprintf(w, "  credential     %s\n", credential(s.Config.APIKey))
 	fmt.Fprintf(w, "  provider       %s\n", orNone(s.Config.Provider))
@@ -583,7 +609,7 @@ func readable(path string) error {
 func subcommand(name string, _ []string, stdout io.Writer) error {
 	switch name {
 	case "version":
-		fmt.Fprintf(stdout, "orcli %s\n", version)
+		fmt.Fprintf(stdout, "%s\n", versionString())
 		return nil
 	case "help":
 		printUsage(stdout)

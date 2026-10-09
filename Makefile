@@ -45,6 +45,16 @@ BINDIR := $(STAGE)/bin
 BIN := $(BINDIR)/orcli
 MAIN := ./cmd/orcli
 
+# BUILDID is the shell pipeline that prints a fresh UUID for one build
+# invocation, tried in the order a target is most likely to have it: the
+# native command on every supported OS, then the kernel's own source on
+# Linux, then Python's library, since every one of those can be missing and
+# the fourth form never is. It is substituted into a recipe's own shell, not
+# run by make itself, so the one definition works whether make is BSD's or
+# GNU's - the same reason crossbuild's own loop is a shell loop rather than a
+# make one.
+BUILDID = uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || date +%s%N
+
 # Every target that is compiled and vetted by `make crossbuild`. The terminal
 # layer names ioctl requests that differ between the BSD family and System V,
 # and nothing else would notice a change that breaks a platform other than the
@@ -76,7 +86,7 @@ all: build
 build:
 	@mkdir -p $(BINDIR)
 	@if [ -f cmd/orcli/main.go ]; then \
-		$(GO) build -o $(BIN) $(MAIN); \
+		$(GO) build -ldflags "-X main.buildID=$$($(BUILDID))" -o $(BIN) $(MAIN); \
 	else \
 		echo "no main package yet, so nothing is placed at $(BIN)"; \
 	fi
@@ -149,7 +159,8 @@ fmtwrite:
 # targets cannot overwrite each other's output and a stale artifact is not
 # mistaken for a current one.
 crossbuild:
-	@for target in $(PLATFORMS); do \
+	@buildid=$$($(BUILDID)); \
+	for target in $(PLATFORMS); do \
 		os=$${target%/*}; arch=$${target#*/}; \
 		echo "==> $$os/$$arch"; \
 		GOOS=$$os GOARCH=$$arch $(GO) build ./... || exit 1; \
@@ -157,6 +168,7 @@ crossbuild:
 		if [ -f cmd/orcli/main.go ]; then \
 			mkdir -p $(BINDIR)/$$os-$$arch; \
 			GOOS=$$os GOARCH=$$arch $(GO) build \
+				-ldflags "-X main.buildID=$$buildid" \
 				-o $(BINDIR)/$$os-$$arch/orcli $(MAIN) || exit 1; \
 		fi; \
 	done
