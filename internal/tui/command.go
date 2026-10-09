@@ -226,6 +226,10 @@ func init() {
 			Summary: "capture the redacted conversation stream for debugging",
 		},
 		{
+			Name:    "context",
+			Summary: "list the context file paths read so far this session",
+		},
+		{
 			Name:    "info",
 			Summary: "report the session settings",
 		},

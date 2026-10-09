@@ -261,6 +261,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"attribution": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.attribute(ctx, args)
 		},
+		"context": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.context(args)
+		},
 	}
 	return d
 }
