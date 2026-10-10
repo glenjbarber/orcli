@@ -141,6 +141,42 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 		if resp.StatusCode != http.StatusOK {
 			err := boundedError(c, resp)
 			resp.Body.Close()
+			// If the request was rate‑limited, respect the OpenRouter headers
+			// and retry after the reset window rather than applying the fixed
+			// exponential backoff.
+			if resp.StatusCode == http.StatusTooManyRequests {
+				// Prefer X‑RateLimit‑Reset (epoch‑milliseconds), fall back to
+				// Retry‑After (seconds), otherwise use a short exponential backoff.
+				var wait time.Duration
+				resetStr := resp.Header.Get("X-RateLimit-Reset")
+				if resetStr != "" {
+					var ms int64
+					fmt.Sscanf(resetStr, "%d", &ms)
+					resetTime := time.Unix(ms/1000, (ms%1000)*1000)
+					wait = resetTime.Sub(time.Now())
+					if wait < 0 {
+						wait = 0
+					}
+				} else {
+					raStr := resp.Header.Get("Retry-After")
+					if raStr != "" {
+						var sec int
+						fmt.Sscanf(raStr, "%d", &sec)
+						wait = time.Duration(sec) * time.Second
+					} else {
+						wait = retryWait * time.Duration(attempt+1)
+					}
+				}
+				if wait > 0 {
+					if err := pause(ctx, wait); err != nil {
+						onEvent(Event{Kind: EventError, Err: err})
+						onEvent(Event{Kind: EventFinish, Finished: false})
+						return nil
+					}
+				}
+				last = err
+				continue
+			}
 			if retryableStatus(resp.StatusCode) {
 				last = err
 				continue
@@ -185,7 +221,8 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 // Only 502, 503, and 504 qualify - the three shapes of "unavailable right
 // now" that a second attempt with backoff can plausibly outlast. Every
 // other status, 401/403/429 included, is the endpoint's own answer to the
-// request it was sent, which a second attempt cannot change.
+// request it was sent, which a second attempt cannot satisfy a rejected
+// credential or a malformed one.
 func retryableStatus(code int) bool {
 	switch code {
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
