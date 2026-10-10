@@ -61,6 +61,10 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	http    *http.Client
+
+	// --- rate‑limit tracking (free‑tier) ---
+	remaining int        // how many requests we can still send this minute
+	resetTime time.Time // when the minute window resets (epoch‑milliseconds from X‑RateLimit-Reset)
 }
 
 // New returns a Client carrying the given credential.
@@ -72,6 +76,83 @@ func New(apiKey string) *Client {
 		baseURL: "https://openrouter.ai/api/v1",
 		apiKey:  apiKey,
 		http:    &http.Client{},
+		// we don't know the quota yet → -1 means “unknown”
+		remaining: -1,
+		resetTime: time.Time{},
+	}
+}
+
+// updateRateLimitInfo extracts the free‑tier quota headers from an HTTP response
+// and stores them in the client. It is safe to call on any response (success or error).
+func (c *Client) updateRateLimitInfo(resp *http.Response) {
+	remainingStr := resp.Header.Get("X-RateLimit-Remaining")
+	resetStr := resp.Header.Get("X-RateLimit-Reset")
+
+	if remainingStr != "" {
+		var n int
+		fmt.Sscanf(remainingStr, "%d", &n)
+		c.remaining = n
+	}
+	if resetStr != "" {
+		var ms int64
+		fmt.Sscanf(resetStr, "%d", &ms)
+		// X‑RateLimit‑Reset is epoch‑milliseconds
+		c.resetTime = time.Unix(ms/1000, (ms%1000)*1000)
+	}
+}
+
+// ensureRateLimit blocks until the free‑tier quota is available.
+// If the current bucket is empty it sleeps until X‑RateLimit‑Reset.
+// After the wait it clears the client‑side counters so the next API
+// response will supply fresh values.
+func (c *Client) ensureRateLimit(ctx context.Context) error {
+	// If we already know we have remaining requests, nothing to do.
+	if c.remaining > 0 {
+		return nil
+	}
+	// If we have never seen the quota headers, just let the first request
+	// go – the server will reply with the headers.
+	if c.resetTime.IsZero() {
+		return nil
+	}
+
+	// Sleep until the reset epoch (the free‑tier window closes).
+	now := time.Now()
+	wait := c.resetTime.Sub(now)
+	if wait > 0 {
+		if err := pause(ctx, wait); err != nil {
+			return err
+		}
+	}
+	// After the wait we do not know the new remaining value, so reset it.
+	c.remaining = -1
+	c.resetTime = time.Time{}
+	return nil
+}
+
+// pause waits for d, or until the turn is stopped.
+//
+// A reader stopping a turn has to end the pause: a request waiting out a backoff
+// is a request the reader cannot stop. The wait is taken in steps rather than
+// slept through whole, so a stop is noticed rather than waited out.
+func pause(ctx context.Context, d time.Duration) error {
+	deadline := time.Now().Add(d)
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return nil
+		}
+		if remain > retryWait {
+			remain = retryWait
+		}
+
+		timer := time.NewTimer(remain)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 
@@ -115,6 +196,16 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 	if c.apiKey == "" {
 		return ErrNoAPIKey
 	}
+
+	// ---------------------------------------------------------------
+	// Rate‑limit guard (free‑tier 20‑requests‑per‑minute)
+	// ---------------------------------------------------------------
+	if err := c.ensureRateLimit(ctx); err != nil {
+		onEvent(Event{Kind: EventError, Err: err})
+		onEvent(Event{Kind: EventFinish, Finished: false})
+		return nil
+	}
+	// -----------------------------------------------------------------
 
 	waits := retryWaits(retryBound)
 
@@ -174,6 +265,12 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 						return nil
 					}
 				}
+				// Update the client‑side counters so the next iteration (or the
+				// next Chat call) knows we are still inside the window.
+				c.updateRateLimitInfo(resp)
+				// Reset the counters so the next iteration starts clean.
+				c.remaining = -1
+				c.resetTime = time.Time{}
 				last = err
 				continue
 			}
@@ -185,6 +282,10 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 			onEvent(Event{Kind: EventFinish, Finished: false})
 			return nil
 		}
+
+		// success – update the rate‑limit counters so the next call knows the
+		// new remaining quota.
+		c.updateRateLimitInfo(resp)
 
 		var undelivered *undeliveredError
 		err = c.stream(ctx, resp.Body, onEvent)
@@ -245,32 +346,6 @@ func retryWaits(bound int) []time.Duration {
 		wait *= 2
 	}
 	return waits
-}
-
-// pause waits for d, or until the turn is stopped.
-//
-// A reader stopping a turn has to end the pause: a request waiting out a backoff
-// is a request the reader cannot stop. The wait is taken in steps rather than
-// slept through whole, so a stop is noticed rather than waited out.
-func pause(ctx context.Context, d time.Duration) error {
-	deadline := time.Now().Add(d)
-	for {
-		remain := time.Until(deadline)
-		if remain <= 0 {
-			return nil
-		}
-		if remain > retryWait {
-			remain = retryWait
-		}
-
-		timer := time.NewTimer(remain)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
 }
 
 // get makes one GET request against path and decodes a successful body into out.
