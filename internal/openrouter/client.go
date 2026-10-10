@@ -63,7 +63,7 @@ type Client struct {
 	http    *http.Client
 
 	// --- rate‑limit tracking (free‑tier) ---
-	remaining int        // how many requests we can still send this minute
+	remaining int       // how many requests we can still send this minute
 	resetTime time.Time // when the minute window resets (epoch‑milliseconds from X‑RateLimit-Reset)
 }
 
