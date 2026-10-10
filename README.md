@@ -26,6 +26,9 @@ been scoped.
 
 ## Status
 
+> **Documentation status (October 9, 2026):** This README contains historical implementation descriptions not yet reconciled with the current source tree. `cmd/orcli/main.go` and the configuration and TUI packages now exist; this is no longer an OpenRouter-client-only source tree. Assertions below that these components have not been written or that no binary can be produced are obsolete. Some rendering details also describe an earlier architecture. Refer to current source code, tests, and merged changes for implementation evidence. [Issue #30](https://github.com/glenjbarber/orcli/issues/30) tracks fuller reconciliation. This notice does not assert that CI passes or that a stable release is available.
+
+
 The project is at the beginning. The API client is written and tested; the
 interface, tools, configuration, persistence, panes and compaction are not.
 
