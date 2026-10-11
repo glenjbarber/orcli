@@ -276,7 +276,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			start = len(rows) - 1
 		}
-		clearLineBuffer(out)
+		movePastControls(out)
 		for _, row := range rows[start:] {
 			fmt.Fprintln(out, lineMarker(row))
 		}
@@ -346,19 +346,11 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 
 func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
 
-// clearLineBuffer removes the current orcli/prompt/status block immediately before
-// completed rows are handed to ordinary terminal stdout. It leaves the cursor at the
-// first row below that block, so the emitted rows become native terminal scrollback.
-func clearLineBuffer(out *os.File) {
-	fmt.Fprint(out, "\x1b[5B\x1b[6A")
-	for i := 0; i < 6; i++ {
-		fmt.Fprint(out, "\r\x1b[2K\n")
-	}
-}
+// movePastControls positions the cursor after the prompt and status panes. The
+// completed rows are then written sequentially, exactly like a `cat` command: no
+// already-emitted output is erased or redrawn.
+func movePastControls(out *os.File) { fmt.Fprint(out, "\x1b[5B") }
 
-// lineControls leaves the editable prompt above the two status panes. The cursor is
-// returned to the prompt after drawing the panes, while completed output remains in
-// ordinary terminal scrollback below the control block.
 func lineControls(out *os.File, l *interfaceLoop) {
 	state, detail := l.session.State()
 	figure := "idle"
