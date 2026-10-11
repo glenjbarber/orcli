@@ -113,7 +113,16 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		return errors.New("tui: Start was given no way to run a command")
 	}
 
-	app := tview.NewApplication().EnableMouse(s.Options().Mouse).EnablePaste(true)
+	// Pane 0 must stay on the terminal's normal screen. tcell's default
+	// terminfo enters the alternate screen during Init, which hides the
+	// transcript from the terminal's native scrollback. Supplying the same
+	// capabilities with only the alternate-screen enter/exit sequences removed
+	// keeps keyboard and resize handling while preserving the normal scrollback.
+	screen, err := pane0Screen()
+	if err != nil {
+		return err
+	}
+	app := tview.NewApplication().SetScreen(screen).EnableMouse(s.Options().Mouse).EnablePaste(true)
 	frame := NewFrame()
 	app.SetRoot(frame, true)
 	l := &interfaceLoop{
@@ -214,11 +223,26 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		case <-finished:
 		}
 	}()
-	err := app.Run()
+	err = app.Run()
 	if errors.Is(err, tcell.ErrNoScreen) {
 		return ErrNoTerminal
 	}
 	return err
+}
+
+// pane0Screen returns a terminal screen that never enters the alternate screen.
+// The terminfo entry is copied so the process-wide terminal definition is not
+// mutated for callers outside the TUI.
+func pane0Screen() (tcell.Screen, error) {
+	name := os.Getenv("TERM")
+	ti, err := tcell.LookupTerminfo(name)
+	if err != nil {
+		return nil, err
+	}
+	copy := *ti
+	copy.EnterCA = ""
+	copy.ExitCA = ""
+	return tcell.NewTerminfoScreenFromTtyTerminfo(nil, &copy)
 }
 
 // maybeSendHELO starts the one turn Start sends on its own, with no key pressed
