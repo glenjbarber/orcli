@@ -259,7 +259,12 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	out := os.Stdout
 	printed := map[*Session]int{}
 	lastRow := map[*Session]string{}
-	liveLines := 0
+	liveRows := 0    // terminal rows the live region currently occupies, not log-row count
+	controlRows := 0 // terminal rows the prompt/status block currently occupies
+	cols := func() int {
+		w, _ := screen.Size()
+		return w
+	}
 	printRows := func() bool {
 		state, _ := l.session.State()
 		running := state == StateThinking || state == StateWorking
@@ -277,12 +282,12 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		}
 		pending := rows[start:]
 		if running {
-			renderLiveRows(out, pending, &liveLines)
+			renderLiveRows(out, pending, &liveRows, controlRows, cols())
 			return true
 		}
-		clearLiveRows(out, liveLines)
-		liveLines = 0
-		movePastControls(out)
+		clearLiveRows(out, liveRows, controlRows)
+		liveRows = 0
+		movePastControls(out, controlRows)
 		for _, row := range pending {
 			fmt.Fprintln(out, lineMarker(row))
 		}
@@ -294,7 +299,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	}
 
 	printRows()
-	lineControls(out, l)
+	controlRows = lineControls(out, l, cols())
 	maybeSendHELO(ctx, l, helo)
 
 	events := make(chan tcell.Event)
@@ -326,7 +331,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			if printRows() {
 				if !sessionRunning(l.session) {
-					lineControls(out, l)
+					controlRows = lineControls(out, l, cols())
 				}
 			}
 		case event := <-events:
@@ -346,7 +351,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			fmt.Fprint(out, "\r\x1b[2K")
 			if printRows() {
 				if !sessionRunning(l.session) {
-					lineControls(out, l)
+					controlRows = lineControls(out, l, cols())
 				} else {
 					linePrompt(out, l.session.Editor().Text())
 				}
@@ -366,33 +371,49 @@ func sessionRunning(s *Session) bool {
 
 // renderLiveRows redraws only the transient rows below the status panes. The cursor
 // returns to the prompt afterward, so editing never leaves stale status lines behind.
-func renderLiveRows(out *os.File, rows []Row, old *int) {
-	clearLiveRows(out, *old)
-	fmt.Fprintf(out, "\x1b[5B")
+//
+// controlRows is how many terminal rows the prompt/status block above actually
+// occupies right now, and cols is the terminal's current width. Both are measured
+// rather than assumed: a row (the block's own lines, or a live row) that is wider
+// than the terminal wraps to more than one terminal row, and a cursor jump sized by
+// line count rather than by wrapped row count lands short or long, which is what let
+// a live update stomp the completed stdout above it or leave stray lines behind.
+func renderLiveRows(out *os.File, rows []Row, old *int, controlRows, cols int) {
+	clearLiveRows(out, *old, controlRows)
+	fmt.Fprintf(out, "\x1b[%dB", controlRows)
+	total := 0
 	for _, row := range rows {
-		fmt.Fprintln(out, lineMarker(row))
+		text := lineMarker(row)
+		fmt.Fprintln(out, text)
+		total += wrappedRows(text, cols)
 	}
-	fmt.Fprintf(out, "\x1b[%dA", 5+len(rows))
-	*old = len(rows)
+	fmt.Fprintf(out, "\x1b[%dA", controlRows+total)
+	*old = total
 }
 
-func clearLiveRows(out *os.File, n int) {
+func clearLiveRows(out *os.File, n, controlRows int) {
 	if n <= 0 {
 		return
 	}
-	fmt.Fprintf(out, "\x1b[5B")
+	fmt.Fprintf(out, "\x1b[%dB", controlRows)
 	for i := 0; i < n; i++ {
 		fmt.Fprint(out, "\r\x1b[2K\n")
 	}
-	fmt.Fprintf(out, "\x1b[%dA", 5+n)
+	fmt.Fprintf(out, "\x1b[%dA", controlRows+n)
 }
 
 // movePastControls positions the cursor after the prompt and status panes. The
 // completed rows are then written sequentially, exactly like a `cat` command: no
 // already-emitted output is erased or redrawn.
-func movePastControls(out *os.File) { fmt.Fprint(out, "\x1b[5B") }
+func movePastControls(out *os.File, controlRows int) { fmt.Fprintf(out, "\x1b[%dB", controlRows) }
 
-func lineControls(out *os.File, l *interfaceLoop) {
+// lineControls draws the prompt and the two status panes below it, and reports how
+// many terminal rows the block actually took so a caller can return the cursor to
+// where it started and so renderLiveRows/clearLiveRows know where the block ends.
+// The block's own lines can each wrap to more than one terminal row (a long working
+// directory, a long status line), so the row count is measured against the current
+// terminal width rather than fixed at the block's five logical lines.
+func lineControls(out *os.File, l *interfaceLoop, cols int) int {
 	state, detail := l.session.State()
 	figure := "idle"
 	if state == StateThinking || state == StateWorking {
@@ -400,7 +421,28 @@ func lineControls(out *os.File, l *interfaceLoop) {
 	}
 	status := l.status(state, detail, figure)
 	prefix, figureText, suffix := renderBarOne(status)
-	fmt.Fprintf(out, "\r\x1b[2Korcli\n%s%s\n\n%s%s%s\n%s\n\x1b[5A", Prompt, l.session.Editor().Text(), prefix, figureText, suffix, renderBarTwo(status))
+	bar1 := prefix + figureText + suffix
+	bar2 := renderBarTwo(status)
+	promptLine := Prompt + l.session.Editor().Text()
+	rows := wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
+		wrappedRows(bar1, cols) + wrappedRows(bar2, cols)
+	fmt.Fprintf(out, "\r\x1b[2Korcli\n%s\n\n%s\n%s\n\x1b[%dA", promptLine, bar1, bar2, rows)
+	return rows
+}
+
+// wrappedRows reports how many terminal rows a line occupies once the terminal
+// wraps it, given a column width. A blank line still takes one row, since that is
+// what printing an empty Fprintln does. cols <= 0 (no terminal size yet) is treated
+// as no wrapping, matching the one-row-per-line behavior this replaces.
+func wrappedRows(s string, cols int) int {
+	if cols <= 0 {
+		return 1
+	}
+	w := displayWidth(s)
+	if w == 0 {
+		return 1
+	}
+	return (w + cols - 1) / cols
 }
 
 func lineMarker(row Row) string {
