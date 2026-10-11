@@ -209,26 +209,6 @@ func TestExitQuitsLikeQuitDoes(t *testing.T) {
 	}
 }
 
-// TestClearEmptiesTheLogAndReportsHowMuch covers Log.Truncate's own contract: a
-// reader is told how many rows went rather than finding an empty log and wondering.
-func TestClearEmptiesTheLogAndReportsHowMuch(t *testing.T) {
-	d := togglesDispatcher(t)
-	before := d.session.Log().Len()
-	d.session.Notice("a notice to clear", 0, tui.RoleDim)
-
-	out, err := d.Run(context.Background(), "/clear")
-	if err != nil {
-		t.Fatalf("/clear: %v", err)
-	}
-	if got := d.session.Log().Len(); got != 0 {
-		t.Errorf("the log still holds %d rows after /clear", got)
-	}
-	if !strings.Contains(out.Text, "cleared") {
-		t.Errorf("/clear did not report what it did: %q", out.Text)
-	}
-	_ = before
-}
-
 // TestBellReportsWithNoArgumentAndSetsWithOne covers /level's own pattern, which
 // every plain toggle in this cluster follows: empty reports, on/off acts.
 func TestBellReportsWithNoArgumentAndSetsWithOne(t *testing.T) {

@@ -78,7 +78,7 @@ func TestContextDoesNotDuplicateARepeatedRead(t *testing.T) {
 	}
 }
 
-// TestContextRefusesArguments covers that /context, like /version and /clear, takes
+// TestContextRefusesArguments covers that /context, like /version, takes
 // no argument, so a reader who types one is told rather than silently ignored.
 func TestContextRefusesArguments(t *testing.T) {
 	resetGlobalContextLog()

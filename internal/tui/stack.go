@@ -451,7 +451,14 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// The fixed footer now begins with two separators above the prompt. Input
 	// lines occupy the rows immediately above that footer; only lines beyond
 	// the three footer rows reduce the visible log area.
-	logRows := backlog
+	bannerRows := 0
+	if len(f.log) > 0 && isProgramBanner(f.log[0]) {
+		bannerRows = 1
+	}
+	logRows := backlog - bannerRows
+	if logRows < 1 {
+		logRows = 1
+	}
 	if extra := len(input) - 3; extra > 0 {
 		logRows -= extra
 	}
@@ -459,14 +466,24 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		logRows = 1
 	}
 	latestResponse := latestResponseID(f.log)
-	physical := make([]Row, 0, len(f.log))
-	for i := 0; i < len(f.log); i++ {
+	physical := make([]Row, 0, len(f.log)-bannerRows)
+	for i := bannerRows; i < len(f.log); i++ {
 		// The response marker occupies part of the terminal width. Apply it
 		// before folding so a wrapped response line leaves room for its marker
 		// instead of being wrapped to the full width and truncated afterward.
 		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
 		lines := foldRowLines(marked, width)
 		physical = append(physical, lines...)
+	}
+	if bannerRows == 1 {
+		banner := PlainRow(f.log[0])
+		text, offset, cut := cutTail(banner.Text, width)
+		if cut {
+			drawCellText(screen, x, y, width, ellipsis, base)
+			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y, width-DisplayWidth(ellipsis), text, offset, banner.Spans, f.palette, base)
+		} else {
+			drawStyledCellText(screen, x, y, width, text, offset, banner.Spans, f.palette, base)
+		}
 	}
 	end := len(physical) - f.scroll
 	if end < 0 {
@@ -482,7 +499,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	shown := physical[start:end]
 	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
-		at := i
+		at := i + bannerRows
 		text, offset, cut := cutTail(row.Text, width)
 		if cut {
 			drawCellText(screen, x, y+at, width, ellipsis, base)
@@ -526,6 +543,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	f.drawBarTwo(screen, x, y+barTwoRow, width, chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
 		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+func isProgramBanner(row Row) bool {
+	return row.Kind == KindNotice && row.Text == "orcli"
 }
 
 func latestResponseID(rows []Row) int {

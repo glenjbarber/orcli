@@ -192,9 +192,6 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"version": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.version()
 		},
-		"clear": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
-			return d.clear()
-		},
 		"trace": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.trace(args)
 		},
