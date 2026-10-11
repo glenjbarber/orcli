@@ -261,9 +261,38 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	lastRow := map[*Session]string{}
 	liveRows := 0    // terminal rows the live region currently occupies, not log-row count
 	controlRows := 0 // terminal rows the prompt/status block currently occupies
+	promptRows := 0  // terminal rows the lone prompt row currently occupies, tracked
+	// separately from controlRows because a per-keystroke redraw rewrites only the
+	// prompt, not the whole control block, and needs its own wrapped-row count to
+	// clear correctly.
 	cols := func() int {
 		w, _ := screen.Size()
 		return w
+	}
+	// drawPrompt is linePrompt plus the one piece of bookkeeping every caller of
+	// it needs: controlRows is lineControls' own idea of the block's height, and
+	// it is only ever refreshed when lineControls itself runs. The reader's own
+	// typing between two such refreshes can wrap the prompt to more or fewer
+	// rows than controlRows still assumes, and onSubmit's own lineControls call
+	// trusts controlRows as the previous height to clean up after - so left out
+	// of sync, it cleans up relative to a height that was never actually drawn,
+	// which is what left a stray tail of the just-typed line behind once Enter
+	// handed off to onSubmit.
+	drawPrompt := func() {
+		before := promptRows
+		linePrompt(out, l.session.Editor().Text(), &promptRows, cols(), wrappedRows("orcli", cols()))
+		controlRows += promptRows - before
+	}
+	l.onSubmit = func() {
+		if sessionRunning(l.session) {
+			// A turn was already running when this one was submitted (queued
+			// behind it via /queue rather than starting fresh) - the control
+			// block stays exactly as frozen as it was for the turn in flight,
+			// which is the behavior every other running-turn path here keeps.
+			return
+		}
+		controlRows = lineControls(out, l, cols(), controlRows)
+		promptRows = 0
 	}
 	printRows := func() bool {
 		state, _ := l.session.State()
@@ -289,7 +318,12 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		liveRows = 0
 		movePastControls(out, controlRows)
 		for _, row := range pending {
-			fmt.Fprintln(out, lineMarker(row))
+			// "\r\n" rather than Fprintln's bare "\n": this raw-mode screen does not
+			// translate a line feed into a carriage return, so a row shorter than
+			// the one before it would otherwise start partway across the row,
+			// showing through whatever that longer row left behind at those
+			// columns instead of starting clean at the left margin.
+			fmt.Fprintf(out, "%s\r\n", lineMarker(row))
 		}
 		printed[l.session] = len(rows)
 		if len(rows) > 0 {
@@ -299,7 +333,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	}
 
 	printRows()
-	controlRows = lineControls(out, l, cols())
+	controlRows = lineControls(out, l, cols(), controlRows)
 	maybeSendHELO(ctx, l, helo)
 
 	events := make(chan tcell.Event)
@@ -331,7 +365,8 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			if printRows() {
 				if !sessionRunning(l.session) {
-					controlRows = lineControls(out, l, cols())
+					controlRows = lineControls(out, l, cols(), controlRows)
+					promptRows = 0
 				}
 			}
 		case event := <-events:
@@ -347,22 +382,81 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			case *tcell.EventPaste:
 				// Paste markers bracket the literal key events that follow; key handling
 				// already inserts those runes into the editor.
+			case *tcell.EventResize:
+				// tcell delivers one of these the moment Init() finishes, reporting the
+				// terminal's starting size, and again on every real resize - neither
+				// carries typed input. Falling through to the generic key-handling
+				// redraw below used to answer it with linePrompt, which rewrites only
+				// the prompt's own row and assumes the cursor is already sitting there;
+				// right after startup it is instead sitting wherever lineControls last
+				// left it (its own first row, one row above the prompt), so that redraw
+				// landed on the wrong row and clobbered it. A resize has nothing to type
+				// into the editor, so a full control-block redraw against the new width
+				// is the only thing it should ever cause.
+				if !sessionRunning(l.session) {
+					controlRows = lineControls(out, l, cols(), controlRows)
+					promptRows = 0
+				}
+				continue
+			default:
+				// An event this loop has no reaction to. Falling through to the
+				// key-handling redraw below answered it anyway, for the same reason
+				// *tcell.EventResize's own case above exists: that redraw assumes a key
+				// or a paste just happened, and nothing here says one did.
+				continue
 			}
-			fmt.Fprint(out, "\r\x1b[2K")
+			// No generic clear here: lineControls and linePrompt both now enter and
+			// leave at the same anchor (the "orcli" banner's own row) and each
+			// clears exactly what it is about to rewrite, so a clear here would
+			// only ever wipe content neither of them is about to repaint - which,
+			// for the "orcli" text linePrompt deliberately skips over rather than
+			// rewriting, means wiping it for good.
 			if printRows() {
 				if !sessionRunning(l.session) {
-					controlRows = lineControls(out, l, cols())
+					controlRows = lineControls(out, l, cols(), controlRows)
+					promptRows = 0
 				} else {
-					linePrompt(out, l.session.Editor().Text())
+					drawPrompt()
 				}
 			} else {
-				linePrompt(out, l.session.Editor().Text())
+				drawPrompt()
 			}
 		}
 	}
 }
 
-func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
+// linePrompt rewrites the prompt row in place for one keystroke, without redrawing
+// the rest of the control block.
+//
+// The prompt and the reader's own typed text can together exceed the terminal's
+// width and wrap to more than one terminal row, same as any other line here. old
+// is how many terminal rows the previous call left behind: enough of them are
+// cleared (fewer if the line grew, more if it shrank).
+//
+// bannerRows is how many terminal rows the "orcli" banner line above the prompt
+// takes (wrappedRows("orcli", cols), effectively always 1). The cursor enters and
+// leaves at that banner's own row - the same anchor lineControls uses - rather
+// than at the prompt's row one below it: the two draw functions run back to back
+// (a keystroke right after startup, or lineControls right after the reader's own
+// typing on submit), and if each expected a different resting row, whichever ran
+// second would clear and write starting from the wrong one, which is what used to
+// leave a stray leftover row of the previous prompt behind once the two met.
+func linePrompt(out *os.File, text string, old *int, cols, bannerRows int) {
+	line := Prompt + text
+	rows := wrappedRows(line, cols)
+
+	cursorDown(out, bannerRows)
+	fmt.Fprint(out, "\r\x1b[2K")
+	fmt.Fprint(out, line)
+
+	total := rows
+	for total < *old {
+		fmt.Fprint(out, "\n\r\x1b[2K")
+		total++
+	}
+	cursorUp(out, total+bannerRows-1)
+	*old = rows
+}
 
 func sessionRunning(s *Session) bool {
 	state, _ := s.State()
@@ -380,14 +474,15 @@ func sessionRunning(s *Session) bool {
 // a live update stomp the completed stdout above it or leave stray lines behind.
 func renderLiveRows(out *os.File, rows []Row, old *int, controlRows, cols int) {
 	clearLiveRows(out, *old, controlRows)
-	fmt.Fprintf(out, "\x1b[%dB", controlRows)
+	cursorDown(out, controlRows)
+	fmt.Fprint(out, "\r")
 	total := 0
 	for _, row := range rows {
 		text := lineMarker(row)
-		fmt.Fprintln(out, text)
+		fmt.Fprintf(out, "%s\r\n", text)
 		total += wrappedRows(text, cols)
 	}
-	fmt.Fprintf(out, "\x1b[%dA", controlRows+total)
+	cursorUp(out, controlRows+total)
 	*old = total
 }
 
@@ -395,17 +490,49 @@ func clearLiveRows(out *os.File, n, controlRows int) {
 	if n <= 0 {
 		return
 	}
-	fmt.Fprintf(out, "\x1b[%dB", controlRows)
+	cursorDown(out, controlRows)
 	for i := 0; i < n; i++ {
 		fmt.Fprint(out, "\r\x1b[2K\n")
 	}
-	fmt.Fprintf(out, "\x1b[%dA", controlRows+n)
+	cursorUp(out, controlRows+n)
 }
 
 // movePastControls positions the cursor after the prompt and status panes. The
 // completed rows are then written sequentially, exactly like a `cat` command: no
 // already-emitted output is erased or redrawn.
-func movePastControls(out *os.File, controlRows int) { fmt.Fprintf(out, "\x1b[%dB", controlRows) }
+//
+// The trailing "\r" matters as much as moving down: a cursor move changes row,
+// never column, and this terminal's raw mode does not translate a bare "\n" to a
+// carriage return either, so without it the first completed row written after this
+// would start at whatever column the control block's own last write left behind
+// rather than at the left margin.
+func movePastControls(out *os.File, controlRows int) {
+	cursorDown(out, controlRows)
+	fmt.Fprint(out, "\r")
+}
+
+// cursorDown and cursorUp move the cursor by exactly n rows, including n == 0,
+// where they write nothing at all.
+//
+// A CSI cursor-movement sequence with a 0 parameter is not a no-op: ANSI treats a
+// 0 (and an omitted parameter) as a request for the default count of 1, so
+// "\x1b[0B" moves the cursor down one row rather than staying put. controlRows is
+// legitimately 0 the first time this runs in a session (no control block has been
+// drawn yet), and writing the escape unconditionally there was an extra,
+// off-by-one row drop that this guards against.
+func cursorDown(out *os.File, n int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprintf(out, "\x1b[%dB", n)
+}
+
+func cursorUp(out *os.File, n int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprintf(out, "\x1b[%dA", n)
+}
 
 // lineControls draws the prompt and the two status panes below it, and reports how
 // many terminal rows the block actually took so a caller can return the cursor to
@@ -413,7 +540,16 @@ func movePastControls(out *os.File, controlRows int) { fmt.Fprintf(out, "\x1b[%d
 // The block's own lines can each wrap to more than one terminal row (a long working
 // directory, a long status line), so the row count is measured against the current
 // terminal width rather than fixed at the block's five logical lines.
-func lineControls(out *os.File, l *interfaceLoop, cols int) int {
+//
+// prevRows is how many terminal rows the block's previous draw took - typically
+// the controlRows a caller already has in hand. A long typed question wraps the
+// prompt line across several terminal rows; once it is sent, this draws the
+// now-empty, single-row prompt in its place, and without clearing the rest of
+// what the longer draw left behind, those extra rows stay on screen as a
+// permanent, meaningless row in the reader's scrollback once real output scrolls
+// past them - the same leftover-row problem linePrompt already guards against
+// for its own, lighter-weight redraw.
+func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	state, detail := l.session.State()
 	figure := "idle"
 	if state == StateThinking || state == StateWorking {
@@ -426,7 +562,27 @@ func lineControls(out *os.File, l *interfaceLoop, cols int) int {
 	promptLine := Prompt + l.session.Editor().Text()
 	rows := wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
 		wrappedRows(bar1, cols) + wrappedRows(bar2, cols)
-	fmt.Fprintf(out, "\r\x1b[2Korcli\n%s\n\n%s\n%s\n\x1b[%dA", promptLine, bar1, bar2, rows)
+	// "\r\n" between segments, not a bare "\n": this raw-mode screen does not
+	// translate a line feed into a carriage return, so each later segment would
+	// otherwise start at whatever column the one before it ended on rather than
+	// at the left margin - which is also what inflated the measured row count
+	// above the five logical lines, since a status line starting mid-row wraps
+	// one row sooner than the same text would starting at column zero.
+	//
+	// "\x1b[2K" before every segment, not only the first: a segment here is only
+	// ever as long as what it is drawing now, never padded out to what the
+	// previous draw at this row held, so a row that shrinks - the blank line,
+	// once the reader's own typing had wrapped the prompt across it and across
+	// the row after it, is exactly this - would otherwise still show whatever
+	// that longer previous draw left on it, merely overwritten at the front by
+	// however much of it the new, shorter content reaches.
+	fmt.Fprintf(out, "\r\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", promptLine, bar1, bar2)
+	total := rows
+	for total < prevRows {
+		fmt.Fprint(out, "\r\x1b[2K\n")
+		total++
+	}
+	cursorUp(out, total)
 	return rows
 }
 
@@ -499,6 +655,14 @@ type interfaceLoop struct {
 	navigatePane  func(direction int) *Session
 	askForSession func(*Session) AskFunc
 	prefixPending bool
+
+	// onSubmit, when set, is called synchronously from submit() right after the
+	// editor is reset and before any turn is started - see submit()'s own call
+	// site for why that moment matters. Start (the line-oriented Pane 0 loop)
+	// is the only caller that sets it; the full-screen tview loop never does,
+	// since it redraws everything every paint() and has no equivalent staleness
+	// to correct.
+	onSubmit func()
 
 	// group counts the goroutines writing to the frame, and is what leaving waits for.
 	group *group
@@ -990,6 +1154,21 @@ func (l *interfaceLoop) submit(ctx context.Context) bool {
 		return false
 	}
 	l.session.Editor().Reset()
+
+	// The reader's own typing, between here and the last full control-block
+	// redraw, used only the lightweight per-keystroke prompt-only path (see
+	// linePrompt), which never touches controlRows - so if what they typed
+	// wrapped the prompt to a different number of terminal rows than the last
+	// full redraw measured, controlRows is now stale relative to what is
+	// actually on screen. The editor was just reset to empty above, on this
+	// same goroutine and strictly before the turn's own goroutine can start
+	// touching the session, so refreshing the control block now - while the
+	// callback can still see that empty prompt, deterministically rather than
+	// racing the turn's state-flipping goroutine - re-syncs it before any
+	// live-row rendering for this turn ever has to consult it.
+	if l.onSubmit != nil {
+		l.onSubmit()
+	}
 
 	// Recorded here, where a line is actually sent, rather than where it was typed.
 	// There is no message-queue mechanism in this tree yet, so this is the only
