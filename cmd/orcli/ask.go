@@ -570,6 +570,25 @@ func introduction(dir string) string {
 // first to make that true later.
 const heloQuestion = "Briefly greet the user as orcli, grounded in the session capabilities above."
 
+// heloWithHomeAgents appends the user's home-level instructions to the synthetic
+// startup question. The file is deliberately part of the HELO user message rather
+// than a separate system message: it is startup guidance for this greeting, and the
+// request must carry it in the same exchange the reader sees as the introduction.
+// A missing home file is ordinary and leaves the HELO unchanged.
+func heloWithHomeAgents(question string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return question
+	}
+	path := filepath.Join(home, "AGENTS.md")
+	text, err := os.ReadFile(path)
+	if err != nil || len(text) == 0 {
+		return question
+	}
+	globalContextLog.record(path)
+	return question + "\n\nHome AGENTS.md:\n" + string(text)
+}
+
 // documentation lists the names of orcli's own documentation under dir, so the
 // capability message can point the model at doc/ and staged/ by name rather than
 // have it guess at what detail exists or describe this build from training data

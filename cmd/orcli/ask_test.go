@@ -597,6 +597,33 @@ func TestHELOQuestionAsksForAnIntroduction(t *testing.T) {
 	}
 }
 
+func TestHELOIncludesHomeAgentsWhenPresent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const agentsText = "Home instructions take precedence for this greeting."
+	if err := os.WriteFile(filepath.Join(home, "AGENTS.md"), []byte(agentsText), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	resetGlobalContextLog()
+
+	got := heloWithHomeAgents(heloQuestion)
+	if !strings.HasPrefix(got, heloQuestion+"\n\nHome AGENTS.md:\n") || !strings.HasSuffix(got, agentsText) {
+		t.Fatalf("HELO = %q, want the home AGENTS.md text at its tail", got)
+	}
+	paths := globalContextLog.list()
+	if len(paths) != 1 || paths[0] != filepath.Join(home, "AGENTS.md") {
+		t.Fatalf("context paths = %v, want the home AGENTS.md path", paths)
+	}
+}
+
+func TestHELOLeavesQuestionUnchangedWithoutHomeAgents(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resetGlobalContextLog()
+	if got := heloWithHomeAgents(heloQuestion); got != heloQuestion {
+		t.Fatalf("HELO = %q, want unchanged question without home AGENTS.md", got)
+	}
+}
+
 // TestSilentTurnHidesOnlyTheQuestion covers the general case behind the HELO:
 // a turn asked with silent=true leaves its own question text out of the log,
 // while its reply and the notice naming how it finished land exactly as they

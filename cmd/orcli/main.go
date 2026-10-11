@@ -462,7 +462,7 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// only refuse it and leave a failure notice as the first thing the reader sees.
 	helo := ""
 	if canAsk(s) {
-		helo = heloQuestion
+		helo = heloWithHomeAgents(heloQuestion)
 	}
 	confirmations := map[*tui.Session]func(string, bool){s: confirmModelAt(s, d.activeConfigPath)}
 	var confirmationMu sync.Mutex
