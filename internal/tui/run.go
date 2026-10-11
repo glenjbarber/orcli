@@ -269,6 +269,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		w, _ := screen.Size()
 		return w
 	}
+	rowsAvail := func() int {
+		_, h := screen.Size()
+		return h
+	}
 	// drawPrompt is linePrompt plus the one piece of bookkeeping every caller of
 	// it needs: controlRows is lineControls' own idea of the block's height, and
 	// it is only ever refreshed when lineControls itself runs. The reader's own
@@ -311,7 +315,58 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		}
 		pending := rows[start:]
 		if running {
-			renderLiveRows(out, pending, &liveRows, controlRows, cols())
+			// renderLiveRows has to move the cursor up past the whole live
+			// region to reach the control block, and an ANSI cursor-up clamps
+			// at the top of the screen instead of erroring - it does not fail
+			// loudly, it just stops short, and every write after that is then
+			// positioned relative to where the code thinks the cursor is
+			// rather than where it actually stopped. A response still fits
+			// comfortably the whole time it is shorter than the terminal is
+			// tall; a long one - a documentation file streamed back in full,
+			// easily hundreds of wrapped rows - eventually does not, and nothing
+			// here enforces that it must.
+			//
+			// The fix is not to commit the overflow as completed output early:
+			// a streamed response's earlier rows are not actually final until
+			// the whole thing is, since every delta re-parses the full
+			// accumulated text and replaces every row the response owns, not
+			// just the new ones - an earlier line's own wrap point can still
+			// shift. So only the tail of pending, as much of it as fits under
+			// the terminal's own height, is ever shown live; the instant the
+			// turn finishes, the ordinary completed-output flush below prints
+			// everything in one pass, in order, needing no cursor-up at all
+			// since it only ever writes forward - which is what makes it safe
+			// at any length to begin with.
+			budget := rowsAvail() - controlRows
+			if budget < 1 {
+				budget = 1
+			}
+			c := cols()
+			cut := len(pending)
+			if len(pending) > 0 {
+				// The most recent row is only ever included if it fits the
+				// budget on its own. A row can be any length - it holds
+				// whatever one streamed paragraph or one still-growing,
+				// not-yet-broken line turned out to be - and one that is
+				// already taller than the terminal cannot be shrunk by
+				// trimming older rows around it; the only sound choice is to
+				// show nothing live this tick rather than a row the terminal
+				// cannot actually display without clamping the cursor move
+				// needed to reach it.
+				if lastRows := wrappedRows(lineMarker(pending[len(pending)-1]), c); lastRows <= budget {
+					cut = len(pending) - 1
+					sum := lastRows
+					for i := len(pending) - 2; i >= 0; i-- {
+						rowsForThis := wrappedRows(lineMarker(pending[i]), c)
+						if sum+rowsForThis > budget {
+							break
+						}
+						sum += rowsForThis
+						cut = i
+					}
+				}
+			}
+			renderLiveRows(out, pending[cut:], &liveRows, controlRows, c)
 			return true
 		}
 		clearLiveRows(out, liveRows, controlRows)
@@ -607,28 +662,77 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 // wraps it, given a column width. A blank line still takes one row, since that is
 // what printing an empty Fprintln does. cols <= 0 (no terminal size yet) is treated
 // as no wrapping, matching the one-row-per-line behavior this replaces.
+//
+// s is split on embedded newlines first, and each resulting line measured on its
+// own, rather than measuring the whole of s as one run of display width. A Row's
+// Text is allowed to hold more than one real line - log.go's own doc comment
+// says a fenced code block is kept whole rather than split as it arrives - and
+// measuring that as if its embedded "\n" bytes were ordinary printable
+// characters first undercounts short multi-line rows and, for a row that is
+// still growing (a streamed response's text is re-parsed and re-measured whole
+// on every delta), produces a count that grows roughly with the total text
+// rather than with how many terminal rows it actually draws. That divergence
+// is what let a long streamed reply demand a cursor-up far taller than any
+// real terminal, which a terminal does not error on - it clamps at row 0 - so
+// everything written after that lands relative to a position the cursor never
+// actually reached.
 func wrappedRows(s string, cols int) int {
-	if cols <= 0 {
-		return 1
+	lines := strings.Split(s, "\n")
+	total := 0
+	for _, line := range lines {
+		if cols <= 0 {
+			total++
+			continue
+		}
+		w := displayWidth(line)
+		if w == 0 {
+			total++
+			continue
+		}
+		total += (w + cols - 1) / cols
 	}
-	w := displayWidth(s)
-	if w == 0 {
-		return 1
-	}
-	return (w + cols - 1) / cols
+	return total
 }
 
+// lineMarker returns a row's text with embedded newlines turned into the same
+// "\r\n" every other multi-segment write in this file uses, for the reason
+// each of those has: this raw-mode screen does not translate a line feed into
+// a carriage return, so a bare "\n" inside a multi-line row's own text would
+// leave every line after the first starting at whatever column the one before
+// it ended on instead of at the left margin - the same corruption class fixed
+// everywhere else a row boundary is written, just one level further in, inside
+// a single row that holds more than one real line.
 func lineMarker(row Row) string {
 	if row.Text == "" {
 		return ""
 	}
-	return row.Text
+	if !strings.Contains(row.Text, "\n") {
+		return row.Text
+	}
+	return strings.ReplaceAll(row.Text, "\n", "\r\n")
 }
 
 // pane0Screen returns a terminal screen that never enters the alternate screen.
 // The terminfo entry is copied so the process-wide terminal definition is not
 // mutated for callers outside the TUI.
+//
+// TCELL_ALTSCREEN=disable has to be set too, not just EnterCA/ExitCA emptied.
+// tcell's own shutdown path reads that variable directly, and when it is
+// unset, finding ExitCA empty does not make it skip the alternate-screen
+// cleanup - its own source says so in so many words ("only needed if ExitCA
+// is empty") - it falls back to clearing the whole screen instead, on the
+// theory that an empty ExitCA still means something needs restoring. There
+// never was an alternate screen to restore from here, so that fallback runs
+// unconditionally on every session end (/quit, or the process simply
+// exiting) and wipes out exactly the scrollback-preserving transcript this
+// whole design exists to protect. The environment variable is the one signal
+// that actually turns off tcell's alternate-screen bookkeeping end to end,
+// entry and exit alike, rather than just the two terminfo capabilities that
+// happen to drive its entry half.
 func pane0Screen() (tcell.Screen, error) {
+	if err := os.Setenv("TCELL_ALTSCREEN", "disable"); err != nil {
+		return nil, err
+	}
 	name := os.Getenv("TERM")
 	ti, err := tcell.LookupTerminfo(name)
 	if err != nil {
