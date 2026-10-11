@@ -257,7 +257,6 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	defer func() { cancel(); l.group.Close() }()
 
 	out := os.Stdout
-	fmt.Fprintln(out, "orcli")
 	printed := map[*Session]int{}
 	lastRow := map[*Session]string{}
 	printRows := func() bool {
@@ -354,7 +353,7 @@ func lineControls(out *os.File, l *interfaceLoop) {
 	}
 	status := l.status(state, detail, figure)
 	prefix, figureText, suffix := renderBarOne(status)
-	fmt.Fprintf(out, "\r\x1b[2K%s%s\n\n%s%s%s\n%s\n\x1b[5A", Prompt, l.session.Editor().Text(), prefix, figureText, suffix, renderBarTwo(status))
+	fmt.Fprintf(out, "\r\x1b[2Korcli\n%s%s\n\n%s%s%s\n%s\n\x1b[5A", Prompt, l.session.Editor().Text(), prefix, figureText, suffix, renderBarTwo(status))
 }
 
 func lineMarker(row Row) string {
