@@ -124,6 +124,10 @@ func init() {
 			Summary: "turn periodic break reminders on or off; use off save to persist off",
 		},
 		{
+			Name:    "ps",
+			Summary: "toggle file-system, shell, GitHub and Notion output",
+		},
+		{
 			Name:    "color",
 			Summary: "turn color on or off, and save the choice",
 			Hidden:  []string{"colour"},

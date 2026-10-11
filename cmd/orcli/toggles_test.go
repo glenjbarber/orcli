@@ -84,6 +84,24 @@ func TestBreakOffSavePersistsAndOnIsSessionOnly(t *testing.T) {
 	}
 }
 
+func TestPSTogglesToolOutput(t *testing.T) {
+	d := togglesDispatcher(t)
+	if !d.session.ToolOutputVisible() {
+		t.Fatal("tool output starts hidden")
+	}
+	out, err := d.Run(context.Background(), "/ps")
+	if err != nil || !strings.Contains(out.Text, "tool output is off") {
+		t.Fatalf("/ps = %q, %v; want off", out.Text, err)
+	}
+	if d.session.ToolOutputVisible() {
+		t.Fatal("/ps did not hide tool output")
+	}
+	out, err = d.Run(context.Background(), "/ps")
+	if err != nil || !strings.Contains(out.Text, "tool output is on") {
+		t.Fatalf("second /ps = %q, %v; want on", out.Text, err)
+	}
+}
+
 func TestTraceCommandCapturesSessionCommands(t *testing.T) {
 	d := togglesDispatcher(t)
 	d.capture = newDebugLog(t.TempDir(), "configured-secret")
