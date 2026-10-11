@@ -259,11 +259,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	out := os.Stdout
 	printed := map[*Session]int{}
 	lastRow := map[*Session]string{}
+	liveLines := 0
 	printRows := func() bool {
 		state, _ := l.session.State()
-		if state == StateThinking || state == StateWorking {
-			return false
-		}
+		running := state == StateThinking || state == StateWorking
 		rows := l.session.Log().Rows()
 		at := printed[l.session]
 		if at > len(rows) {
@@ -276,8 +275,15 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			start = len(rows) - 1
 		}
+		pending := rows[start:]
+		if running {
+			renderLiveRows(out, pending, &liveLines)
+			return true
+		}
+		clearLiveRows(out, liveLines)
+		liveLines = 0
 		movePastControls(out)
-		for _, row := range rows[start:] {
+		for _, row := range pending {
 			fmt.Fprintln(out, lineMarker(row))
 		}
 		printed[l.session] = len(rows)
@@ -286,6 +292,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		}
 		return true
 	}
+
 	printRows()
 	lineControls(out, l)
 	maybeSendHELO(ctx, l, helo)
@@ -318,7 +325,9 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 				l.session.TickBreak(now)
 			}
 			if printRows() {
-				lineControls(out, l)
+				if !sessionRunning(l.session) {
+					lineControls(out, l)
+				}
 			}
 		case event := <-events:
 			switch e := event.(type) {
@@ -336,7 +345,11 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			fmt.Fprint(out, "\r\x1b[2K")
 			if printRows() {
-				lineControls(out, l)
+				if !sessionRunning(l.session) {
+					lineControls(out, l)
+				} else {
+					linePrompt(out, l.session.Editor().Text())
+				}
 			} else {
 				linePrompt(out, l.session.Editor().Text())
 			}
@@ -345,6 +358,34 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 }
 
 func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
+
+func sessionRunning(s *Session) bool {
+	state, _ := s.State()
+	return state == StateThinking || state == StateWorking
+}
+
+// renderLiveRows redraws only the transient rows below the status panes. The cursor
+// returns to the prompt afterward, so editing never leaves stale status lines behind.
+func renderLiveRows(out *os.File, rows []Row, old *int) {
+	clearLiveRows(out, *old)
+	fmt.Fprintf(out, "\x1b[5B")
+	for _, row := range rows {
+		fmt.Fprintln(out, lineMarker(row))
+	}
+	fmt.Fprintf(out, "\x1b[%dA", 5+len(rows))
+	*old = len(rows)
+}
+
+func clearLiveRows(out *os.File, n int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprintf(out, "\x1b[5B")
+	for i := 0; i < n; i++ {
+		fmt.Fprint(out, "\r\x1b[2K\n")
+	}
+	fmt.Fprintf(out, "\x1b[%dA", 5+n)
+}
 
 // movePastControls positions the cursor after the prompt and status panes. The
 // completed rows are then written sequentially, exactly like a `cat` command: no
