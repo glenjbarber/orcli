@@ -15,14 +15,14 @@ func TestTheFrameOrderIsTopToBottom(t *testing.T) {
 	rows := strings.Split(strings.TrimRight(simulationText(screen), "\n"), "\n")
 	promptRow := scrollbackRows(20)
 
-	if got := strings.TrimSpace(rows[promptRow-3]); got != "the oldest log row" {
-		t.Errorf("row %d carries %q, want oldest log row", promptRow-3, got)
+	if got := strings.TrimSpace(rows[0]); got != "the oldest log row" {
+		t.Errorf("row 0 carries %q, want oldest log row", got)
 	}
-	if got := strings.TrimSpace(rows[promptRow-2]); got != "a newer log row" {
-		t.Errorf("row %d carries %q, want middle log row", promptRow-2, got)
+	if got := strings.TrimSpace(rows[1]); got != "a newer log row" {
+		t.Errorf("row 1 carries %q, want middle log row", got)
 	}
-	if got := strings.TrimSpace(rows[promptRow-1]); got != "the newest log row" {
-		t.Errorf("row %d carries %q, want newest log row", promptRow-1, got)
+	if got := strings.TrimSpace(rows[2]); got != "the newest log row" {
+		t.Errorf("row 2 carries %q, want newest log row", got)
 	}
 	if !strings.HasPrefix(rows[promptRow], Prompt+"THE FIELD") {
 		t.Errorf("prompt row %q does not carry the prompt", rows[promptRow])

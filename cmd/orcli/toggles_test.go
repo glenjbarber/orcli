@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,29 @@ func TestPSTogglesToolOutput(t *testing.T) {
 	out, err = d.Run(context.Background(), "/ps")
 	if err != nil || !strings.Contains(out.Text, "tool output is on") {
 		t.Fatalf("second /ps = %q, %v; want on", out.Text, err)
+	}
+}
+
+func TestUpAndDownMoveOutputViewportWithoutWritingRows(t *testing.T) {
+	d := togglesDispatcher(t)
+	for i := 0; i < 20; i++ {
+		d.session.Log().Append(tui.Row{Text: fmt.Sprintf("row %d", i)})
+	}
+	before := d.session.Log().Len()
+	if _, err := d.Run(context.Background(), "/up"); err != nil {
+		t.Fatalf("/up: %v", err)
+	}
+	if got := d.session.ScrollOffset(); got != 15 {
+		t.Fatalf("scroll offset after /up = %d, want 15", got)
+	}
+	if got := d.session.Log().Len(); got != before {
+		t.Fatalf("/up changed log length to %d, want %d", got, before)
+	}
+	if _, err := d.Run(context.Background(), "/down"); err != nil {
+		t.Fatalf("/down: %v", err)
+	}
+	if got := d.session.ScrollOffset(); got != 0 {
+		t.Errorf("scroll offset after /down = %d, want 0", got)
 	}
 }
 

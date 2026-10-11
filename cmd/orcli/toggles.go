@@ -8,6 +8,8 @@ import (
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
+const outputScrollStep = 15
+
 // help is the handler for /help.
 //
 // It lists every name the completer would offer, which is Names rather than the raw
@@ -97,6 +99,21 @@ func (d *dispatcher) ps(args string) (tui.Result, error) {
 	visible := !d.session.ToolOutputVisible()
 	d.session.SetToolOutputVisible(visible)
 	return tui.Result{Text: reportOnOff("tool output", visible)}, nil
+}
+
+func (d *dispatcher) scrollOutput(args string, up bool) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("scrolling needs an open interface")
+	}
+	if strings.TrimSpace(args) != "" {
+		return tui.Result{}, fmt.Errorf("scrolling takes no arguments")
+	}
+	if up {
+		d.session.ScrollUp(outputScrollStep)
+	} else {
+		d.session.ScrollDown(outputScrollStep)
+	}
+	return tui.Result{}, nil
 }
 
 // version is the handler for /version.

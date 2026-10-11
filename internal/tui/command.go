@@ -128,6 +128,14 @@ func init() {
 			Summary: "toggle file-system, shell, GitHub and Notion output",
 		},
 		{
+			Name:    "up",
+			Summary: "scroll the output pane up 15 rows",
+		},
+		{
+			Name:    "down",
+			Summary: "scroll the output pane down 15 rows",
+		},
+		{
 			Name:    "color",
 			Summary: "turn color on or off, and save the choice",
 			Hidden:  []string{"colour"},
