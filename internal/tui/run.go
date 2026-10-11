@@ -123,7 +123,6 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	if err != nil {
 		return err
 	}
-	app := tview.NewApplication().SetScreen(screen).EnableMouse(s.Options().Mouse).EnablePaste(true)
 	frame := NewFrame()
 	l := &interfaceLoop{
 		session: s,
@@ -132,9 +131,12 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		frame:   frame,
 		group:   newGroup(),
 	}
-	app.SetScreen(&transcriptScreen{Screen: screen, afterShow: func() {
-		app.Suspend(l.flushCat)
-	}})
+	var app *tview.Application
+	app = tview.NewApplication().SetScreen(&transcriptScreen{Screen: screen, afterShow: func() {
+		if l.hasCat() {
+			app.Suspend(l.flushCat)
+		}
+	}}).EnableMouse(s.Options().Mouse).EnablePaste(true)
 	app.SetRoot(frame, true)
 	l.navigatePane = navigatePane
 	if len(askForSession) > 0 {
@@ -342,6 +344,12 @@ func (l *interfaceLoop) flushCat() {
 	for _, row := range rows {
 		_, _ = fmt.Fprintln(os.Stdout, row.Text)
 	}
+}
+
+func (l *interfaceLoop) hasCat() bool {
+	l.catMu.Lock()
+	defer l.catMu.Unlock()
+	return len(l.catPending) > 0
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
