@@ -348,6 +348,11 @@ type Frame struct {
 	paste   func(string)
 }
 
+type inputLine struct {
+	text       string
+	start, end int
+}
+
 // NewFrame builds the custom tview primitive used for the interface screen.
 func NewFrame() *Frame { return &Frame{Box: tview.NewBox()} }
 
@@ -429,6 +434,21 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 
 	backlog := scrollbackRows(height)
+	if backlog == 0 {
+		drawCellText(screen, x, y, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y, width)
+		drawCellText(screen, x, y+1, width, "  ", chrome)
+		f.drawBarOne(screen, x, y+2, width, chrome)
+		f.drawBarTwo(screen, x, y+3, width, chrome)
+		drawCellText(screen, x, y+4, width, renderPaneBar(f.bar.Status, width),
+			paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+		return
+	}
+	input := wrapInput(f.bar.Field, width)
+	if len(input) > backlog {
+		input = input[len(input)-backlog:]
+	}
+	logRows := backlog - len(input) + 1
 	end := len(f.log) - f.scroll
 	if end < 0 {
 		end = 0
@@ -441,20 +461,22 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// counted against backlog the way a single-line row always was. f.scroll
 	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
 	// untouched) - only how many physical lines one row costs changes.
-	shown := make([]Row, 0, backlog)
-fill:
-	for i := end - 1; i >= 0; i-- {
-		lines := foldRowLines(PlainRow(f.log[i]), width)
-		for j := len(lines) - 1; j >= 0; j-- {
-			shown = append(shown, lines[j])
-			if len(shown) >= backlog {
-				break fill
+	shown := make([]Row, 0, logRows)
+	if logRows > 0 {
+	fill:
+		for i := end - 1; i >= 0; i-- {
+			lines := foldRowLines(PlainRow(f.log[i]), width)
+			for j := len(lines) - 1; j >= 0; j-- {
+				shown = append(shown, lines[j])
+				if len(shown) >= logRows {
+					break fill
+				}
 			}
 		}
 	}
 	// shown is newest first; it fills the scrollback upward from just above the prompt.
 	for i, row := range shown {
-		at := backlog - 1 - i
+		at := logRows - 1 - i
 		text, offset, cut := cutTail(row.Text, width)
 		if cut {
 			drawCellText(screen, x, y+at, width, ellipsis, base)
@@ -464,14 +486,25 @@ fill:
 		drawStyledCellText(screen, x, y+at, width, text, offset, row.Spans, f.palette, base)
 	}
 
+	for i, line := range input {
+		text := line.text
+		if i == 0 {
+			text = Prompt + text
+		} else {
+			text = strings.Repeat(" ", DisplayWidth(Prompt)) + text
+		}
+		drawCellText(screen, x, y+logRows+i, width, text, chrome)
+	}
 	promptRow := backlog
 	separatorRow := backlog + 1
 	barOneRow := backlog + 2
 	barTwoRow := backlog + 3
 	paneBarRow := backlog + 4
 
-	drawCellText(screen, x, y+promptRow, width, Prompt+f.bar.Field, chrome)
-	f.showCaret(screen, x, y+promptRow, width)
+	if len(input) == 0 {
+		drawCellText(screen, x, y+promptRow, width, Prompt, chrome)
+	}
+	f.showInputCaret(screen, x, y+logRows, width, input)
 
 	// The separator row between the prompt and bar one. It was left to the base clear
 	// above (every cell already a space) rather than drawn; Glen asked, in this session
@@ -525,6 +558,34 @@ func (f *Frame) showCaret(screen tcell.Screen, x, y, width int) {
 		column = min(column, width-1)
 	}
 	screen.ShowCursor(x+column, y)
+}
+
+func (f *Frame) showInputCaret(screen tcell.Screen, x, y, width int, lines []inputLine) {
+	if len(lines) == 0 {
+		f.showCaret(screen, x, y, width)
+		return
+	}
+	caret := min(f.caret, len([]rune(f.bar.Field)))
+	lineIndex := len(lines) - 1
+	for i, line := range lines {
+		if caret <= line.end {
+			lineIndex = i
+			break
+		}
+	}
+	line := lines[lineIndex]
+	part := string([]rune(f.bar.Field)[line.start:caret])
+	prefix := ""
+	if lineIndex == 0 {
+		prefix = Prompt
+	} else {
+		prefix = strings.Repeat(" ", DisplayWidth(Prompt))
+	}
+	column := DisplayWidth(prefix + part)
+	if width > 0 {
+		column = min(column, width-1)
+	}
+	screen.ShowCursor(x+column, y+lineIndex)
 }
 
 // drawBarOne draws bar one at row y, with the figure segment swept while a turn is
@@ -942,6 +1003,55 @@ func drawCellText(screen tcell.Screen, x, y, width int, text string, style tcell
 		screen.SetContent(x+col, y, r, nil, style)
 		col += w
 	}
+}
+
+func wrapInput(text string, width int) []inputLine {
+	runes := []rune(text)
+	if width <= 0 {
+		return []inputLine{{start: 0, end: len(runes)}}
+	}
+	promptWidth := DisplayWidth(Prompt)
+	lines := make([]inputLine, 0, 1)
+	start := 0
+	line := 0
+	for start <= len(runes) {
+		available := width
+		if line == 0 {
+			available -= promptWidth
+		}
+		if available < 1 {
+			available = 1
+		}
+		end := start
+		columns := 0
+		for end < len(runes) && runes[end] != '\n' {
+			rw := DisplayWidth(string(runes[end]))
+			if end > start && columns+rw > available {
+				break
+			}
+			if end == start && rw > available {
+				end++
+				break
+			}
+			columns += rw
+			end++
+		}
+		lines = append(lines, inputLine{text: string(runes[start:end]), start: start, end: end})
+		line++
+		if end == len(runes) {
+			break
+		}
+		if runes[end] == '\n' {
+			start = end + 1
+			if start == len(runes) {
+				lines = append(lines, inputLine{start: start, end: start})
+				break
+			}
+		} else {
+			start = end
+		}
+	}
+	return lines
 }
 
 func runewidth(r rune) int {

@@ -302,6 +302,31 @@ func TestRunToolNamesAnUnknownTool(t *testing.T) {
 	}
 }
 
+func TestOutputMarkerNamesIntegrationTools(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want string
+	}{
+		{name: "notion_search", want: "[notion] "},
+		{name: "notion_tasks", want: "[notion] "},
+		{name: "github_tasks", want: "[github] "},
+	} {
+		if got := outputMarker(test.name); got != test.want {
+			t.Errorf("outputMarker(%q) = %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestToolActivityIncludesOperationAndArguments(t *testing.T) {
+	got := toolActivity(openrouter.ToolCall{Function: openrouter.ToolCallFunction{
+		Name:      "shell",
+		Arguments: `{"command":"echo","args":["hello"]}`,
+	}})
+	if want := `[shell] shell {"command":"echo","args":["hello"]}`; got != want {
+		t.Errorf("toolActivity = %q, want %q", got, want)
+	}
+}
+
 // TestToolSchemasCoverTheWholeSet covers the conversion from internal/tools' Schema
 // to openrouter.Tool: every tool in the set gets a schema, by the same name.
 func TestToolSchemasCoverTheWholeSet(t *testing.T) {

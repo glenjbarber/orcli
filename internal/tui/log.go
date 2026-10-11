@@ -189,6 +189,49 @@ func (l *Log) Append(row Row) int {
 	return len(l.rows) - 1
 }
 
+// ReplaceToolStatus replaces the current tool status for row's level and tool
+// role, or appends it when that status has not appeared yet. The replacement is
+// atomic with respect to drawing, so a live update cannot leave a blank row or
+// overwrite a neighboring reply.
+func (l *Log) ReplaceToolStatus(row Row) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for i := len(l.rows) - 1; i >= 0; i-- {
+		old := l.rows[i]
+		if old.Kind != KindTool || old.Level != row.Level || toolStatusKey(old) != toolStatusKey(row) {
+			continue
+		}
+		l.rows[i] = row
+		return i
+	}
+
+	l.rows = append(l.rows, row)
+	if over := len(l.rows) - LogBound; over > 0 {
+		l.rows = append(l.rows[:0], l.rows[over:]...)
+		l.folded += over
+	}
+	return len(l.rows) - 1
+}
+
+func toolStatusKey(row Row) string {
+	for _, marker := range []string{"[fs] ", "[shell] ", "[git] ", "[notion] ", "[github] "} {
+		if strings.HasPrefix(row.Text, marker) {
+			return marker
+		}
+	}
+	return string(rune(toolRole(row)))
+}
+
+func toolRole(row Row) Role {
+	for _, span := range row.Spans {
+		if span.Role == RoleToolFS || span.Role == RoleToolGit || span.Role == RoleToolShell {
+			return span.Role
+		}
+	}
+	return RoleChrome
+}
+
 // Rows returns the rows held, oldest first.
 //
 // The slice is copied so the caller can read it while a turn appends without

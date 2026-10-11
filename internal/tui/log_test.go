@@ -38,6 +38,55 @@ func TestAppendReportsItsIndex(t *testing.T) {
 	}
 }
 
+func TestReplaceToolStatusReplacesOnlyItsCurrentRow(t *testing.T) {
+	var l Log
+	fs := func(text string) Row {
+		return Row{Kind: KindTool, Level: 0, Text: text,
+			Spans: []Span{{Start: 0, End: 5, Role: RoleToolFS}}}
+	}
+
+	l.Append(Row{Text: "completed output", Kind: KindReply, Level: 0})
+	l.ReplaceToolStatus(fs("[fs] inspecting"))
+	l.Append(Row{Text: "neighbor", Kind: KindNotice, Level: 0})
+	l.ReplaceToolStatus(fs("[fs] reading"))
+	l.ReplaceToolStatus(fs("[fs] done"))
+
+	rows := l.Rows()
+	if got, want := len(rows), 3; got != want {
+		t.Fatalf("got %d rows, want %d", got, want)
+	}
+	if got, want := rows[0].Text, "completed output"; got != want {
+		t.Errorf("completed output became %q, want %q", got, want)
+	}
+	if got, want := rows[1].Text, "[fs] done"; got != want {
+		t.Errorf("tool status is %q, want %q", got, want)
+	}
+	if got, want := rows[2].Text, "neighbor"; got != want {
+		t.Errorf("neighbor became %q, want %q", got, want)
+	}
+}
+
+func TestReplaceToolStatusKeepsLevelsAndToolRolesSeparate(t *testing.T) {
+	var l Log
+	row := func(level int, role Role, text string) Row {
+		return Row{Kind: KindTool, Level: level, Text: text,
+			Spans: []Span{{Start: 0, End: 1, Role: role}}}
+	}
+
+	l.ReplaceToolStatus(row(0, RoleToolFS, "fs-1"))
+	l.ReplaceToolStatus(row(0, RoleToolShell, "shell-1"))
+	l.ReplaceToolStatus(row(1, RoleToolFS, "fs-pane-1"))
+	l.ReplaceToolStatus(row(0, RoleToolFS, "fs-2"))
+
+	rows := l.Rows()
+	if got, want := len(rows), 3; got != want {
+		t.Fatalf("got %d rows, want %d", got, want)
+	}
+	if rows[0].Text != "fs-2" || rows[1].Text != "shell-1" || rows[2].Text != "fs-pane-1" {
+		t.Errorf("rows = %#v, want fs-2, shell-1, fs-pane-1", rows)
+	}
+}
+
 // TestRowsIsACopy checks that the slice handed out is not the log's own, since a
 // caller that appended to it would corrupt the transcript while the painter reads
 // it.
