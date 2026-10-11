@@ -89,6 +89,10 @@ type Config struct {
 	// is choosing between two different events and needs two different knobs.
 	BreakBell bool `json:"break_bell,omitempty"`
 
+	// BreakEnabled controls whether periodic screen-break reminders run.
+	// Missing values default to enabled for compatibility with older files.
+	BreakEnabled bool `json:"break_enabled,omitempty"`
+
 	// Color reports whether colour output is on. Off is the default, and is
 	// decided by this file and by /color alone: NO_COLOR and every other
 	// environment variable are ignored, on the same terms as the API key.
@@ -180,6 +184,7 @@ func Default() Config {
 		Bell:                 false,
 		BreakIntervalMinutes: 22,
 		BreakBell:            false,
+		BreakEnabled:         true,
 		Color:                false,
 		PaneActiveColor:      DefaultPaneActiveColor,
 		PaneDoneColor:        DefaultPaneDoneColor,
@@ -331,6 +336,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readInt(value, &c.BreakIntervalMinutes)
 		case "break_bell":
 			err = readBool(value, &c.BreakBell)
+		case "break_enabled":
+			err = readBool(value, &c.BreakEnabled)
 		case "color":
 			err = readBool(value, &c.Color)
 		case "trace":
