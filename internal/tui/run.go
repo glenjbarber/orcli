@@ -301,6 +301,8 @@ type interfaceLoop struct {
 	// tracking live state the instant the reader turns it back off.
 	frozenStatus     Status
 	haveFrozenStatus bool
+	streamStart      int
+	bufferActive     bool
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
@@ -366,6 +368,23 @@ func (l *interfaceLoop) paint() {
 		Field:  l.fieldRow(),
 	}
 	l.frame.SetContent(footer, rows, palette)
+	if l.bufferActive && running {
+		start := l.streamStart
+		if start < 0 || start > len(rows) {
+			start = len(rows)
+		}
+		buffer := make([]Row, 0, len(rows)-start+1)
+		if len(rows) > 0 && isProgramBanner(rows[0]) {
+			buffer = append(buffer, rows[0])
+		} else {
+			buffer = append(buffer, Row{Kind: KindNotice, Text: "orcli"})
+		}
+		buffer = append(buffer, rows[start:]...)
+		l.frame.SetBuffer(buffer)
+	} else {
+		l.bufferActive = false
+		l.frame.SetBuffer(nil)
+	}
 	l.frame.SetCaret(l.session.Editor().Caret())
 	l.frame.SetSweepStep(l.step)
 	l.frame.SetScroll(l.session.ScrollOffset())
@@ -874,6 +893,10 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 }
 
 func (l *interfaceLoop) startOnSession(ctx context.Context, session *Session, question string, silent bool) {
+	if session == l.session {
+		l.streamStart = session.Log().Len()
+		l.bufferActive = true
+	}
 	if err := l.group.Add(); err != nil {
 		session.Notice(err.Error(), 0, RoleFailure)
 		return

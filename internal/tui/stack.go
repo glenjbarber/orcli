@@ -334,13 +334,15 @@ type Bar struct {
 // tview owns terminal setup and input; this primitive owns the cell layout.
 type Frame struct {
 	*tview.Box
-	bar     Bar
-	log     []Row
-	palette Palette
-	caret   int
-	step    int
-	scroll  int
-	paste   func(string)
+	bar       Bar
+	log       []Row
+	buffer    []Row
+	useBuffer bool
+	palette   Palette
+	caret     int
+	step      int
+	scroll    int
+	paste     func(string)
 }
 
 type inputLine struct {
@@ -356,6 +358,14 @@ func (f *Frame) SetContent(bar Bar, log []Row, palette Palette) {
 	f.bar = bar
 	f.log = append(f.log[:0], log...)
 	f.palette = palette
+}
+
+// SetBuffer switches the output area to the active five-line minimum buffer.
+// The first row is always the permanent orcli boundary; rows after it are the
+// current in-flight stream. Passing nil returns drawing to the full transcript.
+func (f *Frame) SetBuffer(rows []Row) {
+	f.buffer = append(f.buffer[:0], rows...)
+	f.useBuffer = rows != nil
 }
 
 // SetCaret records the prompt caret's rune offset.
@@ -392,6 +402,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	x, y, width, height := f.GetRect()
 	base := f.palette.BaseStyle()
 	chrome := frameStyle(f.palette, RoleChrome)
+	if f.useBuffer {
+		f.drawBufferedPane(screen, x, y, width, height, base, chrome)
+		return
+	}
 	for row := 0; row < height; row++ {
 		for col := 0; col < width; col++ {
 			screen.SetContent(x+col, y+row, ' ', nil, base)
@@ -553,16 +567,38 @@ func (f *Frame) Draw(screen tcell.Screen) {
 // is a permanent boundary row; buffered rows occupy the space above it and the
 // newest rows remain nearest the boundary as the buffer grows upward.
 func (f *Frame) drawBufferedPane(screen tcell.Screen, x, y, width, height int, base, chrome tcell.Style) {
+	for row := 0; row < height; row++ {
+		for col := 0; col < width; col++ {
+			screen.SetContent(x+col, y+row, ' ', nil, base)
+		}
+	}
 	backlog := scrollbackRows(height)
 	input := wrapInput(f.bar.Field, width)
 	if len(input) > backlog {
 		input = input[len(input)-backlog:]
 	}
-	logRows := backlog + 1
-	latestResponse := latestResponseID(f.log)
-	physical := make([]Row, 0, len(f.log)-1)
-	for i := 1; i < len(f.log); i++ {
-		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
+	source := f.log
+	if f.useBuffer {
+		source = f.buffer
+	}
+	logRows := 5
+	if len(source) > 0 && isProgramBanner(source[0]) {
+		logRows = len(source) - 1
+	}
+	if logRows < 5 {
+		logRows = 5
+	}
+	if logRows > backlog+1 {
+		logRows = backlog + 1
+	}
+	latestResponse := latestResponseID(source)
+	startLog := 0
+	if len(source) > 0 && isProgramBanner(source[0]) {
+		startLog = 1
+	}
+	physical := make([]Row, 0, len(source)-startLog)
+	for i := startLog; i < len(source); i++ {
+		marked := withResponseMarker(PlainRow(source[i]), latestResponse)
 		physical = append(physical, foldRowLines(marked, width)...)
 	}
 	end := len(physical) - f.scroll
@@ -576,9 +612,11 @@ func (f *Frame) drawBufferedPane(screen tcell.Screen, x, y, width, height int, b
 	if start < 0 {
 		start = 0
 	}
+	bannerRow := backlog + 1
+	outputStart := bannerRow - logRows
 	for i, row := range physical[start:end] {
 		text, offset, cut := cutTail(row.Text, width)
-		at := i
+		at := outputStart + i
 		if cut {
 			drawCellText(screen, x, y+at, width, ellipsis, base)
 			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y+at, width-DisplayWidth(ellipsis), text, offset, row.Spans, f.palette, base)
@@ -600,7 +638,6 @@ func (f *Frame) drawBufferedPane(screen tcell.Screen, x, y, width, height int, b
 		}
 		drawCellText(screen, x, y+inputStart+i, width, text, chrome)
 	}
-	bannerRow := backlog + 1
 	promptRow := backlog + 2
 	if len(input) == 0 {
 		drawCellText(screen, x, y+promptRow, width, Prompt, chrome)
