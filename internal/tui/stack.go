@@ -773,7 +773,7 @@ func foldRowLines(row Row, width int) []Row {
 		offset := 0
 		for i, text := range lines {
 			start, end := offset, offset+len(text)
-			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level}
+			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID}
 			offset = end + 1 // +1 skips the '\n' this line was split on.
 		}
 	}
@@ -844,12 +844,12 @@ func wrapRowLine(row Row, width int) []Row {
 	for {
 		cut := wrapCut(text, width)
 		if cut >= len(text) {
-			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level})
+			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
 			break
 		}
 
 		piece := text[:cut]
-		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level})
+		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
 
 		rest := text[cut:]
 		trimmed := strings.TrimLeft(rest, " ")

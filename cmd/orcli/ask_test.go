@@ -327,6 +327,16 @@ func TestToolActivityIncludesOperationAndArguments(t *testing.T) {
 	}
 }
 
+func TestToolActivityBoundsLongArguments(t *testing.T) {
+	got := toolActivity(openrouter.ToolCall{Function: openrouter.ToolCallFunction{
+		Name:      "write_file",
+		Arguments: `{"path":"notes.txt","content":"` + strings.Repeat("x", 300) + `"}`,
+	}})
+	if got == "" || len([]rune(got)) > 180 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("toolActivity length/content = %q, want a bounded line ending in an ellipsis", got)
+	}
+}
+
 // TestToolSchemasCoverTheWholeSet covers the conversion from internal/tools' Schema
 // to openrouter.Tool: every tool in the set gets a schema, by the same name.
 func TestToolSchemasCoverTheWholeSet(t *testing.T) {

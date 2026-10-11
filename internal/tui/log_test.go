@@ -87,6 +87,26 @@ func TestReplaceToolStatusKeepsLevelsAndToolRolesSeparate(t *testing.T) {
 	}
 }
 
+func TestReplaceToolStatusStartsANewRowForTheNextCall(t *testing.T) {
+	var l Log
+	row := func(id, text string) Row {
+		return Row{Kind: KindTool, Level: 0, ToolID: id, Text: text,
+			Spans: []Span{{Start: 0, End: 5, Role: RoleToolFS}}}
+	}
+
+	l.ReplaceToolStatus(row("call-1", "[fs] inspecting"))
+	l.ReplaceToolStatus(row("call-1", "[fs] done"))
+	l.ReplaceToolStatus(row("call-2", "[fs] reading"))
+
+	rows := l.Rows()
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("got %d rows, want %d", got, want)
+	}
+	if rows[0].Text != "[fs] done" || rows[1].Text != "[fs] reading" {
+		t.Errorf("rows = %#v, want completed call followed by live next call", rows)
+	}
+}
+
 // TestRowsIsACopy checks that the slice handed out is not the log's own, since a
 // caller that appended to it would corrupt the transcript while the painter reads
 // it.
