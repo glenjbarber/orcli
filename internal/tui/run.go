@@ -156,18 +156,11 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		return nil
 	})
 	app.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
-		switch action {
-		case tview.MouseScrollUp:
-			l.act(ctx, KeyScrollUp, 0)
-			l.paint()
-			return nil, tview.MouseConsumed
-		case tview.MouseScrollDown:
-			l.act(ctx, KeyScrollDown, 0)
-			l.paint()
-			return nil, tview.MouseConsumed
-		default:
-			return event, action
-		}
+		// Leave wheel events to the terminal emulator. The transcript is rendered
+		// in one screen and the terminal's own scrollback is the scrollback the
+		// reader controls with the wheel. Keyboard /up and /down continue to use
+		// the session viewport for now.
+		return event, action
 	})
 
 	ctx, cancel := context.WithCancel(ctx)

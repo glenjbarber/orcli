@@ -402,17 +402,13 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		return
 	}
 
-	// A terminal too short for the full stack sheds the blank lines, then the pane bar,
-	// then bar two, then bar one, in that order - Glen's shedding order (2026-10-06).
+	// A terminal too short for the full stack sheds the separator lines, then the pane
+	// bar, then bar two, then bar one.
 	// The prompt always survives, since the reader is typing into it. Each surviving row
 	// draws top to bottom starting at the terminal's own first row, in their usual
 	// relative order; there is no scrollback at these heights (see scrollbackRows).
 	if height < barRows {
 		row := 0
-		drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
-		f.showCaret(screen, x, y+row, width)
-		row++
-
 		if height >= 2 {
 			drawCellText(screen, x, y+row, width, "  ", chrome)
 			row++
@@ -422,21 +418,22 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 4 {
-			f.drawBarOne(screen, x, y+row, width, chrome)
+			drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
+			f.showCaret(screen, x, y+row, width)
 			row++
 		}
 		if height >= 5 {
-			f.drawBarTwo(screen, x, y+row, width, chrome)
+			f.drawBarOne(screen, x, y+row, width, chrome)
 		}
 		return
 	}
 
 	backlog := scrollbackRows(height)
 	if backlog == 0 {
-		drawCellText(screen, x, y, width, Prompt+f.bar.Field, chrome)
-		f.showCaret(screen, x, y, width)
+		drawCellText(screen, x, y, width, "  ", chrome)
 		drawCellText(screen, x, y+1, width, "  ", chrome)
-		drawCellText(screen, x, y+2, width, "  ", chrome)
+		drawCellText(screen, x, y+2, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y+2, width)
 		f.drawBarOne(screen, x, y+3, width, chrome)
 		f.drawBarTwo(screen, x, y+4, width, chrome)
 		drawCellText(screen, x, y+5, width, renderPaneBar(f.bar.Status, width),
@@ -447,7 +444,16 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	if len(input) > backlog {
 		input = input[len(input)-backlog:]
 	}
-	logRows := backlog - len(input) + 1
+	// The fixed footer now begins with two separators above the prompt. Input
+	// lines occupy the rows immediately above that footer; only lines beyond
+	// the three footer rows reduce the visible log area.
+	logRows := backlog
+	if extra := len(input) - 3; extra > 0 {
+		logRows -= extra
+	}
+	if logRows < 1 {
+		logRows = 1
+	}
 	latestResponse := latestResponseID(f.log)
 	physical := make([]Row, 0, len(f.log))
 	for i := 0; i < len(f.log); i++ {
@@ -482,6 +488,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		drawStyledCellText(screen, x, y+at, width, text, offset, row.Spans, f.palette, base)
 	}
 
+	inputStart := backlog + 3 - len(input)
+	if inputStart < 0 {
+		inputStart = 0
+	}
 	for i, line := range input {
 		text := line.text
 		if i == 0 {
@@ -489,11 +499,11 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		} else {
 			text = strings.Repeat(" ", DisplayWidth(Prompt)) + text
 		}
-		drawCellText(screen, x, y+logRows+i, width, text, chrome)
+		drawCellText(screen, x, y+inputStart+i, width, text, chrome)
 	}
-	promptRow := backlog
-	separatorRow := backlog + 1
-	separatorRowTwo := backlog + 2
+	separatorRow := backlog
+	separatorRowTwo := backlog + 1
+	promptRow := backlog + 2
 	barOneRow := backlog + 3
 	barTwoRow := backlog + 4
 	paneBarRow := backlog + 5
@@ -501,9 +511,9 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	if len(input) == 0 {
 		drawCellText(screen, x, y+promptRow, width, Prompt, chrome)
 	}
-	f.showInputCaret(screen, x, y+logRows, width, input)
+	f.showInputCaret(screen, x, y+inputStart, width, input)
 
-	// Keep two explicit blank rows between the prompt and the top status bar.
+	// Keep two explicit blank rows above the prompt.
 	drawCellText(screen, x, y+separatorRow, width, "  ", chrome)
 	drawCellText(screen, x, y+separatorRowTwo, width, "  ", chrome)
 
@@ -528,7 +538,9 @@ func withResponseMarker(row Row, latest int) Row {
 	if row.ResponseID == 0 || latest == 0 {
 		return row
 	}
-	n := latest - row.ResponseID + 1
+	// Response IDs are assigned in creation order, so the highest number is
+	// always the newest response and the last response in the session.
+	n := row.ResponseID
 	marker := "[" + strconv.Itoa(n)
 	if row.ResponseSub > 0 {
 		marker += "," + strconv.Itoa(row.ResponseSub)
