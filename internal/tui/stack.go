@@ -334,13 +334,15 @@ type Bar struct {
 // tview owns terminal setup and input; this primitive owns the cell layout.
 type Frame struct {
 	*tview.Box
-	bar     Bar
-	log     []Row
-	palette Palette
-	caret   int
-	step    int
-	scroll  int
-	paste   func(string)
+	bar       Bar
+	log       []Row
+	buffer    []Row
+	useBuffer bool
+	palette   Palette
+	caret     int
+	step      int
+	scroll    int
+	paste     func(string)
 }
 
 type inputLine struct {
@@ -356,6 +358,14 @@ func (f *Frame) SetContent(bar Bar, log []Row, palette Palette) {
 	f.bar = bar
 	f.log = append(f.log[:0], log...)
 	f.palette = palette
+}
+
+// SetBuffer switches the output area to the active five-line minimum buffer.
+// The first row is always the permanent orcli boundary; rows after it are the
+// current in-flight stream. Passing nil returns drawing to the full transcript.
+func (f *Frame) SetBuffer(rows []Row) {
+	f.buffer = append(f.buffer[:0], rows...)
+	f.useBuffer = rows != nil
 }
 
 // SetCaret records the prompt caret's rune offset.
@@ -392,6 +402,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	x, y, width, height := f.GetRect()
 	base := f.palette.BaseStyle()
 	chrome := frameStyle(f.palette, RoleChrome)
+	if f.useBuffer {
+		f.drawBufferedPane(screen, x, y, width, height, base, chrome)
+		return
+	}
 	for row := 0; row < height; row++ {
 		for col := 0; col < width; col++ {
 			screen.SetContent(x+col, y+row, ' ', nil, base)
@@ -431,6 +445,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		}
 		return
 	}
+	if len(f.log) > 0 && isProgramBanner(f.log[0]) {
+		f.drawBufferedPane(screen, x, y, width, height, base, chrome)
+		return
+	}
 
 	backlog := scrollbackRows(height)
 	if backlog == 0 {
@@ -451,7 +469,14 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// The fixed footer now begins with two separators above the prompt. Input
 	// lines occupy the rows immediately above that footer; only lines beyond
 	// the three footer rows reduce the visible log area.
-	logRows := backlog
+	bannerRows := 0
+	if len(f.log) > 0 && isProgramBanner(f.log[0]) {
+		bannerRows = 1
+	}
+	logRows := backlog - bannerRows
+	if logRows < 1 {
+		logRows = 1
+	}
 	if extra := len(input) - 3; extra > 0 {
 		logRows -= extra
 	}
@@ -459,14 +484,24 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		logRows = 1
 	}
 	latestResponse := latestResponseID(f.log)
-	physical := make([]Row, 0, len(f.log))
-	for i := 0; i < len(f.log); i++ {
+	physical := make([]Row, 0, len(f.log)-bannerRows)
+	for i := bannerRows; i < len(f.log); i++ {
 		// The response marker occupies part of the terminal width. Apply it
 		// before folding so a wrapped response line leaves room for its marker
 		// instead of being wrapped to the full width and truncated afterward.
 		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
 		lines := foldRowLines(marked, width)
 		physical = append(physical, lines...)
+	}
+	if bannerRows == 1 {
+		banner := PlainRow(f.log[0])
+		text, offset, cut := cutTail(banner.Text, width)
+		if cut {
+			drawCellText(screen, x, y, width, ellipsis, base)
+			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y, width-DisplayWidth(ellipsis), text, offset, banner.Spans, f.palette, base)
+		} else {
+			drawStyledCellText(screen, x, y, width, text, offset, banner.Spans, f.palette, base)
+		}
 	}
 	end := len(physical) - f.scroll
 	if end < 0 {
@@ -482,7 +517,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	shown := physical[start:end]
 	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
-		at := i
+		at := i + bannerRows
 		text, offset, cut := cutTail(row.Text, width)
 		if cut {
 			drawCellText(screen, x, y+at, width, ellipsis, base)
@@ -526,6 +561,97 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	f.drawBarTwo(screen, x, y+barTwoRow, width, chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
 		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+// drawBufferedPane keeps the live buffer directly above the input. The banner
+// is a permanent boundary row; buffered rows occupy the space above it and the
+// newest rows remain nearest the boundary as the buffer grows upward.
+func (f *Frame) drawBufferedPane(screen tcell.Screen, x, y, width, height int, base, chrome tcell.Style) {
+	for row := 0; row < height; row++ {
+		for col := 0; col < width; col++ {
+			screen.SetContent(x+col, y+row, ' ', nil, base)
+		}
+	}
+	backlog := scrollbackRows(height)
+	input := wrapInput(f.bar.Field, width)
+	if len(input) > backlog {
+		input = input[len(input)-backlog:]
+	}
+	source := f.log
+	if f.useBuffer {
+		source = f.buffer
+	}
+	logRows := 5
+	if len(source) > 0 && isProgramBanner(source[0]) {
+		logRows = len(source) - 1
+	}
+	if logRows < 5 {
+		logRows = 5
+	}
+	if logRows > backlog+1 {
+		logRows = backlog + 1
+	}
+	latestResponse := latestResponseID(source)
+	startLog := 0
+	if len(source) > 0 && isProgramBanner(source[0]) {
+		startLog = 1
+	}
+	physical := make([]Row, 0, len(source)-startLog)
+	for i := startLog; i < len(source); i++ {
+		marked := withResponseMarker(PlainRow(source[i]), latestResponse)
+		physical = append(physical, foldRowLines(marked, width)...)
+	}
+	end := len(physical) - f.scroll
+	if end < 0 {
+		end = 0
+	}
+	if end > len(physical) {
+		end = len(physical)
+	}
+	start := end - logRows
+	if start < 0 {
+		start = 0
+	}
+	bannerRow := backlog + 1
+	outputStart := bannerRow - logRows
+	for i, row := range physical[start:end] {
+		text, offset, cut := cutTail(row.Text, width)
+		at := outputStart + i
+		if cut {
+			drawCellText(screen, x, y+at, width, ellipsis, base)
+			drawStyledCellText(screen, x+DisplayWidth(ellipsis), y+at, width-DisplayWidth(ellipsis), text, offset, row.Spans, f.palette, base)
+		} else {
+			drawStyledCellText(screen, x, y+at, width, text, offset, row.Spans, f.palette, base)
+		}
+	}
+
+	inputStart := backlog + 3 - len(input)
+	if inputStart < 0 {
+		inputStart = 0
+	}
+	for i, line := range input {
+		text := line.text
+		if i == 0 {
+			text = Prompt + text
+		} else {
+			text = strings.Repeat(" ", DisplayWidth(Prompt)) + text
+		}
+		drawCellText(screen, x, y+inputStart+i, width, text, chrome)
+	}
+	promptRow := backlog + 2
+	if len(input) == 0 {
+		drawCellText(screen, x, y+promptRow, width, Prompt, chrome)
+	}
+	f.showInputCaret(screen, x, y+inputStart, width, input)
+	drawCellText(screen, x, y+bannerRow, width, "orcli", chrome)
+	f.drawBarOne(screen, x, y+backlog+3, width, chrome)
+	f.drawBarTwo(screen, x, y+backlog+4, width, chrome)
+	drawCellText(screen, x, y+backlog+5, width, renderPaneBar(f.bar.Status, width),
+		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+func isProgramBanner(row Row) bool {
+	return row.Kind == KindNotice && row.Text == "orcli"
 }
 
 func latestResponseID(rows []Row) int {

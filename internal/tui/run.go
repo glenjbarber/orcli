@@ -105,7 +105,7 @@ const (
 // no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
 // passes an empty string and nothing is sent. Start does not decide whether to greet, only
 // how, once asked to.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
+func startScreenMode(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -113,9 +113,16 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		return errors.New("tui: Start was given no way to run a command")
 	}
 
-	app := tview.NewApplication().EnableMouse(s.Options().Mouse).EnablePaste(true)
+	// Pane 0 must stay on the terminal's normal screen. tcell's default
+	// terminfo enters the alternate screen during Init, which hides the
+	// transcript from the terminal's native scrollback. Supplying the same
+	// capabilities with only the alternate-screen enter/exit sequences removed
+	// keeps keyboard and resize handling while preserving the normal scrollback.
+	screen, err := pane0Screen()
+	if err != nil {
+		return err
+	}
 	frame := NewFrame()
-	app.SetRoot(frame, true)
 	l := &interfaceLoop{
 		session: s,
 		runner:  run,
@@ -123,6 +130,8 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		frame:   frame,
 		group:   newGroup(),
 	}
+	app := tview.NewApplication().SetScreen(screen).EnableMouse(s.Options().Mouse).EnablePaste(true)
+	app.SetRoot(frame, true)
 	l.navigatePane = navigatePane
 	if len(askForSession) > 0 {
 		l.askForSession = askForSession[0]
@@ -214,11 +223,248 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		case <-finished:
 		}
 	}()
-	err := app.Run()
+	err = app.Run()
 	if errors.Is(err, tcell.ErrNoScreen) {
 		return ErrNoTerminal
 	}
 	return err
+}
+
+// Start runs Pane 0 as ordinary terminal output. The terminal's native scrollback owns
+// history; this loop only appends complete rows and redraws the current prompt.
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
+	if s == nil {
+		return errors.New("tui: Start was given no session")
+	}
+	if run == nil {
+		return errors.New("tui: Start was given no way to run a command")
+	}
+	screen, err := pane0Screen()
+	if err != nil {
+		return err
+	}
+	if err := screen.Init(); err != nil {
+		return ErrNoTerminal
+	}
+	defer screen.Fini()
+	screen.EnablePaste()
+
+	l := &interfaceLoop{session: s, runner: run, ask: ask, group: newGroup(), navigatePane: navigatePane}
+	if len(askForSession) > 0 {
+		l.askForSession = askForSession[0]
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() { cancel(); l.group.Close() }()
+
+	out := os.Stdout
+	printed := map[*Session]int{}
+	lastRow := map[*Session]string{}
+	liveRows := 0    // terminal rows the live region currently occupies, not log-row count
+	controlRows := 0 // terminal rows the prompt/status block currently occupies
+	cols := func() int {
+		w, _ := screen.Size()
+		return w
+	}
+	printRows := func() bool {
+		state, _ := l.session.State()
+		running := state == StateThinking || state == StateWorking
+		rows := l.session.Log().Rows()
+		at := printed[l.session]
+		if at > len(rows) {
+			at = 0
+		}
+		start := at
+		if at == len(rows) {
+			if at == 0 || len(rows) == 0 || lastRow[l.session] == rows[len(rows)-1].Text {
+				return false
+			}
+			start = len(rows) - 1
+		}
+		pending := rows[start:]
+		if running {
+			renderLiveRows(out, pending, &liveRows, controlRows, cols())
+			return true
+		}
+		clearLiveRows(out, liveRows, controlRows)
+		liveRows = 0
+		movePastControls(out, controlRows)
+		for _, row := range pending {
+			fmt.Fprintln(out, lineMarker(row))
+		}
+		printed[l.session] = len(rows)
+		if len(rows) > 0 {
+			lastRow[l.session] = rows[len(rows)-1].Text
+		}
+		return true
+	}
+
+	printRows()
+	controlRows = lineControls(out, l, cols())
+	maybeSendHELO(ctx, l, helo)
+
+	events := make(chan tcell.Event)
+	go func() {
+		for {
+			e := screen.PollEvent()
+			select {
+			case events <- e:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			now := time.Now()
+			if l.session.BreakDue(now) {
+				l.session.StartBreak(now)
+				if l.session.Options().BreakBell {
+					fmt.Fprint(out, "\a")
+				}
+			} else {
+				l.session.TickBreak(now)
+			}
+			if printRows() {
+				if !sessionRunning(l.session) {
+					controlRows = lineControls(out, l, cols())
+				}
+			}
+		case event := <-events:
+			switch e := event.(type) {
+			case *tcell.EventKey:
+				key, r := keyEvent(e)
+				if key == KeyNone {
+					continue
+				}
+				if l.act(ctx, key, r) {
+					return nil
+				}
+			case *tcell.EventPaste:
+				// Paste markers bracket the literal key events that follow; key handling
+				// already inserts those runes into the editor.
+			}
+			fmt.Fprint(out, "\r\x1b[2K")
+			if printRows() {
+				if !sessionRunning(l.session) {
+					controlRows = lineControls(out, l, cols())
+				} else {
+					linePrompt(out, l.session.Editor().Text())
+				}
+			} else {
+				linePrompt(out, l.session.Editor().Text())
+			}
+		}
+	}
+}
+
+func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
+
+func sessionRunning(s *Session) bool {
+	state, _ := s.State()
+	return state == StateThinking || state == StateWorking
+}
+
+// renderLiveRows redraws only the transient rows below the status panes. The cursor
+// returns to the prompt afterward, so editing never leaves stale status lines behind.
+//
+// controlRows is how many terminal rows the prompt/status block above actually
+// occupies right now, and cols is the terminal's current width. Both are measured
+// rather than assumed: a row (the block's own lines, or a live row) that is wider
+// than the terminal wraps to more than one terminal row, and a cursor jump sized by
+// line count rather than by wrapped row count lands short or long, which is what let
+// a live update stomp the completed stdout above it or leave stray lines behind.
+func renderLiveRows(out *os.File, rows []Row, old *int, controlRows, cols int) {
+	clearLiveRows(out, *old, controlRows)
+	fmt.Fprintf(out, "\x1b[%dB", controlRows)
+	total := 0
+	for _, row := range rows {
+		text := lineMarker(row)
+		fmt.Fprintln(out, text)
+		total += wrappedRows(text, cols)
+	}
+	fmt.Fprintf(out, "\x1b[%dA", controlRows+total)
+	*old = total
+}
+
+func clearLiveRows(out *os.File, n, controlRows int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprintf(out, "\x1b[%dB", controlRows)
+	for i := 0; i < n; i++ {
+		fmt.Fprint(out, "\r\x1b[2K\n")
+	}
+	fmt.Fprintf(out, "\x1b[%dA", controlRows+n)
+}
+
+// movePastControls positions the cursor after the prompt and status panes. The
+// completed rows are then written sequentially, exactly like a `cat` command: no
+// already-emitted output is erased or redrawn.
+func movePastControls(out *os.File, controlRows int) { fmt.Fprintf(out, "\x1b[%dB", controlRows) }
+
+// lineControls draws the prompt and the two status panes below it, and reports how
+// many terminal rows the block actually took so a caller can return the cursor to
+// where it started and so renderLiveRows/clearLiveRows know where the block ends.
+// The block's own lines can each wrap to more than one terminal row (a long working
+// directory, a long status line), so the row count is measured against the current
+// terminal width rather than fixed at the block's five logical lines.
+func lineControls(out *os.File, l *interfaceLoop, cols int) int {
+	state, detail := l.session.State()
+	figure := "idle"
+	if state == StateThinking || state == StateWorking {
+		figure = twiddleWord(state)
+	}
+	status := l.status(state, detail, figure)
+	prefix, figureText, suffix := renderBarOne(status)
+	bar1 := prefix + figureText + suffix
+	bar2 := renderBarTwo(status)
+	promptLine := Prompt + l.session.Editor().Text()
+	rows := wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
+		wrappedRows(bar1, cols) + wrappedRows(bar2, cols)
+	fmt.Fprintf(out, "\r\x1b[2Korcli\n%s\n\n%s\n%s\n\x1b[%dA", promptLine, bar1, bar2, rows)
+	return rows
+}
+
+// wrappedRows reports how many terminal rows a line occupies once the terminal
+// wraps it, given a column width. A blank line still takes one row, since that is
+// what printing an empty Fprintln does. cols <= 0 (no terminal size yet) is treated
+// as no wrapping, matching the one-row-per-line behavior this replaces.
+func wrappedRows(s string, cols int) int {
+	if cols <= 0 {
+		return 1
+	}
+	w := displayWidth(s)
+	if w == 0 {
+		return 1
+	}
+	return (w + cols - 1) / cols
+}
+
+func lineMarker(row Row) string {
+	if row.Text == "" {
+		return ""
+	}
+	return row.Text
+}
+
+// pane0Screen returns a terminal screen that never enters the alternate screen.
+// The terminfo entry is copied so the process-wide terminal definition is not
+// mutated for callers outside the TUI.
+func pane0Screen() (tcell.Screen, error) {
+	name := os.Getenv("TERM")
+	ti, err := tcell.LookupTerminfo(name)
+	if err != nil {
+		return nil, err
+	}
+	copy := *ti
+	copy.EnterCA = ""
+	copy.ExitCA = ""
+	return tcell.NewTerminfoScreenFromTtyTerminfo(nil, &copy)
 }
 
 // maybeSendHELO starts the one turn Start sends on its own, with no key pressed
@@ -277,6 +523,8 @@ type interfaceLoop struct {
 	// tracking live state the instant the reader turns it back off.
 	frozenStatus     Status
 	haveFrozenStatus bool
+	streamStart      int
+	bufferActive     bool
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
@@ -342,6 +590,27 @@ func (l *interfaceLoop) paint() {
 		Field:  l.fieldRow(),
 	}
 	l.frame.SetContent(footer, rows, palette)
+	if l.bufferActive && running {
+		start := l.streamStart
+		if start < 0 || start > len(rows) {
+			start = len(rows)
+		}
+		buffer := make([]Row, 0, len(rows)-start+1)
+		if len(rows) > 0 && isProgramBanner(rows[0]) {
+			buffer = append(buffer, rows[0])
+		} else {
+			buffer = append(buffer, Row{Kind: KindNotice, Text: "orcli"})
+		}
+		buffer = append(buffer, rows[start:]...)
+		l.frame.SetBuffer(buffer)
+	} else {
+		l.bufferActive = false
+		banner := Row{Kind: KindNotice, Text: "orcli"}
+		if len(rows) > 0 && isProgramBanner(rows[0]) {
+			banner = rows[0]
+		}
+		l.frame.SetBuffer([]Row{banner})
+	}
 	l.frame.SetCaret(l.session.Editor().Caret())
 	l.frame.SetSweepStep(l.step)
 	l.frame.SetScroll(l.session.ScrollOffset())
@@ -850,6 +1119,10 @@ func (l *interfaceLoop) start(ctx context.Context, question string, silent bool)
 }
 
 func (l *interfaceLoop) startOnSession(ctx context.Context, session *Session, question string, silent bool) {
+	if session == l.session {
+		l.streamStart = session.Log().Len()
+		l.bufferActive = true
+	}
 	if err := l.group.Add(); err != nil {
 		session.Notice(err.Error(), 0, RoleFailure)
 		return

@@ -126,23 +126,6 @@ func (d *dispatcher) version() (tui.Result, error) {
 	return tui.Result{Text: fmt.Sprintf("orcli %s", version)}, nil
 }
 
-// clear is the handler for /clear.
-//
-// The count is reported rather than left silent, on the same grounds Log.Truncate's
-// own doc comment gives: a command that removed rows and said nothing about how many
-// would look like a quiet failure, and the figure costs nothing to read for a reader
-// who does not care what it says.
-func (d *dispatcher) clear() (tui.Result, error) {
-	if d.session == nil {
-		return tui.Result{}, fmt.Errorf("/clear needs an open interface")
-	}
-
-	log := d.session.Log()
-	n := log.Len()
-	log.Truncate()
-	return tui.Result{Text: fmt.Sprintf("cleared %d rows", n)}, nil
-}
-
 // trace enables, disables, or reports the redacted capture for this session.
 func (d *dispatcher) trace(args string) (tui.Result, error) {
 	if d.capture == nil {
