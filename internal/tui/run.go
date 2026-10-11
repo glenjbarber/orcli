@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -124,18 +122,16 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	if err != nil {
 		return err
 	}
-	app := tview.NewApplication().EnableMouse(s.Options().Mouse).EnablePaste(true)
+	app := tview.NewApplication().SetScreen(screen).EnableMouse(s.Options().Mouse).EnablePaste(true)
 	frame := NewFrame()
-	l := &interfaceLoop{
-		session:          s,
-		runner:           run,
-		ask:              ask,
-		frame:            frame,
-		group:            newGroup(),
-		transcriptWriter: os.Stdout,
-	}
-	app.SetScreen(&transcriptScreen{Screen: screen, afterShow: l.emitTranscript})
 	app.SetRoot(frame, true)
+	l := &interfaceLoop{
+		session: s,
+		runner:  run,
+		ask:     ask,
+		frame:   frame,
+		group:   newGroup(),
+	}
 	l.navigatePane = navigatePane
 	if len(askForSession) > 0 {
 		l.askForSession = askForSession[0]
@@ -305,40 +301,6 @@ type interfaceLoop struct {
 	// tracking live state the instant the reader turns it back off.
 	frozenStatus     Status
 	haveFrozenStatus bool
-
-	transcriptWriter io.Writer
-	transcriptMu     sync.Mutex
-	printedRows      int
-}
-
-// transcriptScreen runs the append-only Pane 0 writer after tcell has flushed
-// its current frame. Writing earlier would be overwritten by tcell's Show call.
-type transcriptScreen struct {
-	tcell.Screen
-	afterShow func()
-}
-
-func (s *transcriptScreen) Show() {
-	s.Screen.Show()
-	if s.afterShow != nil {
-		s.afterShow()
-	}
-}
-
-func (l *interfaceLoop) emitTranscript() {
-	if l.transcriptWriter == nil {
-		return
-	}
-	rows := l.session.Log().Rows()
-	l.transcriptMu.Lock()
-	defer l.transcriptMu.Unlock()
-	if len(rows) <= l.printedRows {
-		return
-	}
-	for _, row := range rows[l.printedRows:] {
-		_, _ = fmt.Fprintln(l.transcriptWriter, row.Text)
-	}
-	l.printedRows = len(rows)
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
