@@ -64,6 +64,11 @@ type dispatcher struct {
 	// session rather than replacing it. It is pane 1; a second /begin replaces it.
 	worker *tui.Session
 
+	// beginTask starts the model turn for a newly-created /begin worker. The
+	// callback is installed by openInterface, where the session-specific AskFunc
+	// and lifetime context are available.
+	beginTask func(*tui.Session, string)
+
 	// mainSession remains pane 0 when focus moves to the first /begin session.
 	mainSession *tui.Session
 	focusedPane int

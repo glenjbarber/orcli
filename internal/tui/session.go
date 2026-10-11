@@ -191,6 +191,12 @@ type Session struct {
 
 	opts Options
 
+	// mirror receives live progress from this session when it is a worker pane.
+	// It is intentionally another Session rather than a log callback so mirrored
+	// replies get their own response numbering and never share locks or copy state
+	// with the worker that produced them.
+	mirror *Session
+
 	// workers are the background turns this session started.
 	//
 	// They are under the session's own lock rather than the levels' lock, because a
@@ -452,6 +458,21 @@ func (s *Session) Options() Options {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.opts
+}
+
+// SetMirror makes target receive live notices, tool status and model output from
+// this session. A nil target disables mirroring.
+func (s *Session) SetMirror(target *Session) {
+	s.mu.Lock()
+	s.mirror = target
+	s.mu.Unlock()
+}
+
+func (s *Session) mirrorSession() *Session {
+	s.mu.RLock()
+	target := s.mirror
+	s.mu.RUnlock()
+	return target
 }
 
 // SetModel changes the model a turn is sent to.
@@ -1003,6 +1024,9 @@ func (s *Session) Deliver(text string, level int) {
 
 	s.FinishDelta(level)
 	s.appendResponse(text, level)
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.Deliver(text, level)
+	}
 }
 
 // DeliverDelta records one delta as a response. It remains the direct primitive
@@ -1022,6 +1046,9 @@ func (s *Session) DeliverDelta(text string, level int) {
 	s.mu.Unlock()
 	if working {
 		s.SetState(StateWorking, "")
+	}
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.DeliverDelta(text, level)
 	}
 }
 
@@ -1064,6 +1091,9 @@ func (s *Session) DeliverStreamDelta(text string, level int) {
 	if working {
 		s.SetState(StateWorking, "")
 	}
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.DeliverStreamDelta(text, level)
+	}
 }
 
 // FinishDelta closes the current streamed response block for level. It is called after a
@@ -1087,6 +1117,9 @@ func (s *Session) FinishDelta(level int) {
 	s.mu.Unlock()
 	if text != "" {
 		s.replaceResponseRows(id, text, level)
+	}
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.FinishDelta(level)
 	}
 }
 
@@ -1216,6 +1249,18 @@ func (s *Session) Notice(text string, level int, role Role) {
 		Text:  text,
 		Spans: []Span{{Start: 0, End: len(text), Role: role}},
 	})
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.Notice(text, level, role)
+	}
+}
+
+// ReplaceToolStatus records a live tool line and mirrors it to the parent pane
+// when this session is running as a /begin worker.
+func (s *Session) ReplaceToolStatus(row Row) {
+	s.log.ReplaceToolStatus(row)
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.ReplaceToolStatus(row)
+	}
 }
 
 // Finished records that a turn ended and returns the session to idle.
@@ -1239,6 +1284,9 @@ func (s *Session) Finished(reason string) {
 	s.helo = false
 	s.mu.Unlock()
 	s.SetState(StateIdle, "")
+	if mirror := s.mirrorSession(); mirror != nil {
+		mirror.Finished(reason)
+	}
 }
 
 // BreakDue reports whether a screen-break reminder is due at now.

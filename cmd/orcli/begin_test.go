@@ -58,6 +58,25 @@ func TestBeginDeliversTheNoteToANewSession(t *testing.T) {
 	}
 }
 
+func TestBeginStartsTheWorkerTaskCallback(t *testing.T) {
+	d := beginDispatcher(t)
+	var gotWorker *tui.Session
+	var gotNote string
+	d.beginTask = func(worker *tui.Session, note string) {
+		gotWorker, gotNote = worker, note
+	}
+
+	if _, err := d.begin("inspect the repository"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if gotWorker != d.worker {
+		t.Fatal("/begin did not start the newly-created worker")
+	}
+	if !strings.Contains(gotNote, "Return the result to parent /pane 0") {
+		t.Fatalf("worker task note = %q, want pane 0 handoff instruction", gotNote)
+	}
+}
+
 func TestNavigatePaneSwitchesBetweenMainZeroAndBeginOne(t *testing.T) {
 	d := beginDispatcher(t)
 	main := d.mainSession

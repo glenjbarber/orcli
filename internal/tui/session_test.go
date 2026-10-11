@@ -218,6 +218,27 @@ func TestStreamedDeltasStayInOneLiveResponseBlock(t *testing.T) {
 	}
 }
 
+func TestWorkerMirrorsProgressToParentSession(t *testing.T) {
+	parent := New(Options{Model: "some/model"})
+	worker := New(Options{Model: "some/model"})
+	worker.SetMirror(parent)
+
+	worker.ReplaceToolStatus(Row{Kind: KindTool, Level: 0, ToolID: "call-1", Text: "[fs] inspecting", Spans: []Span{{Start: 0, End: 4, Role: RoleToolFS}}})
+	worker.DeliverStreamDelta("worker result", 0)
+	worker.FinishDelta(0)
+
+	rows := parent.Log().Rows()
+	if len(rows) != 3 {
+		t.Fatalf("parent rows = %d, want banner, tool status and response", len(rows))
+	}
+	if rows[1].Kind != KindTool || rows[1].Text != "[fs] inspecting" {
+		t.Fatalf("mirrored tool row = %#v", rows[1])
+	}
+	if rows[2].Text != "worker result" {
+		t.Fatalf("mirrored response = %q", rows[2].Text)
+	}
+}
+
 // TestDeliverIgnoresNothing covers the case where a turn produced no text, such as a
 // turn that went straight to a tool call. A row with no text in it is a blank line the
 // reader has to scroll past.
