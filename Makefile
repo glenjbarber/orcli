@@ -39,7 +39,9 @@ GO ?= go
 MODULE := github.com/glenjbarber/orcli
 
 # Output lives under staged/bin/. The binary is named for the program, so an
-# install target has one file to place rather than a directory to copy.
+# install target has one file to place rather than a directory to copy. Installed
+# commands go to the user's ~/bin, which is the executable directory used by the
+# project environment.
 STAGE := staged
 BINDIR := $(STAGE)/bin
 BIN := $(BINDIR)/orcli
@@ -92,8 +94,8 @@ build:
 	fi
 
 install: build
-	@mkdir -p ${HOME}/${BINDIR}
-	install -m 555 ${BIN} ${HOME}/${BINDIR}
+	@mkdir -p $(HOME)/bin
+	install -m 555 $(BIN) $(HOME)/bin/orcli
 
 test:
 	$(GO) test ./...
