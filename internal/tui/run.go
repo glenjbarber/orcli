@@ -259,6 +259,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	out := os.Stdout
 	printed := map[*Session]int{}
 	lastRow := map[*Session]string{}
+	lastLive := map[*Session]string{}
 	liveRows := 0    // terminal rows the live region currently occupies, not log-row count
 	controlRows := 0 // terminal rows the prompt/status block currently occupies
 	promptRows := 0  // terminal rows the lone prompt row currently occupies, tracked
@@ -370,6 +371,24 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			if wrappedRows(lineMarker(pending[0]), c) > budget {
 				live = nil
 			}
+			// The 80ms ticker calls this on a fixed cadence regardless of whether
+			// the provider has sent anything new since the last tick - a still
+			// loading/thinking gap, or a tool status sitting unchanged while a
+			// command runs, ticks just as often as an active stream does. Without
+			// this check, every one of those idle ticks still redrew the live
+			// region from scratch: clear, move, rewrite, byte-identical to what
+			// was already on screen. That is wasted work at best, and at worst it
+			// is what read to a person as the same text "writing over itself" -
+			// the exact complaint the eager-commit fix above addressed for
+			// settled rows, happening again here for the one row that is still
+			// legitimately live. Key on the row's text plus controlRows (not just
+			// text) so a resize - which can change controlRows without changing
+			// pending[0].Text - still forces the one redraw it needs.
+			key := fmt.Sprintf("%d:%t:%s", controlRows, live == nil, pending[0].Text)
+			if key == lastLive[l.session] {
+				return false
+			}
+			lastLive[l.session] = key
 			renderLiveRows(out, live, &liveRows, controlRows, c)
 			return true
 		}
