@@ -259,24 +259,32 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	out := os.Stdout
 	fmt.Fprintln(out, "orcli")
 	printed := map[*Session]int{}
+	lastRow := map[*Session]string{}
 	printRows := func() bool {
 		rows := l.session.Log().Rows()
 		at := printed[l.session]
 		if at > len(rows) {
 			at = 0
 		}
+		start := at
 		if at == len(rows) {
-			return false
+			if at == 0 || len(rows) == 0 || lastRow[l.session] == rows[len(rows)-1].Text {
+				return false
+			}
+			start = len(rows) - 1
 		}
 		fmt.Fprint(out, "\r\x1b[2K\n")
-		for _, row := range rows[at:] {
+		for _, row := range rows[start:] {
 			fmt.Fprintln(out, lineMarker(row))
 		}
 		printed[l.session] = len(rows)
+		if len(rows) > 0 {
+			lastRow[l.session] = rows[len(rows)-1].Text
+		}
 		return true
 	}
 	printRows()
-	linePrompt(out, l.session.Editor().Text())
+	lineControls(out, l)
 	maybeSendHELO(ctx, l, helo)
 
 	events := make(chan tcell.Event)
@@ -307,7 +315,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 				l.session.TickBreak(now)
 			}
 			if printRows() {
-				linePrompt(out, l.session.Editor().Text())
+				lineControls(out, l)
 			}
 		case event := <-events:
 			switch e := event.(type) {
@@ -324,13 +332,30 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 				// already inserts those runes into the editor.
 			}
 			fmt.Fprint(out, "\r\x1b[2K")
-			printRows()
-			linePrompt(out, l.session.Editor().Text())
+			if printRows() {
+				lineControls(out, l)
+			} else {
+				linePrompt(out, l.session.Editor().Text())
+			}
 		}
 	}
 }
 
-func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2Kroot@lolhost $ %s", text) }
+func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
+
+// lineControls leaves the editable prompt above the two status panes. The cursor is
+// returned to the prompt after drawing the panes, while completed output remains in
+// ordinary terminal scrollback below the control block.
+func lineControls(out *os.File, l *interfaceLoop) {
+	state, detail := l.session.State()
+	figure := "idle"
+	if state == StateThinking || state == StateWorking {
+		figure = twiddleWord(state)
+	}
+	status := l.status(state, detail, figure)
+	prefix, figureText, suffix := renderBarOne(status)
+	fmt.Fprintf(out, "\r\x1b[2K%s%s\n\n%s%s%s\n%s\n\x1b[5A", Prompt, l.session.Editor().Text(), prefix, figureText, suffix, renderBarTwo(status))
+}
 
 func lineMarker(row Row) string {
 	if row.Text == "" {
