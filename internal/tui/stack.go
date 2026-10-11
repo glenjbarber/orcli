@@ -74,8 +74,11 @@ const barRows = 6
 // queue depth, token usage, cost, and hostname, with bar one above bar two.
 var barOneFields = []int{fieldState, fieldFigure, fieldQueue, fieldInput, fieldOutput, fieldCost, fieldHost}
 
-// barTwoFields is the user-confirmed field order from the active status-bar task.
-var barTwoFields = []int{fieldCredits, fieldContext, fieldAutosave, fieldStealth, fieldApproval}
+// barTwoFields is the user-confirmed field order from the active status-bar task,
+// with provider and model appended at the end so they read on the right of the
+// row - the two loreloom/UI-redesign.md named for bar two but the confirmed order
+// above had dropped.
+var barTwoFields = []int{fieldCredits, fieldContext, fieldAutosave, fieldStealth, fieldApproval, fieldProvider, fieldModel}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws

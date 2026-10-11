@@ -357,7 +357,7 @@ func TestBarTwoFieldOrder(t *testing.T) {
 		status[field] = fieldName(field)
 	}
 	got := renderBarTwo(status)
-	want := "credits:credits · context:context · autosave:autosave · stealth:stealth · approval:approval"
+	want := "credits:credits · context:context · autosave:autosave · stealth:stealth · approval:approval · provider:provider · model:model"
 	if got != want {
 		t.Fatalf("renderBarTwo = %q, want %q", got, want)
 	}

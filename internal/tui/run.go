@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/gdamore/tcell/v2/terminfo"
 	"github.com/rivo/tview"
 )
 
@@ -118,7 +120,7 @@ func startScreenMode(ctx context.Context, s *Session, run LineRunner, ask AskFun
 	// transcript from the terminal's native scrollback. Supplying the same
 	// capabilities with only the alternate-screen enter/exit sequences removed
 	// keeps keyboard and resize handling while preserving the normal scrollback.
-	screen, err := pane0Screen()
+	screen, _, err := pane0Screen()
 	if err != nil {
 		return err
 	}
@@ -239,7 +241,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	if run == nil {
 		return errors.New("tui: Start was given no way to run a command")
 	}
-	screen, err := pane0Screen()
+	screen, ti, err := pane0Screen()
 	if err != nil {
 		return err
 	}
@@ -248,6 +250,21 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	}
 	defer screen.Fini()
 	screen.EnablePaste()
+	// tcell's own Init() always sends DisableAutoMargin, since it draws its own
+	// cell buffer and expects to control wrapping itself - every caller of
+	// tcell.Screen does, except this one. Pane 0 never calls into tcell's own
+	// draw/Show path at all (see Start's own doc comment): every row here is a
+	// raw write straight to stdout, and every width-measuring and cursor-math
+	// fix in this file (wrappedRows, lineMarker, the live-region cap) has
+	// always assumed the terminal wraps a line too long for its width on its
+	// own, the way a terminal does by default. With auto-margin left off, it
+	// doesn't: a row wider than the terminal just overwrites its own last
+	// column forever instead, and everything past the edge is gone rather
+	// than wrapped - never printed, never recoverable by scrolling, invisible
+	// even though this file's own row counting already accounted for it
+	// wrapping. Turning auto-margin back on right after Init() is what makes
+	// that assumption true again.
+	fmt.Fprint(os.Stdout, ti.EnableAutoMargin)
 
 	l := &interfaceLoop{session: s, runner: run, ask: ask, group: newGroup(), navigatePane: navigatePane}
 	if len(askForSession) > 0 {
@@ -444,11 +461,18 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			} else {
 				l.session.TickBreak(now)
 			}
-			if printRows() {
-				if !sessionRunning(l.session) {
-					controlRows = lineControls(out, l, cols(), controlRows)
-					promptRows = 0
-				}
+			moved := printRows()
+			switch {
+			case sessionRunning(l.session):
+				// Redrawn every tick while a turn runs, not only when printRows
+				// itself changed something: lineControls' spectrum colour (see
+				// spectrumStep) advances by wall clock, so the control block has
+				// new content to show even on a tick where nothing else did.
+				controlRows = lineControls(out, l, cols(), controlRows)
+				promptRows = 0
+			case moved:
+				controlRows = lineControls(out, l, cols(), controlRows)
+				promptRows = 0
 			}
 		case event := <-events:
 			switch e := event.(type) {
@@ -633,6 +657,67 @@ func cursorUp(out *os.File, n int) {
 	fmt.Fprintf(out, "\x1b[%dA", n)
 }
 
+// spectrumBar wraps s in a full-width background colour drawn from the visible
+// spectrum, so a running turn reads as motion across the whole bar's width
+// rather than only the "thinking"/"working" word changing. s is padded to
+// cols columns first so the colour fills the row even past where its own text
+// ends, and the trailing reset keeps the colour from bleeding into whatever is
+// drawn after it (the rule, or the next bar).
+func spectrumBar(s string, cols int) string {
+	r, g, b := spectrumRGB(spectrumStep())
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm%s\x1b[0m", r, g, b, padToWidth(s, cols))
+}
+
+// spectrumStep is which step of the sweep is current, derived from the clock
+// rather than threaded through as state: every bar drawn in the same 80ms
+// render tick (lineControls draws bar1 and bar2 separately, and either can be
+// redrawn more than once a tick) lands on the same step this way, with
+// nothing to keep in sync between them.
+func spectrumStep() int {
+	const tickMillis = 80
+	const steps = 256
+	return int(time.Now().UnixMilli()/tickMillis) % steps
+}
+
+// spectrumRGB turns a step in [0,256) into one point on the hue wheel at full
+// saturation and value - a continuous rainbow sweep, which is what "the full
+// spectrum" means here, rather than a jump through the 256-colour xterm
+// palette (whose entries are not evenly spaced around the wheel and would
+// read as a jumble of named colours rather than a sweep).
+func spectrumRGB(step int) (r, g, b byte) {
+	hue := float64(step%256) / 256 * 360
+	const sat, val = 1.0, 1.0
+	c := val * sat
+	x := c * (1 - math.Abs(math.Mod(hue/60, 2)-1))
+	var r1, g1, b1 float64
+	switch {
+	case hue < 60:
+		r1, g1, b1 = c, x, 0
+	case hue < 120:
+		r1, g1, b1 = x, c, 0
+	case hue < 180:
+		r1, g1, b1 = 0, c, x
+	case hue < 240:
+		r1, g1, b1 = 0, x, c
+	case hue < 300:
+		r1, g1, b1 = x, 0, c
+	default:
+		r1, g1, b1 = c, 0, x
+	}
+	return byte(r1 * 255), byte(g1 * 255), byte(b1 * 255)
+}
+
+// padToWidth pads s with trailing spaces until it reaches cols display
+// columns, leaving it unchanged if it already reaches or exceeds cols (or
+// cols is not yet known).
+func padToWidth(s string, cols int) string {
+	w := displayWidth(s)
+	if cols <= 0 || w >= cols {
+		return s
+	}
+	return s + strings.Repeat(" ", cols-w)
+}
+
 // lineControls draws the prompt and the two status panes below it, and reports how
 // many terminal rows the block actually took so a caller can return the cursor to
 // where it started and so renderLiveRows/clearLiveRows know where the block ends.
@@ -664,8 +749,21 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	}
 	rule := strings.Repeat("─", ruleWidth)
 	promptLine := Prompt + l.session.Editor().Text()
+	// Row counts are measured against the plain text, before any colour escapes
+	// are added below - displayWidth has no notion of an escape sequence, and
+	// counting its bytes as columns is exactly the kind of row-count inflation
+	// that drove the cursor far past where the terminal actually was, the same
+	// failure class every earlier fix in this file chased down.
 	rows := wrappedRows(rule, cols) + wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
 		wrappedRows(bar1, cols) + wrappedRows(bar2, cols) + wrappedRows(rule, cols)
+	// While a turn is running, the two status bars cycle through the full colour
+	// spectrum one step per redraw instead of sitting still - a steadier, more
+	// visible "something is happening" signal than the single sweeping figure
+	// character alone, across the bars' whole width rather than one glyph.
+	if state == StateThinking || state == StateWorking {
+		bar1 = spectrumBar(bar1, cols)
+		bar2 = spectrumBar(bar2, cols)
+	}
 	// "\r\n" between segments, not a bare "\n": this raw-mode screen does not
 	// translate a line feed into a carriage return, so each later segment would
 	// otherwise start at whatever column the one before it ended on rather than
@@ -771,19 +869,20 @@ func lineMarker(row Row) string {
 // that actually turns off tcell's alternate-screen bookkeeping end to end,
 // entry and exit alike, rather than just the two terminfo capabilities that
 // happen to drive its entry half.
-func pane0Screen() (tcell.Screen, error) {
+func pane0Screen() (tcell.Screen, *terminfo.Terminfo, error) {
 	if err := os.Setenv("TCELL_ALTSCREEN", "disable"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	name := os.Getenv("TERM")
 	ti, err := tcell.LookupTerminfo(name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	copy := *ti
 	copy.EnterCA = ""
 	copy.ExitCA = ""
-	return tcell.NewTerminfoScreenFromTtyTerminfo(nil, &copy)
+	screen, err := tcell.NewTerminfoScreenFromTtyTerminfo(nil, &copy)
+	return screen, ti, err
 }
 
 // maybeSendHELO starts the one turn Start sends on its own, with no key pressed
