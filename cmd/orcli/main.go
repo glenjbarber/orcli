@@ -457,13 +457,11 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
 	//
-	// The HELO is only sent when canAsk(s) agrees a turn can be sent at all: a
-	// session with no model configured has nothing to greet with, and Begin would
-	// only refuse it and leave a failure notice as the first thing the reader sees.
+	// Startup does not send a synthetic HELO. The first model turn is the reader's
+	// own submitted input; worker turns from /begin still use the normal ask path.
+	// Keeping this empty also leaves the terminal transcript free to use its own
+	// scrollback from the first line of the session.
 	helo := ""
-	if canAsk(s) {
-		helo = heloQuestion
-	}
 	confirmations := map[*tui.Session]func(string, bool){s: confirmModelAt(s, d.activeConfigPath)}
 	var confirmationMu sync.Mutex
 	askForSession := func(target *tui.Session) tui.AskFunc {
