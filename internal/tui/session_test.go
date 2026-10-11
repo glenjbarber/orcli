@@ -183,7 +183,7 @@ func TestStreamedResponsesRenderAndCopyNewestFirst(t *testing.T) {
 	s.DeliverDelta("B\n```text\ninside B\n```", 0)
 	s.DeliverDelta("C", 0)
 
-	for index, want := range map[int]string{0: "C", 1: "C", 2: "B\n```text\ninside B\n```"} {
+	for index, want := range map[int]string{0: "C", 1: "A", 2: "B\n```text\ninside B\n```"} {
 		got, ok := s.CopyResponse(index, 0)
 		if !ok || got != want {
 			t.Errorf("CopyResponse(%d) = %q, %t; want %q", index, got, ok, want)
@@ -199,6 +199,22 @@ func TestStreamedResponsesRenderAndCopyNewestFirst(t *testing.T) {
 	}
 	if rows[1].ResponseID == 0 || rows[2].ResponseID != rows[3].ResponseID || rows[3].ResponseSub != 1 {
 		t.Fatalf("response metadata = %#v, want streamed and sub-response rows", rows[1:])
+	}
+}
+
+func TestStreamedDeltasStayInOneLiveResponseBlock(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.DeliverStreamDelta("hello ", 0)
+	s.DeliverStreamDelta("world\nnext line", 0)
+	s.FinishDelta(0)
+
+	got, ok := s.CopyResponse(0, 0)
+	if !ok || got != "hello world\nnext line" {
+		t.Fatalf("CopyResponse(0) = %q, %t; want one complete streamed response", got, ok)
+	}
+	rows := s.Log().Rows()
+	if len(rows) != 2 || rows[1].ResponseID == 0 {
+		t.Fatalf("streamed response rows = %#v, want one response row", rows)
 	}
 }
 

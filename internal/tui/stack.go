@@ -448,44 +448,28 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		input = input[len(input)-backlog:]
 	}
 	logRows := backlog - len(input) + 1
-	end := len(f.log) - f.scroll
-	if end < 0 {
-		end = 0
-	}
-	if end > len(f.log) {
-		end = len(f.log)
-	}
-	// shown is oldest first, in physical lines rather than log rows: a row with a
-	// line break of its own folds into more than one entry here, each still
-	// counted against backlog the way a single-line row always was. f.scroll
-	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
-	// untouched) - only how many physical lines one row costs changes.
-	// Collect physical lines from the live edge backward. Selecting a starting log row
-	// first would let a wrapped older row consume the pane before the newest stream data
-	// was reached. Reverse the collected lines before drawing so the pane still reads
-	// oldest-to-newest from top to bottom.
-	newestFirst := make([]Row, 0, logRows)
 	latestResponse := latestResponseID(f.log)
-	for i := end - 1; i >= 0; i-- {
+	physical := make([]Row, 0, len(f.log))
+	for i := 0; i < len(f.log); i++ {
 		// The response marker occupies part of the terminal width. Apply it
 		// before folding so a wrapped response line leaves room for its marker
 		// instead of being wrapped to the full width and truncated afterward.
 		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
 		lines := foldRowLines(marked, width)
-		for j := len(lines) - 1; j >= 0; j-- {
-			newestFirst = append(newestFirst, lines[j])
-			if len(newestFirst) >= logRows {
-				break
-			}
-		}
-		if len(newestFirst) >= logRows {
-			break
-		}
+		physical = append(physical, lines...)
 	}
-	shown := make([]Row, len(newestFirst))
-	for i, row := range newestFirst {
-		shown[len(newestFirst)-1-i] = row
+	end := len(physical) - f.scroll
+	if end < 0 {
+		end = 0
 	}
+	if end > len(physical) {
+		end = len(physical)
+	}
+	start := end - logRows
+	if start < 0 {
+		start = 0
+	}
+	shown := physical[start:end]
 	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
 		at := i

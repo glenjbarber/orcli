@@ -784,7 +784,13 @@ func (s *Session) StopTurn() context.CancelFunc {
 func (s *Session) ScrollUp(n int) {
 	s.mu.Lock()
 	s.scroll += n
-	if max := s.log.Len(); s.scroll > max {
+	max := s.log.Len()
+	for _, response := range s.responses {
+		if lines := strings.Count(response.text, "\n") + 1; lines > 1 {
+			max += lines - 1
+		}
+	}
+	if s.scroll > max {
 		s.scroll = max
 	}
 	s.mu.Unlock()
@@ -1019,10 +1025,11 @@ func (s *Session) DeliverDelta(text string, level int) {
 	}
 }
 
-// DeliverStreamDelta adds streamed text to the current logical response line. Providers
-// commonly send one token per event, so an event is not itself a useful row. Text
-// is kept live in the log, but a new response number is started only at a newline
-// outside a fenced code block.
+// DeliverStreamDelta appends streamed text to one live response block. Providers
+// commonly send one token per event, so an event is never a row of its own. The
+// complete response stays under one response ID; newline folding and visual
+// wrapping happen when the frame draws it while the visible block is replaced
+// atomically as more text arrives.
 func (s *Session) DeliverStreamDelta(text string, level int) {
 	if text == "" {
 		return
@@ -1047,38 +1054,9 @@ func (s *Session) DeliverStreamDelta(text string, level int) {
 		}
 	}
 	combined := s.responses[position].text + text
-	complete, remainder := splitResponseLines(combined)
-	s.responses[position].text = ""
+	s.responses[position].text = combined
 	s.mu.Unlock()
-
-	for i, line := range complete {
-		s.finishResponse(id, line, level)
-		if i == len(complete)-1 && remainder == "" {
-			s.mu.Lock()
-			delete(s.activeResponses, level)
-			s.mu.Unlock()
-			id = 0
-			break
-		}
-		s.mu.Lock()
-		s.nextResponseID++
-		id = s.nextResponseID
-		s.responses = append(s.responses, responseRecord{id: id})
-		s.activeResponses[level] = id
-		s.mu.Unlock()
-	}
-	if id == 0 {
-		return
-	}
-	s.mu.Lock()
-	for i := range s.responses {
-		if s.responses[i].id == id {
-			s.responses[i].text = remainder
-			break
-		}
-	}
-	s.mu.Unlock()
-	s.replaceResponseRows(id, remainder, level)
+	s.replaceResponseRows(id, combined, level)
 
 	s.mu.Lock()
 	working := s.state == StateThinking
@@ -1088,7 +1066,7 @@ func (s *Session) DeliverStreamDelta(text string, level int) {
 	}
 }
 
-// FinishDelta closes the current streamed line for level. It is called after a
+// FinishDelta closes the current streamed response block for level. It is called after a
 // provider stream ends so a final line without a trailing newline remains
 // addressable by /copy.
 func (s *Session) FinishDelta(level int) {
@@ -1135,31 +1113,6 @@ func (s *Session) replaceResponseRows(id int, text string, level int) {
 	}
 }
 
-// splitResponseLines returns complete lines outside fenced code and the current
-// unfinished line. Newlines inside a fenced block stay in the same response so
-// /copy N M can still select the complete fenced sub-response.
-func splitResponseLines(text string) (complete []string, remainder string) {
-	start, last := 0, -1
-	fenced := false
-	for i := 0; i < len(text); {
-		if strings.HasPrefix(text[i:], "```") {
-			fenced = !fenced
-			i += 3
-			continue
-		}
-		if text[i] == '\n' && !fenced {
-			complete = append(complete, text[start:i])
-			last = i
-			start = i + 1
-		}
-		i++
-	}
-	if last >= 0 {
-		return complete, text[start:]
-	}
-	return nil, text
-}
-
 func (s *Session) appendResponse(text string, level int) {
 	s.mu.Lock()
 	s.nextResponseID++
@@ -1204,9 +1157,10 @@ func responseParts(text string) []responsePart {
 	return parts
 }
 
-// CopyResponse returns a streamed response by newest-first index. Zero and one
-// both name the newest response. A positive sub selects that response's fenced
-// text block, including its delimiters.
+// CopyResponse returns a streamed response by its incrementing reply number.
+// Reply numbers are one-based in creation order; zero is a convenience alias
+// for the newest reply. A positive sub selects that response's fenced text
+// block, including its delimiters.
 func (s *Session) CopyResponse(index, sub int) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1214,8 +1168,8 @@ func (s *Session) CopyResponse(index, sub int) (string, bool) {
 		return "", false
 	}
 	position := len(s.responses) - 1
-	if index > 1 {
-		position -= index - 1
+	if index > 0 {
+		position = index - 1
 	}
 	if position < 0 {
 		return "", false
