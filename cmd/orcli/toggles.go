@@ -16,7 +16,18 @@ import (
 // would spend a line on a spelling nobody asked for. The names are already
 // alphabetical, which is the order a reader scans a list in rather than the order
 // they were declared in the table.
-func (d *dispatcher) help() (tui.Result, error) {
+func (d *dispatcher) help(args string) (tui.Result, error) {
+	if target := strings.TrimSpace(args); target != "" {
+		command, found := tui.Lookup(target)
+		if !found {
+			return tui.Result{}, fmt.Errorf("unknown command /%s", target)
+		}
+		usage := "/" + command.Name
+		if command.Args != "" {
+			usage += " " + command.Args
+		}
+		return tui.Result{Text: usage + "\n" + command.Summary}, nil
+	}
 	names := tui.Names()
 
 	var b strings.Builder
@@ -37,6 +48,41 @@ func (d *dispatcher) help() (tui.Result, error) {
 		fmt.Fprintf(&b, "  %s", c.Summary)
 	}
 	return tui.Result{Text: b.String()}, nil
+}
+
+// breakToggle controls the periodic screen-break timer. `off` applies only to
+// this session; adding `save` writes the disabled setting for future sessions.
+func (d *dispatcher) breakToggle(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/break needs an open interface")
+	}
+	words := strings.Fields(args)
+	if len(words) > 2 || (len(words) == 2 && (words[1] != "save" || words[0] != "off")) {
+		return tui.Result{}, fmt.Errorf("/break expects on, off, or off save")
+	}
+	if len(words) == 0 {
+		return tui.Result{Text: reportOnOff("break reminders", d.session.Options().BreakEnabled)}, nil
+	}
+	switch words[0] {
+	case "on":
+		d.session.SetBreakEnabled(true)
+		return tui.Result{Text: "break reminders are on for this session"}, nil
+	case "off":
+		d.session.SetBreakEnabled(false)
+		if len(words) == 1 {
+			return tui.Result{Text: "break reminders are off for this session"}, nil
+		}
+		path, err := d.activeConfigPath()
+		if err != nil {
+			return tui.Result{Text: fmt.Sprintf("break reminders are off for this session; the setting was not saved: %v", err)}, nil
+		}
+		if err := config.WriteBreakEnabled(path, false); err != nil {
+			return tui.Result{Text: fmt.Sprintf("break reminders are off for this session; saving failed: %v", err)}, nil
+		}
+		return tui.Result{Text: fmt.Sprintf("break reminders are off and saved to %s", path)}, nil
+	default:
+		return tui.Result{}, fmt.Errorf("/break expects on, off, or off save")
+	}
 }
 
 // version is the handler for /version.

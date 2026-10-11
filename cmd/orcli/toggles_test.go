@@ -42,6 +42,48 @@ func TestHelpListsEveryNameAndSkipsHiddenOnes(t *testing.T) {
 	}
 }
 
+func TestHelpBreakShowsPersistenceSyntax(t *testing.T) {
+	d := togglesDispatcher(t)
+	out, err := d.Run(context.Background(), "/help break")
+	if err != nil {
+		t.Fatalf("/help break: %v", err)
+	}
+	if !strings.Contains(out.Text, "/break on|off [save]") || !strings.Contains(out.Text, "off save") {
+		t.Errorf("/help break = %q, want session and persistent forms", out.Text)
+	}
+}
+
+func TestBreakOffSavePersistsAndOnIsSessionOnly(t *testing.T) {
+	d := togglesDispatcher(t)
+	d.configFile = filepath.Join(t.TempDir(), "orcli.json")
+	if err := os.WriteFile(d.configFile, []byte(`{"api_key":"k"}`), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.Run(context.Background(), "/break off"); err != nil {
+		t.Fatalf("/break off: %v", err)
+	}
+	if d.session.Options().BreakEnabled {
+		t.Error("/break off left reminders enabled")
+	}
+	if _, err := d.Run(context.Background(), "/break on"); err != nil {
+		t.Fatalf("/break on: %v", err)
+	}
+	if !d.session.Options().BreakEnabled {
+		t.Error("/break on did not re-enable reminders")
+	}
+	if _, err := d.Run(context.Background(), "/break off save"); err != nil {
+		t.Fatalf("/break off save: %v", err)
+	}
+	cfg, _, err := config.LoadFromPath(d.configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BreakEnabled {
+		t.Error("saved break setting is enabled, want disabled")
+	}
+}
+
 func TestTraceCommandCapturesSessionCommands(t *testing.T) {
 	d := togglesDispatcher(t)
 	d.capture = newDebugLog(t.TempDir(), "configured-secret")

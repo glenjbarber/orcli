@@ -119,6 +119,11 @@ func init() {
 			Summary: "ring the terminal bell on reply, on or off",
 		},
 		{
+			Name:    "break",
+			Args:    "on|off [save]",
+			Summary: "turn periodic break reminders on or off; use off save to persist off",
+		},
+		{
 			Name:    "color",
 			Summary: "turn color on or off, and save the choice",
 			Hidden:  []string{"colour"},

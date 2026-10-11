@@ -85,6 +85,12 @@ type Options struct {
 	// rather than about a break starting.
 	BreakBell bool
 
+	// BreakEnabled controls whether periodic screen-break reminders run.
+	BreakEnabled bool
+	// BreakDisabled is the zero-compatible internal switch used by older callers
+	// that construct Options with only BreakInterval.
+	BreakDisabled bool
+
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
 
@@ -476,6 +482,14 @@ func (s *Session) SetModel(model string) error {
 func (s *Session) SetBell(on bool) {
 	s.mu.Lock()
 	s.opts.Bell = on
+	s.mu.Unlock()
+}
+
+// SetBreakEnabled changes whether the periodic screen-break timer is active.
+func (s *Session) SetBreakEnabled(on bool) {
+	s.mu.Lock()
+	s.opts.BreakEnabled = on
+	s.opts.BreakDisabled = !on
 	s.mu.Unlock()
 }
 
@@ -980,11 +994,11 @@ func (s *Session) Finished(reason string) {
 // not due a second time, so a caller can poll this on every tick without
 // guarding it itself.
 func (s *Session) BreakDue(now time.Time) bool {
-	if s.opts.BreakInterval <= 0 {
-		return false
-	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.opts.BreakDisabled || s.opts.BreakInterval <= 0 {
+		return false
+	}
 	if s.state != StateIdle {
 		return false
 	}

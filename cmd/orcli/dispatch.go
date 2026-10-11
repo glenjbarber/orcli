@@ -182,7 +182,7 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 			return d.redirect(args)
 		},
 		"help": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
-			return d.help()
+			return d.help(args)
 		},
 		"version": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.version()
@@ -195,6 +195,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		},
 		"bell": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.bell(args)
+		},
+		"break": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.breakToggle(args)
 		},
 		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.color(args)

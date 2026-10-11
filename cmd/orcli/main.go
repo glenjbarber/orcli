@@ -268,6 +268,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		Bell:                 *bell || cfg.Bell,
 		BreakIntervalMinutes: breakIntervalMinutes,
 		BreakBell:            *breakBell || cfg.BreakBell,
+		BreakEnabled:         cfg.BreakEnabled,
 		Color:                *color || cfg.Color,
 		PaneActiveColor:      firstNonEmpty(*paneActiveColor, cfg.PaneActiveColor),
 		PaneDoneColor:        firstNonEmpty(*paneDoneColor, cfg.PaneDoneColor),
@@ -311,6 +312,7 @@ type session struct {
 	Bell                 bool
 	BreakIntervalMinutes int
 	BreakBell            bool
+	BreakEnabled         bool
 	Color                bool
 	PaneActiveColor      string
 	PaneDoneColor        string
@@ -351,6 +353,8 @@ func (s session) tuiSession() *tui.Session {
 		Bell:          s.Bell,
 		BreakInterval: time.Duration(s.BreakIntervalMinutes) * time.Minute,
 		BreakBell:     s.BreakBell,
+		BreakEnabled:  s.BreakEnabled,
+		BreakDisabled: !s.BreakEnabled,
 		Mouse:         s.Mouse,
 	}
 
