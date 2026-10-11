@@ -409,6 +409,11 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// relative order; there is no scrollback at these heights (see scrollbackRows).
 	if height < barRows {
 		row := 0
+		// On a very short terminal the prompt takes priority over separators and
+		// status rows so input remains usable.
+		drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
+		f.showCaret(screen, x, y+row, width)
+		row++
 		if height >= 2 {
 			drawCellText(screen, x, y+row, width, "  ", chrome)
 			row++
@@ -418,12 +423,11 @@ func (f *Frame) Draw(screen tcell.Screen) {
 			row++
 		}
 		if height >= 4 {
-			drawCellText(screen, x, y+row, width, Prompt+f.bar.Field, chrome)
-			f.showCaret(screen, x, y+row, width)
+			f.drawBarOne(screen, x, y+row, width, chrome)
 			row++
 		}
 		if height >= 5 {
-			f.drawBarOne(screen, x, y+row, width, chrome)
+			f.drawBarTwo(screen, x, y+row, width, chrome)
 		}
 		return
 	}

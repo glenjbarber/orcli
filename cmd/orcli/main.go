@@ -457,11 +457,13 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 	// main and the interface holds no configuration. A turn that came back with text
 	// is what writes the model, and that is the connection there is no command for.
 	//
-	// Startup does not send a synthetic HELO. The first model turn is the reader's
-	// own submitted input; worker turns from /begin still use the normal ask path.
-	// Keeping this empty also leaves the terminal transcript free to use its own
-	// scrollback from the first line of the session.
+	// Send the synthetic HELO when this session can ask a model. Its user message
+	// includes ~/AGENTS.md when that optional file exists; /begin worker turns use
+	// the normal ask path independently.
 	helo := ""
+	if canAsk(s) {
+		helo = heloWithHomeAgents(heloQuestion)
+	}
 	confirmations := map[*tui.Session]func(string, bool){s: confirmModelAt(s, d.activeConfigPath)}
 	var confirmationMu sync.Mutex
 	askForSession := func(target *tui.Session) tui.AskFunc {

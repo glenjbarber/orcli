@@ -37,7 +37,7 @@ func simulationText(screen tcell.SimulationScreen) string {
 }
 
 // TestFrameDrawsCellsAndPlacesPromptCaret uses a terminal exactly barRows tall, so there
-// is no scrollback and the prompt is row 0.
+// is no scrollback and the prompt follows the two separator rows.
 func TestFrameDrawsCellsAndPlacesPromptCaret(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
@@ -56,14 +56,14 @@ func TestFrameDrawsCellsAndPlacesPromptCaret(t *testing.T) {
 
 	// Prompt now has a leading space (see stack.go's Prompt doc comment), so column 0
 	// is that space and column 1 is "r" of "root@lolhost".
-	r, _, _, _ := screen.GetContent(1, 0)
+	r, _, _, _ := screen.GetContent(1, 2)
 	if r != 'r' {
 		t.Fatalf("prompt row begins with %q, want 'r'", r)
 	}
 	x, y, visible := screen.GetCursor()
 	wantX := DisplayWidth(Prompt + "he")
-	if !visible || x != wantX || y != 0 {
-		t.Fatalf("cursor = (%d, %d, %t), want (%d, 0, true)", x, y, visible, wantX)
+	if !visible || x != wantX || y != 2 {
+		t.Fatalf("cursor = (%d, %d, %t), want (%d, 2, true)", x, y, visible, wantX)
 	}
 }
 

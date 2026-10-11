@@ -13,7 +13,7 @@ func TestTheFrameOrderIsTopToBottom(t *testing.T) {
 	}
 	screen := drawSimulationFrame(t, 20, 80, Bar{Field: "THE FIELD"}, log, Palette{})
 	rows := strings.Split(strings.TrimRight(simulationText(screen), "\n"), "\n")
-	promptRow := scrollbackRows(20)
+	promptRow := scrollbackRows(20) + 2
 
 	if got := strings.TrimSpace(rows[0]); got != "the oldest log row" {
 		t.Errorf("row 0 carries %q, want oldest log row", got)
