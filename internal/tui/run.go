@@ -315,58 +315,62 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		}
 		pending := rows[start:]
 		if running {
-			// renderLiveRows has to move the cursor up past the whole live
-			// region to reach the control block, and an ANSI cursor-up clamps
-			// at the top of the screen instead of erroring - it does not fail
-			// loudly, it just stops short, and every write after that is then
-			// positioned relative to where the code thinks the cursor is
-			// rather than where it actually stopped. A response still fits
-			// comfortably the whole time it is shorter than the terminal is
-			// tall; a long one - a documentation file streamed back in full,
-			// easily hundreds of wrapped rows - eventually does not, and nothing
-			// here enforces that it must.
+			// Every row in pending except the newest is already final.
+			// ReplaceResponse re-parses a streamed response's whole
+			// accumulated text on every delta, but responseParts only ever
+			// splits on complete fenced code blocks, scanning left to right -
+			// new text is only ever appended at the end, so every boundary it
+			// already found earlier is still exactly where it was, and every
+			// part before the last is byte-identical no matter how much more
+			// streams in afterward. ReplaceToolStatus is narrower still: it
+			// only ever revises the single row matching one tool call's own
+			// ID. So pending's older rows are done changing the moment
+			// anything else has been appended after them, and holding them in
+			// the redraw-every-tick live region bought nothing: it just made
+			// already-settled text visually flicker and reshuffle under the
+			// reader on every tick, instead of scrolling up and staying put
+			// the way the rest of this design's own completed-output handles
+			// everything else. They are flushed here exactly like the
+			// completed-output path below does, which is what lets a long
+			// reply read top to bottom like any other terminal output while
+			// it is still arriving, rather than only once the whole thing is
+			// done.
 			//
-			// The fix is not to commit the overflow as completed output early:
-			// a streamed response's earlier rows are not actually final until
-			// the whole thing is, since every delta re-parses the full
-			// accumulated text and replaces every row the response owns, not
-			// just the new ones - an earlier line's own wrap point can still
-			// shift. So only the tail of pending, as much of it as fits under
-			// the terminal's own height, is ever shown live; the instant the
-			// turn finishes, the ordinary completed-output flush below prints
-			// everything in one pass, in order, needing no cursor-up at all
-			// since it only ever writes forward - which is what makes it safe
-			// at any length to begin with.
+			// Only the newest row - the one still actually being written -
+			// stays live, and even it has to fit the terminal: renderLiveRows
+			// moves the cursor up past the whole live region to reach the
+			// control block, and an ANSI cursor-up clamps at the top of the
+			// screen instead of erroring, so a row taller than the terminal
+			// would silently break every position this code assumes after
+			// it. One oversized row cannot be shrunk by trimming rows around
+			// it, since there are none left to trim once older rows are
+			// already committed - the only sound choice is to show it live
+			// not at all until the turn finishes and the always-safe,
+			// forward-only completed flush can print it in one pass.
+			if len(pending) > 1 {
+				toCommit := pending[:len(pending)-1]
+				clearLiveRows(out, liveRows, controlRows)
+				liveRows = 0
+				movePastControls(out, controlRows)
+				for _, row := range toCommit {
+					fmt.Fprintf(out, "%s\r\n", lineMarker(row))
+				}
+				printed[l.session] += len(toCommit)
+				lastRow[l.session] = toCommit[len(toCommit)-1].Text
+				pending = pending[len(pending)-1:]
+				controlRows = lineControls(out, l, cols(), controlRows)
+				promptRows = 0
+			}
 			budget := rowsAvail() - controlRows
 			if budget < 1 {
 				budget = 1
 			}
 			c := cols()
-			cut := len(pending)
-			if len(pending) > 0 {
-				// The most recent row is only ever included if it fits the
-				// budget on its own. A row can be any length - it holds
-				// whatever one streamed paragraph or one still-growing,
-				// not-yet-broken line turned out to be - and one that is
-				// already taller than the terminal cannot be shrunk by
-				// trimming older rows around it; the only sound choice is to
-				// show nothing live this tick rather than a row the terminal
-				// cannot actually display without clamping the cursor move
-				// needed to reach it.
-				if lastRows := wrappedRows(lineMarker(pending[len(pending)-1]), c); lastRows <= budget {
-					cut = len(pending) - 1
-					sum := lastRows
-					for i := len(pending) - 2; i >= 0; i-- {
-						rowsForThis := wrappedRows(lineMarker(pending[i]), c)
-						if sum+rowsForThis > budget {
-							break
-						}
-						sum += rowsForThis
-						cut = i
-					}
-				}
+			live := pending
+			if wrappedRows(lineMarker(pending[0]), c) > budget {
+				live = nil
 			}
-			renderLiveRows(out, pending[cut:], &liveRows, controlRows, c)
+			renderLiveRows(out, live, &liveRows, controlRows, c)
 			return true
 		}
 		clearLiveRows(out, liveRows, controlRows)
