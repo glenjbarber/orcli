@@ -264,6 +264,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 				ToolCalls: calls,
 			})
 			for _, call := range calls {
+				appendToolActivity(s, call, level)
 				result := runTool(toolset, approval, call)
 				capture.record("tool_result", map[string]string{"call_id": call.ID, "name": call.Function.Name, "content": result})
 				appendToolResult(s, result, call.Function.Name, level)
@@ -350,6 +351,10 @@ func outputMarker(toolName string) string {
 		return "[shell] "
 	case toolName == "git":
 		return "[git] "
+	case strings.HasPrefix(toolName, "notion_"):
+		return "[notion] "
+	case toolName == "github_tasks":
+		return "[github] "
 	default:
 		return ""
 	}
@@ -361,19 +366,51 @@ func appendToolResult(s *tui.Session, result, toolName string, level int) {
 		return
 	}
 
-	role := tui.RoleToolFS
-	switch toolName {
-	case "git":
-		role = tui.RoleToolGit
-	case "shell":
-		role = tui.RoleToolShell
-	}
-	s.Log().Append(tui.Row{
+	role := toolRoleForName(toolName)
+	s.Log().ReplaceToolStatus(tui.Row{
 		Kind:  tui.KindTool,
 		Level: level,
 		Text:  result,
 		Spans: []tui.Span{{Start: 0, End: len(marker), Role: role}},
 	})
+}
+
+func appendToolActivity(s *tui.Session, call openrouter.ToolCall, level int) {
+	text := toolActivity(call)
+	if text == "" {
+		return
+	}
+	s.Log().ReplaceToolStatus(tui.Row{
+		Kind:  tui.KindTool,
+		Level: level,
+		Text:  text,
+		Spans: []tui.Span{{Start: 0, End: len(outputMarker(call.Function.Name)), Role: toolRoleForName(call.Function.Name)}},
+	})
+}
+
+func toolActivity(call openrouter.ToolCall) string {
+	marker := outputMarker(call.Function.Name)
+	if marker == "" {
+		return ""
+	}
+	args := strings.TrimSpace(call.Function.Arguments)
+	if args == "" || args == "{}" {
+		return marker + call.Function.Name
+	}
+	return marker + call.Function.Name + " " + args
+}
+
+func toolRoleForName(toolName string) tui.Role {
+	switch toolName {
+	case "read_file", "write_file", "list_dir":
+		return tui.RoleToolFS
+	case "git":
+		return tui.RoleToolGit
+	case "shell":
+		return tui.RoleToolShell
+	default:
+		return tui.RoleNotice
+	}
 }
 
 // runTool finds the tool a call named and runs it, refreshing the approval mode each
