@@ -393,10 +393,27 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 				// landed on the wrong row and clobbered it. A resize has nothing to type
 				// into the editor, so a full control-block redraw against the new width
 				// is the only thing it should ever cause.
-				if !sessionRunning(l.session) {
-					controlRows = lineControls(out, l, cols(), controlRows)
-					promptRows = 0
+				//
+				// A turn in flight is not a reason to skip this. renderLiveRows always
+				// measures the live rows' own wrapping against cols() fresh on every
+				// tick, but it still trusts controlRows - the height of the block
+				// above it - to say how far to jump. A resize mid-turn (dragging a
+				// GUI terminal window while a reply streams, which is exactly what
+				// happens in ordinary use) leaves controlRows pinned to the width it
+				// was last drawn at while every live-row redraw after it measures
+				// against the new one, and that mismatch does not correct itself: it
+				// compounds on every single tick for as long as the turn keeps
+				// streaming, which is what a growing diagonal staircase of
+				// single-character rows turns out to be. Clearing the live region at
+				// its old position before redrawing the control block, so the next
+				// tick's renderLiveRows starts clean at the new one, is what keeps a
+				// resize from ever being more than a one-time, self-correcting jump.
+				if sessionRunning(l.session) {
+					clearLiveRows(out, liveRows, controlRows)
+					liveRows = 0
 				}
+				controlRows = lineControls(out, l, cols(), controlRows)
+				promptRows = 0
 				continue
 			default:
 				// An event this loop has no reaction to. Falling through to the
