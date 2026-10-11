@@ -448,39 +448,28 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		input = input[len(input)-backlog:]
 	}
 	logRows := backlog - len(input) + 1
-	end := len(f.log) - f.scroll
+	latestResponse := latestResponseID(f.log)
+	physical := make([]Row, 0, len(f.log))
+	for i := 0; i < len(f.log); i++ {
+		// The response marker occupies part of the terminal width. Apply it
+		// before folding so a wrapped response line leaves room for its marker
+		// instead of being wrapped to the full width and truncated afterward.
+		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
+		lines := foldRowLines(marked, width)
+		physical = append(physical, lines...)
+	}
+	end := len(physical) - f.scroll
 	if end < 0 {
 		end = 0
 	}
-	if end > len(f.log) {
-		end = len(f.log)
+	if end > len(physical) {
+		end = len(physical)
 	}
-	// shown is oldest first, in physical lines rather than log rows: a row with a
-	// line break of its own folds into more than one entry here, each still
-	// counted against backlog the way a single-line row always was. f.scroll
-	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
-	// untouched) - only how many physical lines one row costs changes.
-	// Collect physical lines from the live edge backward. Selecting a starting log row
-	// first would let a wrapped older row consume the pane before the newest stream data
-	// was reached. Reverse the collected lines before drawing so the pane still reads
-	// oldest-to-newest from top to bottom.
-	newestFirst := make([]Row, 0, logRows)
-	for i := end - 1; i >= 0; i-- {
-		lines := foldRowLines(PlainRow(f.log[i]), width)
-		for j := len(lines) - 1; j >= 0; j-- {
-			newestFirst = append(newestFirst, lines[j])
-			if len(newestFirst) >= logRows {
-				break
-			}
-		}
-		if len(newestFirst) >= logRows {
-			break
-		}
+	start := end - logRows
+	if start < 0 {
+		start = 0
 	}
-	shown := make([]Row, len(newestFirst))
-	for i, row := range newestFirst {
-		shown[len(newestFirst)-1-i] = row
-	}
+	shown := physical[start:end]
 	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
 		at := i
@@ -523,6 +512,35 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	f.drawBarTwo(screen, x, y+barTwoRow, width, chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
 		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+func latestResponseID(rows []Row) int {
+	latest := 0
+	for _, row := range rows {
+		if row.ResponseID > latest {
+			latest = row.ResponseID
+		}
+	}
+	return latest
+}
+
+func withResponseMarker(row Row, latest int) Row {
+	if row.ResponseID == 0 || latest == 0 {
+		return row
+	}
+	n := latest - row.ResponseID + 1
+	marker := "[" + strconv.Itoa(n)
+	if row.ResponseSub > 0 {
+		marker += "," + strconv.Itoa(row.ResponseSub)
+	}
+	marker += "] "
+	shift := len(marker)
+	for i := range row.Spans {
+		row.Spans[i].Start += shift
+		row.Spans[i].End += shift
+	}
+	row.Text = marker + row.Text
+	return row
 }
 
 // paneBarStyle picks the style the pane bar draws in: a configured colour for
@@ -784,7 +802,7 @@ func foldRowLines(row Row, width int) []Row {
 		offset := 0
 		for i, text := range lines {
 			start, end := offset, offset+len(text)
-			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID}
+			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub}
 			offset = end + 1 // +1 skips the '\n' this line was split on.
 		}
 	}
@@ -855,12 +873,12 @@ func wrapRowLine(row Row, width int) []Row {
 	for {
 		cut := wrapCut(text, width)
 		if cut >= len(text) {
-			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
+			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub})
 			break
 		}
 
 		piece := text[:cut]
-		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
+		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub})
 
 		rest := text[cut:]
 		trimmed := strings.TrimLeft(rest, " ")

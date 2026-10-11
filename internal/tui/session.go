@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -218,10 +219,13 @@ type Session struct {
 	// of its own.
 	history History
 
-	mu     sync.RWMutex
-	usage  UsageMetrics
-	state  State
-	detail string
+	mu              sync.RWMutex
+	responses       []responseRecord
+	activeResponses map[int]int
+	nextResponseID  int
+	usage           UsageMetrics
+	state           State
+	detail          string
 
 	// cancel stops the turn now in flight, or is nil when there is none.
 	//
@@ -304,6 +308,11 @@ type Session struct {
 	// of it, and a channel read for that would either block or require a
 	// select with a default on every repaint.
 	queue []string
+}
+
+type responseRecord struct {
+	id   int
+	text string
 }
 
 // UsageMetrics is the accounting reported by the active provider streams.
@@ -419,7 +428,7 @@ const breakDuration = 2 * time.Minute
 // log above them (see the package doc comment) - rather than the pre-redesign
 // description of a bare log, which stopped being true once the frame returned.
 func New(opts Options) *Session {
-	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now(), history: NewHistory()}
+	s := &Session{opts: opts, state: StateIdle, levels: newLevels(), lastBreak: time.Now(), history: NewHistory(), activeResponses: make(map[int]int)}
 	s.log.Append(Row{
 		Kind:  KindNotice,
 		Level: 0,
@@ -775,7 +784,13 @@ func (s *Session) StopTurn() context.CancelFunc {
 func (s *Session) ScrollUp(n int) {
 	s.mu.Lock()
 	s.scroll += n
-	if max := s.log.Len(); s.scroll > max {
+	max := s.log.Len()
+	for _, response := range s.responses {
+		if lines := strings.Count(response.text, "\n") + 1; lines > 1 {
+			max += lines - 1
+		}
+	}
+	if s.scroll > max {
 		s.scroll = max
 	}
 	s.mu.Unlock()
@@ -847,6 +862,28 @@ func (s *Session) Restore(rows []Row) {
 	s.log.Restore(rows)
 
 	s.mu.Lock()
+	s.responses = nil
+	s.activeResponses = make(map[int]int)
+	s.nextResponseID = 0
+	for _, row := range rows {
+		if row.ResponseID == 0 {
+			continue
+		}
+		if row.ResponseID > s.nextResponseID {
+			s.nextResponseID = row.ResponseID
+		}
+		found := false
+		for i := range s.responses {
+			if s.responses[i].id == row.ResponseID {
+				s.responses[i].text += "\n" + row.Text
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.responses = append(s.responses, responseRecord{id: row.ResponseID, text: row.Text})
+		}
+	}
 	s.scroll = 0
 	s.mu.Unlock()
 }
@@ -964,7 +1001,206 @@ func (s *Session) Deliver(text string, level int) {
 		s.SetState(StateWorking, "")
 	}
 
-	s.log.Append(Row{Kind: KindReply, Level: level, Text: text, Spans: ParseMarkdown(text)})
+	s.FinishDelta(level)
+	s.appendResponse(text, level)
+}
+
+// DeliverDelta records one delta as a response. It remains the direct primitive
+// used by callers that already have complete response fragments.
+func (s *Session) DeliverDelta(text string, level int) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	s.nextResponseID++
+	id := s.nextResponseID
+	s.responses = append(s.responses, responseRecord{id: id, text: text})
+	s.mu.Unlock()
+	s.replaceResponseRows(id, text, level)
+	s.mu.Lock()
+	working := s.state == StateThinking
+	s.mu.Unlock()
+	if working {
+		s.SetState(StateWorking, "")
+	}
+}
+
+// DeliverStreamDelta appends streamed text to one live response block. Providers
+// commonly send one token per event, so an event is never a row of its own. The
+// complete response stays under one response ID; newline folding and visual
+// wrapping happen when the frame draws it while the visible block is replaced
+// atomically as more text arrives.
+func (s *Session) DeliverStreamDelta(text string, level int) {
+	if text == "" {
+		return
+	}
+
+	s.mu.Lock()
+	if s.activeResponses == nil {
+		s.activeResponses = make(map[int]int)
+	}
+	id, ok := s.activeResponses[level]
+	if !ok {
+		s.nextResponseID++
+		id = s.nextResponseID
+		s.responses = append(s.responses, responseRecord{id: id})
+		s.activeResponses[level] = id
+	}
+	position := len(s.responses) - 1
+	for i := range s.responses {
+		if s.responses[i].id == id {
+			position = i
+			break
+		}
+	}
+	combined := s.responses[position].text + text
+	s.responses[position].text = combined
+	s.mu.Unlock()
+	s.replaceResponseRows(id, combined, level)
+
+	s.mu.Lock()
+	working := s.state == StateThinking
+	s.mu.Unlock()
+	if working {
+		s.SetState(StateWorking, "")
+	}
+}
+
+// FinishDelta closes the current streamed response block for level. It is called after a
+// provider stream ends so a final line without a trailing newline remains
+// addressable by /copy.
+func (s *Session) FinishDelta(level int) {
+	s.mu.Lock()
+	id, ok := s.activeResponses[level]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	var text string
+	for _, response := range s.responses {
+		if response.id == id {
+			text = response.text
+			break
+		}
+	}
+	delete(s.activeResponses, level)
+	s.mu.Unlock()
+	if text != "" {
+		s.replaceResponseRows(id, text, level)
+	}
+}
+
+func (s *Session) finishResponse(id int, text string, level int) {
+	s.mu.Lock()
+	for i := range s.responses {
+		if s.responses[i].id == id {
+			s.responses[i].text = text
+			break
+		}
+	}
+	s.mu.Unlock()
+	s.replaceResponseRows(id, text, level)
+}
+
+func (s *Session) replaceResponseRows(id int, text string, level int) {
+	parts := responseParts(text)
+	rows := make([]Row, 0, len(parts))
+	for _, part := range parts {
+		rows = append(rows, Row{Kind: KindReply, Level: level, Text: part.text, Spans: ParseMarkdown(part.text), ResponseID: id, ResponseSub: part.sub})
+	}
+	if len(rows) > 0 {
+		s.log.ReplaceResponse(id, rows)
+	}
+}
+
+func (s *Session) appendResponse(text string, level int) {
+	s.mu.Lock()
+	s.nextResponseID++
+	id := s.nextResponseID
+	s.responses = append(s.responses, responseRecord{id: id, text: text})
+	s.mu.Unlock()
+	for _, part := range responseParts(text) {
+		s.log.Append(Row{Kind: KindReply, Level: level, Text: part.text, Spans: ParseMarkdown(part.text), ResponseID: id, ResponseSub: part.sub})
+	}
+}
+
+type responsePart struct {
+	text string
+	sub  int
+}
+
+func responseParts(text string) []responsePart {
+	parts := make([]responsePart, 0, 2)
+	sub := 0
+	for {
+		start := strings.Index(text, "```")
+		if start < 0 {
+			if text != "" {
+				parts = append(parts, responsePart{text: text, sub: 0})
+			}
+			break
+		}
+		before := strings.TrimSuffix(text[:start], "\n")
+		if before != "" {
+			parts = append(parts, responsePart{text: before, sub: 0})
+		}
+		end := strings.Index(text[start+3:], "```")
+		if end < 0 {
+			parts = append(parts, responsePart{text: text[start:], sub: sub + 1})
+			break
+		}
+		end += start + 3
+		sub++
+		parts = append(parts, responsePart{text: text[start : end+3], sub: sub})
+		text = strings.TrimPrefix(text[end+3:], "\n")
+	}
+	return parts
+}
+
+// CopyResponse returns a streamed response by its incrementing reply number.
+// Reply numbers are one-based in creation order; zero is a convenience alias
+// for the newest reply. A positive sub selects that response's fenced text
+// block, including its delimiters.
+func (s *Session) CopyResponse(index, sub int) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.responses) == 0 || index < 0 || index > len(s.responses) {
+		return "", false
+	}
+	position := len(s.responses) - 1
+	if index > 0 {
+		position = index - 1
+	}
+	if position < 0 {
+		return "", false
+	}
+	text := s.responses[position].text
+	if sub == 0 {
+		return text, true
+	}
+	blocks := fencedBlocks(text)
+	if sub > len(blocks) {
+		return "", false
+	}
+	return blocks[sub-1], true
+}
+
+func fencedBlocks(text string) []string {
+	var blocks []string
+	for {
+		start := strings.Index(text, "```")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(text[start+3:], "```")
+		if end < 0 {
+			break
+		}
+		end += start + 3
+		blocks = append(blocks, text[start:end+3])
+		text = text[end+3:]
+	}
+	return blocks
 }
 
 // Notice records a message from the client: a refusal, a failure, a milestone.

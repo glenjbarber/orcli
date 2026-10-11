@@ -91,6 +91,13 @@ type Row struct {
 	// is being refreshed in place. Empty IDs retain the marker-based behavior used
 	// by restored and manually constructed rows.
 	ToolID string
+
+	// ResponseID identifies a streamed response fragment for the copy buffer.
+	// Zero means the row is not a response fragment.
+	ResponseID int
+
+	// ResponseSub identifies a fenced sub-response within ResponseID.
+	ResponseSub int
 }
 
 // RowKind labels what a row is, for the marker and the role beside it.
@@ -218,6 +225,37 @@ func (l *Log) ReplaceToolStatus(row Row) int {
 		l.folded += over
 	}
 	return len(l.rows) - 1
+}
+
+// ReplaceResponse replaces rows for a streamed response, or appends them when
+// the response has not reached the log yet. A provider may update the current
+// line many times as token deltas arrive; doing this under one lock keeps a
+// repaint from observing half of an update.
+func (l *Log) ReplaceResponse(responseID int, rows []Row) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	first := -1
+	last := -1
+	for i, row := range l.rows {
+		if row.ResponseID != responseID {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i
+	}
+	if first < 0 {
+		l.rows = append(l.rows, rows...)
+		if over := len(l.rows) - LogBound; over > 0 {
+			l.rows = append(l.rows[:0], l.rows[over:]...)
+			l.folded += over
+		}
+		return len(l.rows) - len(rows)
+	}
+	l.rows = append(l.rows[:first], append(append([]Row(nil), rows...), l.rows[last+1:]...)...)
+	return first
 }
 
 func toolStatusKey(row Row) string {

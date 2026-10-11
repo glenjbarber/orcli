@@ -164,6 +164,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 			var reason string
 			var finished bool
 			var failed error
+			deltaCount := 0
 			capture.record("request", map[string]any{"model": model, "messages": messages, "tools": schemas})
 
 			err := c.Chat(turnCtx, openrouter.Request{
@@ -176,6 +177,9 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 				switch e.Kind {
 				case openrouter.EventDelta:
 					reply.WriteString(e.Text)
+					deltaCount++
+					deliverDelta := s.DeliverStreamDelta
+					deliverDelta(e.Text, level)
 					capture.record("assistant_delta", e.Text)
 
 				case openrouter.EventTool:
@@ -212,7 +216,9 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 					// failure is reported beside it, since the text is usually
 					// more useful than the error alone and a reader handed only
 					// an error has nothing to read.
-					deliver(reply.String(), level)
+					if deltaCount == 0 {
+						deliver(reply.String(), level)
+					}
 					if e.Err != nil {
 						capture.record("stream_error", e.Err.Error())
 						notice(e.Err.Error(), level, tui.RoleFailure)
@@ -225,6 +231,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 					capture.record("finish", map[string]any{"reason": reason, "finished": finished})
 				}
 			})
+			s.FinishDelta(level)
 			if err != nil {
 				capture.record("request_error", err.Error())
 				notice(err.Error(), level, tui.RoleFailure)
@@ -239,7 +246,9 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 			if len(calls) == 0 {
 				// Deliver is a no-op for an empty reply, so a turn that failed
 				// before any text does not write a blank row.
-				deliver(reply.String(), level)
+				if deltaCount == 0 {
+					deliver(reply.String(), level)
+				}
 				finishedFn(reason)
 
 				// A reply with text in it is the confirmation, and an empty one
