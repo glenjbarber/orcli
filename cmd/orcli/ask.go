@@ -267,7 +267,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 				appendToolActivity(s, call, level)
 				result := runTool(toolset, approval, call)
 				capture.record("tool_result", map[string]string{"call_id": call.ID, "name": call.Function.Name, "content": result})
-				appendToolResult(s, result, call.Function.Name, level)
+				appendToolResult(s, result, call.Function.Name, call.ID, level)
 				messages = append(messages, openrouter.Message{
 					Role:       "tool",
 					ToolCallID: call.ID,
@@ -360,7 +360,7 @@ func outputMarker(toolName string) string {
 	}
 }
 
-func appendToolResult(s *tui.Session, result, toolName string, level int) {
+func appendToolResult(s *tui.Session, result, toolName, toolID string, level int) {
 	marker := outputMarker(toolName)
 	if marker == "" || result == "" {
 		return
@@ -368,10 +368,11 @@ func appendToolResult(s *tui.Session, result, toolName string, level int) {
 
 	role := toolRoleForName(toolName)
 	s.Log().ReplaceToolStatus(tui.Row{
-		Kind:  tui.KindTool,
-		Level: level,
-		Text:  result,
-		Spans: []tui.Span{{Start: 0, End: len(marker), Role: role}},
+		Kind:   tui.KindTool,
+		Level:  level,
+		ToolID: toolID,
+		Text:   result,
+		Spans:  []tui.Span{{Start: 0, End: len(marker), Role: role}},
 	})
 }
 
@@ -381,10 +382,11 @@ func appendToolActivity(s *tui.Session, call openrouter.ToolCall, level int) {
 		return
 	}
 	s.Log().ReplaceToolStatus(tui.Row{
-		Kind:  tui.KindTool,
-		Level: level,
-		Text:  text,
-		Spans: []tui.Span{{Start: 0, End: len(outputMarker(call.Function.Name)), Role: toolRoleForName(call.Function.Name)}},
+		Kind:   tui.KindTool,
+		Level:  level,
+		ToolID: call.ID,
+		Text:   text,
+		Spans:  []tui.Span{{Start: 0, End: len(outputMarker(call.Function.Name)), Role: toolRoleForName(call.Function.Name)}},
 	})
 }
 
@@ -397,7 +399,12 @@ func toolActivity(call openrouter.ToolCall) string {
 	if args == "" || args == "{}" {
 		return marker + call.Function.Name
 	}
-	return marker + call.Function.Name + " " + args
+	text := marker + call.Function.Name + " " + args
+	const maxActivityRunes = 180
+	if len([]rune(text)) > maxActivityRunes {
+		text = string([]rune(text)[:maxActivityRunes-1]) + "…"
+	}
+	return text
 }
 
 func toolRoleForName(toolName string) tui.Role {

@@ -85,6 +85,12 @@ type Row struct {
 	// start of a sentence as easily as the client can, and a guess from the text
 	// would colour a sentence the model chose that way.
 	Kind RowKind
+
+	// ToolID identifies the tool call whose live status this row represents. It is
+	// intentionally not part of saved transcript data: it only exists while a call
+	// is being refreshed in place. Empty IDs retain the marker-based behavior used
+	// by restored and manually constructed rows.
+	ToolID string
 }
 
 // RowKind labels what a row is, for the marker and the role beside it.
@@ -199,7 +205,7 @@ func (l *Log) ReplaceToolStatus(row Row) int {
 
 	for i := len(l.rows) - 1; i >= 0; i-- {
 		old := l.rows[i]
-		if old.Kind != KindTool || old.Level != row.Level || toolStatusKey(old) != toolStatusKey(row) {
+		if old.Kind != KindTool || old.Level != row.Level || !sameToolStatus(old, row) {
 			continue
 		}
 		l.rows[i] = row
@@ -221,6 +227,13 @@ func toolStatusKey(row Row) string {
 		}
 	}
 	return string(rune(toolRole(row)))
+}
+
+func sameToolStatus(old, next Row) bool {
+	if old.ToolID != "" || next.ToolID != "" {
+		return old.ToolID != "" && old.ToolID == next.ToolID
+	}
+	return toolStatusKey(old) == toolStatusKey(next)
 }
 
 func toolRole(row Row) Role {
