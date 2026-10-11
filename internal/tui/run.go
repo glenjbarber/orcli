@@ -654,9 +654,14 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	prefix, figureText, suffix := renderBarOne(status)
 	bar1 := prefix + figureText + suffix
 	bar2 := renderBarTwo(status)
+	ruleWidth := cols
+	if ruleWidth < 0 {
+		ruleWidth = 0
+	}
+	rule := strings.Repeat("─", ruleWidth)
 	promptLine := Prompt + l.session.Editor().Text()
 	rows := wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
-		wrappedRows(bar1, cols) + wrappedRows(bar2, cols)
+		wrappedRows(bar1, cols) + wrappedRows(bar2, cols) + wrappedRows(rule, cols)
 	// "\r\n" between segments, not a bare "\n": this raw-mode screen does not
 	// translate a line feed into a carriage return, so each later segment would
 	// otherwise start at whatever column the one before it ended on rather than
@@ -671,7 +676,12 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	// the row after it, is exactly this - would otherwise still show whatever
 	// that longer previous draw left on it, merely overwritten at the front by
 	// however much of it the new, shorter content reaches.
-	fmt.Fprintf(out, "\r\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", promptLine, bar1, bar2)
+	//
+	// The rule after bar2 gives the control block a visible bottom edge, so the
+	// reader can tell at a glance where the status panes end and the live or
+	// completed output below them begins, rather than the two blending into one
+	// scrolling wall of text.
+	fmt.Fprintf(out, "\r\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", promptLine, bar1, bar2, rule)
 	total := rows
 	for total < prevRows {
 		fmt.Fprint(out, "\r\x1b[2K\n")
