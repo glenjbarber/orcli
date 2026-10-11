@@ -32,6 +32,11 @@ var ErrNoAPIKey = errors.New("openrouter: no API key configured")
 // transport bound read from the configuration would be the first edge across.
 const retryBound = 6
 
+// chatTimeout bounds one complete chat request, including rate-limit waiting,
+// retries, connection setup, and streaming the response. A provider that stops
+// sending bytes must not leave the reader's turn running forever.
+const chatTimeout = 2 * time.Minute
+
 // retryWait is the first pause between attempts. Each pause after it is twice the
 // one before.
 //
@@ -196,6 +201,11 @@ func (c *Client) Chat(ctx context.Context, req Request, onEvent func(Event)) err
 	if c.apiKey == "" {
 		return ErrNoAPIKey
 	}
+
+	// Keep the caller's cancellation behavior while adding a deadline for a
+	// provider or network path that never answers or stops streaming.
+	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
+	defer cancel()
 
 	// ---------------------------------------------------------------
 	// Rate‑limit guard (free‑tier 20‑requests‑per‑minute)

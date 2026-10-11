@@ -266,6 +266,7 @@ func askWithTaskIntegrations(s *tui.Session, c chatClient, attribution string, c
 			for _, call := range calls {
 				result := runTool(toolset, approval, call)
 				capture.record("tool_result", map[string]string{"call_id": call.ID, "name": call.Function.Name, "content": result})
+				appendToolResult(s, result, call.Function.Name, level)
 				messages = append(messages, openrouter.Message{
 					Role:       "tool",
 					ToolCallID: call.ID,
@@ -340,6 +341,41 @@ func toolSchemas(toolset []tools.Tool) []openrouter.Tool {
 	return schemas
 }
 
+// outputMarker returns the marker prefix for a tool name, or "" if none.
+func outputMarker(toolName string) string {
+	switch {
+	case toolName == "read_file" || toolName == "write_file" || toolName == "list_dir":
+		return "[fs] "
+	case toolName == "shell":
+		return "[shell] "
+	case toolName == "git":
+		return "[git] "
+	default:
+		return ""
+	}
+}
+
+func appendToolResult(s *tui.Session, result, toolName string, level int) {
+	marker := outputMarker(toolName)
+	if marker == "" || result == "" {
+		return
+	}
+
+	role := tui.RoleToolFS
+	switch toolName {
+	case "git":
+		role = tui.RoleToolGit
+	case "shell":
+		role = tui.RoleToolShell
+	}
+	s.Log().Append(tui.Row{
+		Kind:  tui.KindTool,
+		Level: level,
+		Text:  result,
+		Spans: []tui.Span{{Start: 0, End: len(marker), Role: role}},
+	})
+}
+
 // runTool finds the tool a call named and runs it, refreshing the approval mode each
 // call rather than once at construction, since `/approval` can change it between
 // turns and a tool built at startup would otherwise answer to a mode the reader left
@@ -365,9 +401,9 @@ func runTool(toolset []tools.Tool, approval string, call openrouter.ToolCall) st
 		}
 		result := t.Run(json.RawMessage(call.Function.Arguments))
 		if result.Err != nil {
-			return result.Err.Error()
+			return outputMarker(call.Function.Name) + result.Err.Error()
 		}
-		return result.Content
+		return outputMarker(call.Function.Name) + result.Content
 	}
 	return fmt.Sprintf("tools: no tool named %q", call.Function.Name)
 }
