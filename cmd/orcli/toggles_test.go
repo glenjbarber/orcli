@@ -105,15 +105,15 @@ func TestPSTogglesToolOutput(t *testing.T) {
 
 func TestUpAndDownMoveOutputViewportWithoutWritingRows(t *testing.T) {
 	d := togglesDispatcher(t)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 20; i++ {
 		d.session.Log().Append(tui.Row{Text: fmt.Sprintf("row %d", i)})
 	}
 	before := d.session.Log().Len()
 	if _, err := d.Run(context.Background(), "/up"); err != nil {
 		t.Fatalf("/up: %v", err)
 	}
-	if got := d.session.ScrollOffset(); got != 1 {
-		t.Fatalf("scroll offset after /up = %d, want 1", got)
+	if got := d.session.ScrollOffset(); got != 15 {
+		t.Fatalf("scroll offset after /up = %d, want 15", got)
 	}
 	if got := d.session.Log().Len(); got != before {
 		t.Fatalf("/up changed log length to %d, want %d", got, before)

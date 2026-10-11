@@ -18,7 +18,7 @@ func hue(h float64) int {
 }
 
 // TestScrollbackGrowsWithHeight covers the layout loreloom/UI-redesign.md settled: a
-// terminal taller than the four fixed rows (prompt, blank, two status bars) gives every
+// terminal taller than the six fixed rows (prompt, two blanks, two status bars, pane bar) gives every
 // row beyond them to scrollback, rather than to a fixed field count.
 func TestScrollbackGrowsWithHeight(t *testing.T) {
 	for _, height := range []int{barRows, barRows + 1, 20, 40} {
@@ -56,23 +56,22 @@ func TestAShortTerminalStillDrawsThePrompt(t *testing.T) {
 }
 
 // TestTheSheddingLadderDropsInGlensOrder covers the actual order a short terminal sheds
-// rows in: blank line first (never seen below barRows anyway), then the pane bar, then
-// bar two, then bar one, with the prompt surviving every height.
+// rows in: the two blank lines first, then the pane bar, then bar two, then bar one,
+// with the prompt surviving every height.
 func TestTheSheddingLadderDropsInGlensOrder(t *testing.T) {
 	var s Status
 	s[fieldPane] = "main"
 
-	// Height 4: blank is already gone (nothing shows it directly); bar one, bar two,
-	// and the pane bar all still show.
+	// Height 4: the pane and bar two are shed; bar one remains below the blanks.
 	screen := drawSimulationFrame(t, 4, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
-	if got := rowAt(screen, 3); got != "main" {
-		t.Errorf("at height 4 the pane bar is %q, want %q", got, "main")
+	if got := rowAt(screen, 3); got == "main" || strings.Contains(got, "openrouter") {
+		t.Errorf("at height 4 lower fixed rows should be shed, but row 3 is %q", got)
 	}
 
-	// Height 3: the pane bar is shed; bar two is now the last row.
+	// Height 3: bar one is shed; only the prompt and two blanks remain.
 	screen = drawSimulationFrame(t, 3, 40, Bar{Status: s, Field: "hi"}, nil, plainPalette())
-	if got := rowAt(screen, 2); !strings.Contains(got, "openrouter") && got == "main" {
-		t.Errorf("at height 3 the pane bar should be shed, but row 2 is %q", got)
+	if got := rowAt(screen, 2); got == "main" || strings.Contains(got, "openrouter") {
+		t.Errorf("at height 3 bar one should be shed, but row 2 is %q", got)
 	}
 
 	// Height 2: bar two is also shed; only the prompt and bar one remain.
@@ -321,14 +320,17 @@ func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	}
 	live.SetSize(width, 20)
 	frame.Draw(live)
-	if got := rowAt(live, 0); got != "row 15" {
-		t.Errorf("at the live edge the first output row is %q, want row 15", got)
+	if got := rowAt(live, 0); got != "row 16" {
+		t.Errorf("at the live edge the first output row is %q, want row 16", got)
 	}
-	if strings.Contains(rowAt(live, promptRow+3), "hostname:") || strings.Contains(rowAt(live, promptRow+3), "cost:") {
-		t.Errorf("bar two fields are %q, want cost and hostname moved to bar one", rowAt(live, promptRow+3))
+	if strings.Contains(rowAt(live, promptRow+4), "hostname:") || strings.Contains(rowAt(live, promptRow+4), "cost:") {
+		t.Errorf("bar two fields are %q, want cost and hostname moved to bar one", rowAt(live, promptRow+4))
 	}
-	if !strings.Contains(rowAt(live, promptRow+2), "cost:") || !strings.Contains(rowAt(live, promptRow+2), "hostname:") || !strings.Contains(rowAt(live, promptRow+2), "in:") || !strings.Contains(rowAt(live, promptRow+2), "out:") {
-		t.Errorf("bar one fields are %q, want cost, hostname, input, and output tokens", rowAt(live, promptRow+2))
+	if strings.Contains(rowAt(live, promptRow+4), "[scroll]") {
+		t.Errorf("live bar two unexpectedly shows scroll marker: %q", rowAt(live, promptRow+4))
+	}
+	if !strings.Contains(rowAt(live, promptRow+3), "cost:") || !strings.Contains(rowAt(live, promptRow+3), "hostname:") || !strings.Contains(rowAt(live, promptRow+3), "in:") || !strings.Contains(rowAt(live, promptRow+3), "out:") {
+		t.Errorf("bar one fields are %q, want cost, hostname, input, and output tokens", rowAt(live, promptRow+3))
 	}
 
 	frame.SetScroll(3)
@@ -338,11 +340,14 @@ func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	}
 	back.SetSize(width, 20)
 	frame.Draw(back)
-	if got := rowAt(back, 0); got != "row 12" {
-		t.Errorf("scrolled back 3, the first output row is %q, want row 12", got)
+	if got := rowAt(back, 0); got != "row 13" {
+		t.Errorf("scrolled back 3, the first output row is %q, want row 13", got)
 	}
-	if strings.Contains(rowAt(back, promptRow+3), "hostname:") || strings.Contains(rowAt(back, promptRow+3), "cost:") {
-		t.Errorf("bar two changed while scrolling: %q", rowAt(back, promptRow+3))
+	if strings.Contains(rowAt(back, promptRow+4), "hostname:") || strings.Contains(rowAt(back, promptRow+4), "cost:") {
+		t.Errorf("bar two changed while scrolling: %q", rowAt(back, promptRow+4))
+	}
+	if !strings.Contains(rowAt(back, promptRow+4), "[scroll]") {
+		t.Errorf("scrolled bar two lacks scroll marker: %q", rowAt(back, promptRow+4))
 	}
 }
 
@@ -416,7 +421,7 @@ func TestThePaneBarIsItsOwnRowBelowBarTwo(t *testing.T) {
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, plainPalette())
 	promptRow := scrollbackRows(20)
 
-	if got := rowAt(screen, promptRow+4); got != "main" {
+	if got := rowAt(screen, promptRow+5); got != "main" {
 		t.Errorf("the pane bar is %q, want %q", got, "main")
 	}
 }
@@ -435,7 +440,7 @@ func TestThePaneBarDrawsTheConfiguredPaneColour(t *testing.T) {
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
 	promptRow := scrollbackRows(20)
 
-	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+5)
 	gotFG, _, _ := gotStyle.Decompose()
 	if gotFG != active.TCellColor() {
 		t.Errorf("the pane bar's foreground is %v, want the configured active colour %v",
@@ -455,7 +460,7 @@ func TestThePaneBarDrawsChromeWithNoWorkerState(t *testing.T) {
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, nil, p)
 	promptRow := scrollbackRows(20)
 
-	_, _, gotStyle, _ := screen.GetContent(0, promptRow+4)
+	_, _, gotStyle, _ := screen.GetContent(0, promptRow+5)
 	gotFG, _, _ := gotStyle.Decompose()
 	wantFG, _, _ := frameStyle(p, RoleChrome).Decompose()
 	if gotFG != wantFG {

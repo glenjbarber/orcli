@@ -67,7 +67,7 @@ func TestFrameDrawsCellsAndPlacesPromptCaret(t *testing.T) {
 	}
 }
 
-// TestFrameAppliesRowRoleStyle uses one row of scrollback above the four fixed rows, so
+// TestFrameAppliesRowRoleStyle uses one row of scrollback above the six fixed rows, so
 // the single log row lands at the top of the screen, full width, with no field column.
 func TestFrameAppliesRowRoleStyle(t *testing.T) {
 	screen := tcell.NewSimulationScreen("UTF-8")
@@ -103,7 +103,7 @@ func TestFrameSweepsTheFigureAsCellStyles(t *testing.T) {
 	frame.SetSweepStep(0)
 	frame.Draw(screen)
 
-	barOneRow := scrollbackRows(20) + 2
+	barOneRow := scrollbackRows(20) + 3
 	prefix, _, _ := renderBarOne(bar.Status)
 	start := DisplayWidth(prefix)
 	_, _, first, _ := screen.GetContent(start, barOneRow)
@@ -142,7 +142,7 @@ func TestFrameDrawsAnIdleFigureInChromeNotSwept(t *testing.T) {
 	frame.SetSweepStep(3)
 	frame.Draw(screen)
 
-	barOneRow := scrollbackRows(20) + 2
+	barOneRow := scrollbackRows(20) + 3
 	prefix, _, _ := renderBarOne(bar.Status)
 	start := DisplayWidth(prefix)
 

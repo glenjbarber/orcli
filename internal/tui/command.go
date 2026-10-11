@@ -129,11 +129,11 @@ func init() {
 		},
 		{
 			Name:    "up",
-			Summary: "scroll the output pane up one row",
+			Summary: "scroll the output pane up 15 rows",
 		},
 		{
 			Name:    "down",
-			Summary: "scroll the output pane down one row",
+			Summary: "scroll the output pane down 15 rows",
 		},
 		{
 			Name:    "color",

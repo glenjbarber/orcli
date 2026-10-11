@@ -10,18 +10,17 @@ import (
 	"github.com/rivo/tview"
 )
 
-// The frame, as it is now: the program owns the screen, and the screen is five fixed rows
+// The frame, as it is now: the program owns the screen, and the screen is six fixed rows
 // below a scrollback that takes whatever height is left.
 //
 // Bottom to top: the pane bar, bar two (credits, context, autosave, stealth and
-// approval), bar one (the live,
-// fast-changing fields - state, the sweeping figure, queue depth; see
-// barOneFields/barTwoFields), one blank separator line, and the prompt - this order
-// confirmed by Glen (2026-10-06). Everything above those five rows is scrollback: the
+// approval), bar one (the live, fast-changing fields - state, the sweeping figure,
+// queue depth; see barOneFields/barTwoFields), two blank separator lines, and the prompt - this order
+// confirmed by Glen (2026-10-06). Everything above those six rows is scrollback: the
 // tail of the log at the top of the output pane, oldest row first and newest row last.
 // This is loreloom/UI-redesign.md's shape (2026-10-06) with one addition: that
 // document names only the prompt, blank line, and two bars, and Glen added the pane bar
-// as a fifth fixed row rather than cutting it (adr-0000019/0000020 are carried forward,
+// as a sixth fixed row rather than cutting it (adr-0000019/0000020 are carried forward,
 // not superseded). It is not the field-column-beside-every-log-row shape the ten ADRs
 // this does supersede (see staged/adr-index.txt) describe.
 //
@@ -58,17 +57,14 @@ import (
 // sign from the 2026-10-06 mockup is unchanged; this only adds the one before "root".
 const Prompt = " root@lolhost $ "
 
-// barRows is how many fixed rows sit below the scrollback: the prompt, one blank
-// separator line, the two status bars loreloom/UI-redesign.md describes, and the pane
-// bar. loreloom/UI-redesign.md itself names only four; Glen extended it to five
+// barRows is how many fixed rows sit below the scrollback: the prompt, two blank
+// separator lines, the two status bars loreloom/UI-redesign.md describes, and the pane
+// bar. loreloom/UI-redesign.md itself names only four; Glen extended it to six
 // (2026-10-06) to give the pane bar (adr-0000019/0000020) a row of its own rather than
 // cutting it, dropping it into bar two, or leaving it homeless.
 //
-// The separator line stays one row. Glen confirmed in this session (2026-10-07) that it
-// should carry two leading spaces rather than being left to the frame's own blank fill
-// (see Draw's separatorRow write); that is a change to what the row draws, not to how
-// many rows the stack has, so barRows is still five.
-const barRows = 5
+// The separator is kept as two rows above the top status bar.
+const barRows = 6
 
 // barOneFields and barTwoFields choose which Status fields render on each status bar.
 //
@@ -406,7 +402,7 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		return
 	}
 
-	// A terminal too short for the full stack sheds the blank line, then the pane bar,
+	// A terminal too short for the full stack sheds the blank lines, then the pane bar,
 	// then bar two, then bar one, in that order - Glen's shedding order (2026-10-06).
 	// The prompt always survives, since the reader is typing into it. Each surviving row
 	// draws top to bottom starting at the terminal's own first row, in their usual
@@ -418,16 +414,19 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		row++
 
 		if height >= 2 {
-			f.drawBarOne(screen, x, y+row, width, chrome)
+			drawCellText(screen, x, y+row, width, "  ", chrome)
 			row++
 		}
 		if height >= 3 {
-			f.drawBarTwo(screen, x, y+row, width, chrome)
+			drawCellText(screen, x, y+row, width, "  ", chrome)
 			row++
 		}
 		if height >= 4 {
-			drawCellText(screen, x, y+row, width, renderPaneBar(f.bar.Status, width),
-				paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+			f.drawBarOne(screen, x, y+row, width, chrome)
+			row++
+		}
+		if height >= 5 {
+			f.drawBarTwo(screen, x, y+row, width, chrome)
 		}
 		return
 	}
@@ -437,9 +436,10 @@ func (f *Frame) Draw(screen tcell.Screen) {
 		drawCellText(screen, x, y, width, Prompt+f.bar.Field, chrome)
 		f.showCaret(screen, x, y, width)
 		drawCellText(screen, x, y+1, width, "  ", chrome)
-		f.drawBarOne(screen, x, y+2, width, chrome)
-		f.drawBarTwo(screen, x, y+3, width, chrome)
-		drawCellText(screen, x, y+4, width, renderPaneBar(f.bar.Status, width),
+		drawCellText(screen, x, y+2, width, "  ", chrome)
+		f.drawBarOne(screen, x, y+3, width, chrome)
+		f.drawBarTwo(screen, x, y+4, width, chrome)
+		drawCellText(screen, x, y+5, width, renderPaneBar(f.bar.Status, width),
 			paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
 		return
 	}
@@ -500,23 +500,19 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	}
 	promptRow := backlog
 	separatorRow := backlog + 1
-	barOneRow := backlog + 2
-	barTwoRow := backlog + 3
-	paneBarRow := backlog + 4
+	separatorRowTwo := backlog + 2
+	barOneRow := backlog + 3
+	barTwoRow := backlog + 4
+	paneBarRow := backlog + 5
 
 	if len(input) == 0 {
 		drawCellText(screen, x, y+promptRow, width, Prompt, chrome)
 	}
 	f.showInputCaret(screen, x, y+logRows, width, input)
 
-	// The separator row between the prompt and bar one. It was left to the base clear
-	// above (every cell already a space) rather than drawn; Glen asked, in this session
-	// (2026-10-07), that it carry two spaces explicitly, matching the indent he asked for
-	// on the prompt row above it, rather than being blank only because nothing writes to
-	// it. Two spaces at a width of two or more look identical to the blank fill they
-	// replace - the row was already all spaces - so this is a deliberate row of content
-	// rather than a visible change.
+	// Keep two explicit blank rows between the prompt and the top status bar.
 	drawCellText(screen, x, y+separatorRow, width, "  ", chrome)
+	drawCellText(screen, x, y+separatorRowTwo, width, "  ", chrome)
 
 	f.drawBarOne(screen, x, y+barOneRow, width, chrome)
 
@@ -652,7 +648,7 @@ func renderBarOne(status Status) (prefix, figure, suffix string) {
 func renderBarTwo(status Status) string {
 	parts := make([]string, 0, len(barTwoFields))
 	for _, k := range barTwoFields {
-		parts = append(parts, fieldName(k)+":"+status[k])
+		parts = append(parts, statusFieldText(status, k, false))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -663,8 +659,8 @@ func renderBarTwo(status Status) string {
 func (f *Frame) drawBarTwo(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
 	leftFields := []int{fieldCredits, fieldContext}
 	rightFields := []int{fieldAutosave, fieldStealth, fieldApproval}
-	left := statusFieldsText(f.bar.Status, leftFields)
-	right := statusFieldsText(f.bar.Status, rightFields)
+	left := statusFieldsText(f.bar.Status, leftFields, f.scroll > 0)
+	right := statusFieldsText(f.bar.Status, rightFields, f.scroll > 0)
 	lw := DisplayWidth(left)
 	// The two runs each own one half of the row. The right run starts at the
 	// center even when its full text would not fit, so an overlong run can
@@ -684,16 +680,24 @@ func (f *Frame) drawBarTwo(screen tcell.Screen, x, y, width int, chrome tcell.St
 	drawCellText(screen, x+rightStart, y, width-rightStart, right, chrome)
 }
 
-func statusFieldsText(status Status, fields []int) string {
+func statusFieldsText(status Status, fields []int, scrolled bool) string {
 	parts := make([]string, 0, len(fields))
 	for _, field := range fields {
-		value := status[field]
-		if value == "" {
-			value = "unavailable"
-		}
-		parts = append(parts, fieldName(field)+":"+value)
+		parts = append(parts, statusFieldText(status, field, scrolled))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func statusFieldText(status Status, field int, scrolled bool) string {
+	value := status[field]
+	if value == "" {
+		value = "unavailable"
+	}
+	text := fieldName(field) + ":" + value
+	if field == fieldContext && scrolled {
+		text += " [scroll]"
+	}
+	return text
 }
 
 func sliceDisplayWidth(text string, start, width int) string {

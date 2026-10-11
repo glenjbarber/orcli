@@ -8,6 +8,8 @@ import (
 	"github.com/glenjbarber/orcli/internal/tui"
 )
 
+const outputScrollStep = 15
+
 // help is the handler for /help.
 //
 // It lists every name the completer would offer, which is Names rather than the raw
@@ -107,9 +109,9 @@ func (d *dispatcher) scrollOutput(args string, up bool) (tui.Result, error) {
 		return tui.Result{}, fmt.Errorf("scrolling takes no arguments")
 	}
 	if up {
-		d.session.ScrollUp(1)
+		d.session.ScrollUp(outputScrollStep)
 	} else {
-		d.session.ScrollDown(1)
+		d.session.ScrollDown(outputScrollStep)
 	}
 	return tui.Result{}, nil
 }
