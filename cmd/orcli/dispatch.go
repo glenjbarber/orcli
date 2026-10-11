@@ -199,6 +199,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"break": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.breakToggle(args)
 		},
+		"ps": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.ps(args)
+		},
 		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.color(args)
 		},

@@ -91,6 +91,10 @@ type Options struct {
 	// that construct Options with only BreakInterval.
 	BreakDisabled bool
 
+	// ToolOutputDisabled hides tool activity and results from the output pane
+	// without changing execution or the messages sent back to the model.
+	ToolOutputDisabled bool
+
 	// Mouse reports whether mouse reporting is on.
 	Mouse bool
 
@@ -491,6 +495,20 @@ func (s *Session) SetBreakEnabled(on bool) {
 	s.opts.BreakEnabled = on
 	s.opts.BreakDisabled = !on
 	s.mu.Unlock()
+}
+
+// SetToolOutputVisible controls whether tool activity and results are drawn.
+func (s *Session) SetToolOutputVisible(visible bool) {
+	s.mu.Lock()
+	s.opts.ToolOutputDisabled = !visible
+	s.mu.Unlock()
+}
+
+// ToolOutputVisible reports whether tool activity and results are shown.
+func (s *Session) ToolOutputVisible() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.opts.ToolOutputDisabled
 }
 
 // SetMouse changes whether mouse reporting is on.

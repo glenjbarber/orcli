@@ -85,6 +85,20 @@ func (d *dispatcher) breakToggle(args string) (tui.Result, error) {
 	}
 }
 
+// ps toggles the display of tool activity and results. The tools still run and
+// their results still return to the model; this only changes the output pane.
+func (d *dispatcher) ps(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/ps needs an open interface")
+	}
+	if strings.TrimSpace(args) != "" {
+		return tui.Result{}, fmt.Errorf("/ps takes no arguments")
+	}
+	visible := !d.session.ToolOutputVisible()
+	d.session.SetToolOutputVisible(visible)
+	return tui.Result{Text: reportOnOff("tool output", visible)}, nil
+}
+
 // version is the handler for /version.
 //
 // It reports the same identity `orcli --version` and `orcli version` print at

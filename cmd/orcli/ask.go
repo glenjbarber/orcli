@@ -361,6 +361,9 @@ func outputMarker(toolName string) string {
 }
 
 func appendToolResult(s *tui.Session, result, toolName, toolID string, level int) {
+	if !s.ToolOutputVisible() {
+		return
+	}
 	marker := outputMarker(toolName)
 	if marker == "" || result == "" {
 		return
@@ -377,6 +380,9 @@ func appendToolResult(s *tui.Session, result, toolName, toolID string, level int
 }
 
 func appendToolActivity(s *tui.Session, call openrouter.ToolCall, level int) {
+	if !s.ToolOutputVisible() {
+		return
+	}
 	text := toolActivity(call)
 	if text == "" {
 		return
