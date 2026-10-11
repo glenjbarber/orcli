@@ -285,7 +285,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	// handed off to onSubmit.
 	drawPrompt := func() {
 		before := promptRows
-		linePrompt(out, l.session.Editor().Text(), &promptRows, cols(), wrappedRows("orcli", cols()))
+		// The control block's shared anchor is the top rule's own row, one row
+		// above "orcli" - see lineControls' matching rule and linePrompt's own
+		// doc comment for why the two draw functions have to agree on it.
+		linePrompt(out, l.session.Editor().Text(), &promptRows, cols(), 1+wrappedRows("orcli", cols()))
 		controlRows += promptRows - before
 	}
 	l.onSubmit = func() {
@@ -528,14 +531,15 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 // is how many terminal rows the previous call left behind: enough of them are
 // cleared (fewer if the line grew, more if it shrank).
 //
-// bannerRows is how many terminal rows the "orcli" banner line above the prompt
-// takes (wrappedRows("orcli", cols), effectively always 1). The cursor enters and
-// leaves at that banner's own row - the same anchor lineControls uses - rather
-// than at the prompt's row one below it: the two draw functions run back to back
-// (a keystroke right after startup, or lineControls right after the reader's own
-// typing on submit), and if each expected a different resting row, whichever ran
-// second would clear and write starting from the wrong one, which is what used to
-// leave a stray leftover row of the previous prompt behind once the two met.
+// bannerRows is how many terminal rows sit above the prompt: the top rule (always
+// one row) plus the "orcli" banner line (wrappedRows("orcli", cols), effectively
+// always 1 too). The cursor enters and leaves at the top rule's own row - the same
+// anchor lineControls uses - rather than at the prompt's row further below: the two
+// draw functions run back to back (a keystroke right after startup, or lineControls
+// right after the reader's own typing on submit), and if each expected a different
+// resting row, whichever ran second would clear and write starting from the wrong
+// one, which is what used to leave a stray leftover row of the previous prompt
+// behind once the two met.
 func linePrompt(out *os.File, text string, old *int, cols, bannerRows int) {
 	line := Prompt + text
 	rows := wrappedRows(line, cols)
@@ -660,7 +664,7 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	}
 	rule := strings.Repeat("─", ruleWidth)
 	promptLine := Prompt + l.session.Editor().Text()
-	rows := wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
+	rows := wrappedRows(rule, cols) + wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
 		wrappedRows(bar1, cols) + wrappedRows(bar2, cols) + wrappedRows(rule, cols)
 	// "\r\n" between segments, not a bare "\n": this raw-mode screen does not
 	// translate a line feed into a carriage return, so each later segment would
@@ -680,8 +684,13 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	// The rule after bar2 gives the control block a visible bottom edge, so the
 	// reader can tell at a glance where the status panes end and the live or
 	// completed output below them begins, rather than the two blending into one
-	// scrolling wall of text.
-	fmt.Fprintf(out, "\r\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", promptLine, bar1, bar2, rule)
+	// scrolling wall of text. The same rule drawn again before "orcli" gives it a
+	// top edge too: every later turn already gets this for free, since this very
+	// block's own bottom rule ends up sitting just above whatever the reader
+	// writes or the model replies next - but the first turn in a session has no
+	// earlier control block to borrow that edge from, and would otherwise be the
+	// one exchange with no separator above it at all.
+	fmt.Fprintf(out, "\r\x1b[2K%s\r\n\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", rule, promptLine, bar1, bar2, rule)
 	total := rows
 	for total < prevRows {
 		fmt.Fprint(out, "\r\x1b[2K\n")
