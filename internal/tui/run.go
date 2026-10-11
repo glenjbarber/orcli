@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -124,7 +125,6 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	}
 	app := tview.NewApplication().SetScreen(screen).EnableMouse(s.Options().Mouse).EnablePaste(true)
 	frame := NewFrame()
-	app.SetRoot(frame, true)
 	l := &interfaceLoop{
 		session: s,
 		runner:  run,
@@ -132,6 +132,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		frame:   frame,
 		group:   newGroup(),
 	}
+	app.SetScreen(&transcriptScreen{Screen: screen, afterShow: func() {
+		app.Suspend(l.flushCat)
+	}})
+	app.SetRoot(frame, true)
 	l.navigatePane = navigatePane
 	if len(askForSession) > 0 {
 		l.askForSession = askForSession[0]
@@ -303,6 +307,41 @@ type interfaceLoop struct {
 	haveFrozenStatus bool
 	streamStart      int
 	bufferActive     bool
+	catMu            sync.Mutex
+	catPending       []Row
+}
+
+// transcriptScreen provides the one safe point for handing completed buffer
+// rows to native stdout: the tcell frame has already been flushed.
+type transcriptScreen struct {
+	tcell.Screen
+	afterShow func()
+}
+
+func (s *transcriptScreen) Show() {
+	s.Screen.Show()
+	if s.afterShow != nil {
+		s.afterShow()
+	}
+}
+
+func (l *interfaceLoop) queueCat(rows []Row) {
+	if len(rows) == 0 {
+		return
+	}
+	l.catMu.Lock()
+	l.catPending = append(l.catPending, rows...)
+	l.catMu.Unlock()
+}
+
+func (l *interfaceLoop) flushCat() {
+	l.catMu.Lock()
+	rows := append([]Row(nil), l.catPending...)
+	l.catPending = nil
+	l.catMu.Unlock()
+	for _, row := range rows {
+		_, _ = fmt.Fprintln(os.Stdout, row.Text)
+	}
 }
 
 // consumeBell reports whether a bell is owed for the draw about to happen,
@@ -382,8 +421,19 @@ func (l *interfaceLoop) paint() {
 		buffer = append(buffer, rows[start:]...)
 		l.frame.SetBuffer(buffer)
 	} else {
+		if l.bufferActive {
+			start := l.streamStart
+			if start < 0 || start > len(rows) {
+				start = len(rows)
+			}
+			l.queueCat(rows[start:])
+		}
 		l.bufferActive = false
-		l.frame.SetBuffer(nil)
+		banner := Row{Kind: KindNotice, Text: "orcli"}
+		if len(rows) > 0 && isProgramBanner(rows[0]) {
+			banner = rows[0]
+		}
+		l.frame.SetBuffer([]Row{banner})
 	}
 	l.frame.SetCaret(l.session.Editor().Caret())
 	l.frame.SetSweepStep(l.step)
