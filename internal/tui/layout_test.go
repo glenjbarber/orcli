@@ -179,11 +179,11 @@ func TestTheLogFillsTheOutputPane(t *testing.T) {
 	}
 
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, log, plainPalette())
-	if got := rowAt(screen, 14); got != "row 39" {
+	if got := rowAt(screen, 13); got != "row 39" {
 		t.Errorf("the last visible row is %q, want row 39", got)
 	}
-	if got := rowAt(screen, 0); got != "row 25" {
-		t.Errorf("the topmost row is %q, want row 25 and fourteen rows beneath it", got)
+	if got := rowAt(screen, 0); got != "row 26" {
+		t.Errorf("the topmost row is %q, want row 26 and thirteen rows beneath it", got)
 	}
 }
 
@@ -307,7 +307,7 @@ func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	// 56 rather than 40: bar two now carries fieldPreset (/level's active preset)
 	// alongside the fields the figure of 40 was sized for, and the assertions
 	// below are against text past the point 40 columns used to cut.
-	const width = 56
+	const width = 100
 
 	frame := NewFrame()
 	frame.SetRect(0, 0, width, 20)
@@ -379,9 +379,9 @@ func TestBarOneEndsWithCostThenHostname(t *testing.T) {
 func TestBarTwoFadesLeftTextWhereTheHalvesCollide(t *testing.T) {
 	var status Status
 	status[fieldHost] = "local"
-	status[fieldCredits] = "$1"
+	status[fieldCredits] = strings.Repeat("c", 30)
 	status[fieldCost] = "$0"
-	status[fieldContext] = "4k"
+	status[fieldContext] = strings.Repeat("x", 30)
 	status[fieldInput] = "5"
 	status[fieldOutput] = "67890"
 	status[fieldAutosave] = "on"
@@ -389,18 +389,18 @@ func TestBarTwoFadesLeftTextWhereTheHalvesCollide(t *testing.T) {
 	status[fieldApproval] = "ask"
 	palette := NewPalette(true, GroundDark, nil)
 	frame := NewFrame()
-	frame.SetRect(0, 0, 80, 5)
+	frame.SetRect(0, 0, 80, 6)
 	frame.SetContent(Bar{Status: status}, nil, palette)
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
 	}
-	screen.SetSize(80, 5)
+	screen.SetSize(80, 6)
 	frame.Draw(screen)
 	leftFG, _, _ := palette.Style(RoleChrome).Decompose()
 	fadedFG, _, _ := palette.Style(RoleDim).Decompose()
-	first, _, firstStyle, _ := screen.GetContent(0, 3)
-	nearCollision, _, fadeStyle, _ := screen.GetContent(39, 3)
+	first, _, firstStyle, _ := screen.GetContent(0, 4)
+	nearCollision, _, fadeStyle, _ := screen.GetContent(39, 4)
 	nearFG, _, _ := fadeStyle.Decompose()
 	if first == 0 || nearCollision == 0 {
 		t.Fatalf("bar two cells were blank: first=%q near collision=%q", first, nearCollision)

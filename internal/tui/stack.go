@@ -460,22 +460,26 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// counted against backlog the way a single-line row always was. f.scroll
 	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
 	// untouched) - only how many physical lines one row costs changes.
-	start := end - logRows
-	if start < 0 {
-		start = 0
-	}
-	shown := make([]Row, 0, logRows)
-	for i := start; i < end; i++ {
+	// Collect physical lines from the live edge backward. Selecting a starting log row
+	// first would let a wrapped older row consume the pane before the newest stream data
+	// was reached. Reverse the collected lines before drawing so the pane still reads
+	// oldest-to-newest from top to bottom.
+	newestFirst := make([]Row, 0, logRows)
+	for i := end - 1; i >= 0; i-- {
 		lines := foldRowLines(PlainRow(f.log[i]), width)
-		for _, line := range lines {
-			shown = append(shown, line)
-			if len(shown) >= logRows {
+		for j := len(lines) - 1; j >= 0; j-- {
+			newestFirst = append(newestFirst, lines[j])
+			if len(newestFirst) >= logRows {
 				break
 			}
 		}
-		if len(shown) >= logRows {
+		if len(newestFirst) >= logRows {
 			break
 		}
+	}
+	shown := make([]Row, len(newestFirst))
+	for i, row := range newestFirst {
+		shown[len(newestFirst)-1-i] = row
 	}
 	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
