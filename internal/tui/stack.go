@@ -13,13 +13,13 @@ import (
 // The frame, as it is now: the program owns the screen, and the screen is five fixed rows
 // below a scrollback that takes whatever height is left.
 //
-// Bottom to top: the pane bar, bar two (hostname, credits, cost, context, input and
-// output tokens, autosave, stealth and approval), bar one (the live,
+// Bottom to top: the pane bar, bar two (credits, context, autosave, stealth and
+// approval), bar one (the live,
 // fast-changing fields - state, the sweeping figure, queue depth; see
 // barOneFields/barTwoFields), one blank separator line, and the prompt - this order
 // confirmed by Glen (2026-10-06). Everything above those five rows is scrollback: the
-// tail of the log, newest row just above the prompt, oldest pushed off the top as it
-// grows. This is loreloom/UI-redesign.md's shape (2026-10-06) with one addition: that
+// tail of the log at the top of the output pane, oldest row first and newest row last.
+// This is loreloom/UI-redesign.md's shape (2026-10-06) with one addition: that
 // document names only the prompt, blank line, and two bars, and Glen added the pane bar
 // as a fifth fixed row rather than cutting it (adr-0000019/0000020 are carried forward,
 // not superseded). It is not the field-column-beside-every-log-row shape the ten ADRs
@@ -74,13 +74,12 @@ const barRows = 5
 //
 // loreloom/UI-redesign.md names bar two's fields explicitly - provider, model,
 // verbosity, mouse, scrollback - and says nothing about bar one beyond "rapidly
-// changing statistics." Glen confirmed bar one's list and the bars' order
-// (2026-10-06): state, the sweeping figure, and the queue depth, with bar one
-// above bar two.
-var barOneFields = []int{fieldState, fieldFigure, fieldQueue}
+// changing statistics." The current bar-one order is state, the sweeping figure,
+// queue depth, token usage, cost, and hostname, with bar one above bar two.
+var barOneFields = []int{fieldState, fieldFigure, fieldQueue, fieldInput, fieldOutput, fieldCost, fieldHost}
 
 // barTwoFields is the user-confirmed field order from the active status-bar task.
-var barTwoFields = []int{fieldHost, fieldCredits, fieldCost, fieldContext, fieldInput, fieldOutput, fieldAutosave, fieldStealth, fieldApproval}
+var barTwoFields = []int{fieldCredits, fieldContext, fieldAutosave, fieldStealth, fieldApproval}
 
 // StatusFields is how many named status fields exist, whether or not a given redesign
 // of the frame renders all of them. It no longer bounds how many rows the frame draws
@@ -456,27 +455,31 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	if end > len(f.log) {
 		end = len(f.log)
 	}
-	// shown is newest first, in physical lines rather than log rows: a row with a
+	// shown is oldest first, in physical lines rather than log rows: a row with a
 	// line break of its own folds into more than one entry here, each still
 	// counted against backlog the way a single-line row always was. f.scroll
 	// itself stays in log-row units (session.go's ScrollUp/ScrollDown are
 	// untouched) - only how many physical lines one row costs changes.
+	start := end - logRows
+	if start < 0 {
+		start = 0
+	}
 	shown := make([]Row, 0, logRows)
-	if logRows > 0 {
-	fill:
-		for i := end - 1; i >= 0; i-- {
-			lines := foldRowLines(PlainRow(f.log[i]), width)
-			for j := len(lines) - 1; j >= 0; j-- {
-				shown = append(shown, lines[j])
-				if len(shown) >= logRows {
-					break fill
-				}
+	for i := start; i < end; i++ {
+		lines := foldRowLines(PlainRow(f.log[i]), width)
+		for _, line := range lines {
+			shown = append(shown, line)
+			if len(shown) >= logRows {
+				break
 			}
 		}
+		if len(shown) >= logRows {
+			break
+		}
 	}
-	// shown is newest first; it fills the scrollback upward from just above the prompt.
+	// shown is oldest first; it fills the output pane from the top downward.
 	for i, row := range shown {
-		at := logRows - 1 - i
+		at := i
 		text, offset, cut := cutTail(row.Text, width)
 		if cut {
 			drawCellText(screen, x, y+at, width, ellipsis, base)
@@ -658,8 +661,8 @@ func renderBarTwo(status Status) string {
 // meet, the left half fades toward the collision point before the right half is
 // drawn over it, making the overlap visible without changing field order.
 func (f *Frame) drawBarTwo(screen tcell.Screen, x, y, width int, chrome tcell.Style) {
-	leftFields := []int{fieldHost, fieldCredits, fieldCost, fieldContext, fieldInput}
-	rightFields := []int{fieldOutput, fieldAutosave, fieldStealth, fieldApproval}
+	leftFields := []int{fieldCredits, fieldContext}
+	rightFields := []int{fieldAutosave, fieldStealth, fieldApproval}
 	left := statusFieldsText(f.bar.Status, leftFields)
 	right := statusFieldsText(f.bar.Status, rightFields)
 	lw := DisplayWidth(left)

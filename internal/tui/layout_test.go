@@ -157,26 +157,22 @@ func rowAt(screen tcell.SimulationScreen, row int) string {
 // appears just above the prompt and everything above it moves up, which is what the
 // reader asked the log to do, rather than appearing at the top where a reader is not
 // looking.
-func TestTheLogIsNewestBesideThePrompt(t *testing.T) {
+func TestTheLogFlowsTopToBottom(t *testing.T) {
 	var s Status
 	rows := []Row{{Text: "first"}, {Text: "second"}, {Text: "third"}}
 
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, rows, plainPalette())
-	promptRow := scrollbackRows(20)
-
-	if got := rowAt(screen, promptRow-1); got != "third" {
-		t.Errorf("the row above the prompt is %q, want the newest log row %q", got, "third")
+	if got := rowAt(screen, 0); got != "first" {
+		t.Errorf("the top output row is %q, want the oldest log row %q", got, "first")
 	}
-	if got := rowAt(screen, promptRow-2); got != "second" {
-		t.Errorf("the row above that is %q, want %q", got, "second")
+	if got := rowAt(screen, 1); got != "second" {
+		t.Errorf("the next output row is %q, want %q", got, "second")
 	}
 }
 
-// TestTheLogFillsUpward covers the case where the log is longer than the scrollback. The
-// newest rows fill the scrollback from the bottom upward and the oldest are off the
-// screen, so a reader scrolling back finds them in the terminal's own scrollback rather
-// than on the screen.
-func TestTheLogFillsUpward(t *testing.T) {
+// TestTheLogFillsTheOutputPane covers the case where the log is longer than the output
+// pane. The newest rows are visible at the live edge, in oldest-to-newest order.
+func TestTheLogFillsTheOutputPane(t *testing.T) {
 	var s Status
 	log := make([]Row, 40)
 	for i := range log {
@@ -184,10 +180,8 @@ func TestTheLogFillsUpward(t *testing.T) {
 	}
 
 	screen := drawSimulationFrame(t, 20, 40, Bar{Status: s}, log, plainPalette())
-	promptRow := scrollbackRows(20)
-
-	if got := rowAt(screen, promptRow-1); got != "row 39" {
-		t.Errorf("the newest row is %q, want row 39", got)
+	if got := rowAt(screen, 14); got != "row 39" {
+		t.Errorf("the last visible row is %q, want row 39", got)
 	}
 	if got := rowAt(screen, 0); got != "row 25" {
 		t.Errorf("the topmost row is %q, want row 25 and fourteen rows beneath it", got)
@@ -306,7 +300,7 @@ func TestSweepStatusColoursOnlyTheValue(t *testing.T) {
 // TestScrollMovesTheWindowWithoutChangingUsageFields covers the scroll offset and
 // keeps the confirmed usage fields independent of transcript navigation.
 func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
-	log := make([]Row, 10)
+	log := make([]Row, 30)
 	for i := range log {
 		log[i] = Row{Text: fmt.Sprintf("row %d", i)}
 	}
@@ -327,11 +321,14 @@ func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	}
 	live.SetSize(width, 20)
 	frame.Draw(live)
-	if got := rowAt(live, promptRow-1); got != "row 9" {
-		t.Errorf("at the live edge the row above the prompt is %q, want the newest row 9", got)
+	if got := rowAt(live, 0); got != "row 15" {
+		t.Errorf("at the live edge the first output row is %q, want row 15", got)
 	}
-	if !strings.Contains(rowAt(live, promptRow+3), "hostname:unavailable") || !strings.Contains(rowAt(live, promptRow+3), "out:") {
-		t.Errorf("bar two fields are %q, want the confirmed live usage fields", rowAt(live, promptRow+3))
+	if strings.Contains(rowAt(live, promptRow+3), "hostname:") || strings.Contains(rowAt(live, promptRow+3), "cost:") {
+		t.Errorf("bar two fields are %q, want cost and hostname moved to bar one", rowAt(live, promptRow+3))
+	}
+	if !strings.Contains(rowAt(live, promptRow+2), "cost:") || !strings.Contains(rowAt(live, promptRow+2), "hostname:") || !strings.Contains(rowAt(live, promptRow+2), "in:") || !strings.Contains(rowAt(live, promptRow+2), "out:") {
+		t.Errorf("bar one fields are %q, want cost, hostname, input, and output tokens", rowAt(live, promptRow+2))
 	}
 
 	frame.SetScroll(3)
@@ -341,10 +338,10 @@ func TestScrollMovesTheWindowWithoutChangingUsageFields(t *testing.T) {
 	}
 	back.SetSize(width, 20)
 	frame.Draw(back)
-	if got := rowAt(back, promptRow-1); got != "row 6" {
-		t.Errorf("scrolled back 3, the row above the prompt is %q, want row 6", got)
+	if got := rowAt(back, 0); got != "row 12" {
+		t.Errorf("scrolled back 3, the first output row is %q, want row 12", got)
 	}
-	if !strings.Contains(rowAt(back, promptRow+3), "hostname:unavailable") {
+	if strings.Contains(rowAt(back, promptRow+3), "hostname:") || strings.Contains(rowAt(back, promptRow+3), "cost:") {
 		t.Errorf("bar two changed while scrolling: %q", rowAt(back, promptRow+3))
 	}
 }
@@ -355,9 +352,22 @@ func TestBarTwoFieldOrder(t *testing.T) {
 		status[field] = fieldName(field)
 	}
 	got := renderBarTwo(status)
-	want := "hostname:hostname · credits:credits · cost:cost · context:context · in:in · out:out · autosave:autosave · stealth:stealth · approval:approval"
+	want := "credits:credits · context:context · autosave:autosave · stealth:stealth · approval:approval"
 	if got != want {
 		t.Fatalf("renderBarTwo = %q, want %q", got, want)
+	}
+}
+
+func TestBarOneEndsWithCostThenHostname(t *testing.T) {
+	var status Status
+	for _, field := range barOneFields {
+		status[field] = fieldName(field)
+	}
+	prefix, figure, suffix := renderBarOne(status)
+	got := strings.Trim(strings.Join([]string{prefix, figure, suffix}, ""), " ·")
+	want := "state:state · figure:figure · queue:queue · in:in · out:out · cost:cost · hostname:hostname"
+	if got != want {
+		t.Fatalf("renderBarOne = %q, want %q", got, want)
 	}
 }
 

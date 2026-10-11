@@ -202,6 +202,12 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"ps": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.ps(args)
 		},
+		"up": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.scrollOutput(args, true)
+		},
+		"down": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.scrollOutput(args, false)
+		},
 		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.color(args)
 		},

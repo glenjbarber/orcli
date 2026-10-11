@@ -99,6 +99,21 @@ func (d *dispatcher) ps(args string) (tui.Result, error) {
 	return tui.Result{Text: reportOnOff("tool output", visible)}, nil
 }
 
+func (d *dispatcher) scrollOutput(args string, up bool) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("scrolling needs an open interface")
+	}
+	if strings.TrimSpace(args) != "" {
+		return tui.Result{}, fmt.Errorf("scrolling takes no arguments")
+	}
+	if up {
+		d.session.ScrollUp(1)
+	} else {
+		d.session.ScrollDown(1)
+	}
+	return tui.Result{}, nil
+}
+
 // version is the handler for /version.
 //
 // It reports the same identity `orcli --version` and `orcli version` print at
