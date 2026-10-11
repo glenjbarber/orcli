@@ -105,7 +105,7 @@ const (
 // no model configured, or one asking in a mode where an unprompted turn would be unwelcome,
 // passes an empty string and nothing is sent. Start does not decide whether to greet, only
 // how, once asked to.
-func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
+func startScreenMode(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
 	if s == nil {
 		return errors.New("tui: Start was given no session")
 	}
@@ -228,6 +228,115 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 		return ErrNoTerminal
 	}
 	return err
+}
+
+// Start runs Pane 0 as ordinary terminal output. The terminal's native scrollback owns
+// history; this loop only appends complete rows and redraws the current prompt.
+func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo string, navigatePane func(direction int) *Session, askForSession ...func(*Session) AskFunc) error {
+	if s == nil {
+		return errors.New("tui: Start was given no session")
+	}
+	if run == nil {
+		return errors.New("tui: Start was given no way to run a command")
+	}
+	screen, err := pane0Screen()
+	if err != nil {
+		return err
+	}
+	if err := screen.Init(); err != nil {
+		return ErrNoTerminal
+	}
+	defer screen.Fini()
+	screen.EnablePaste()
+
+	l := &interfaceLoop{session: s, runner: run, ask: ask, group: newGroup(), navigatePane: navigatePane}
+	if len(askForSession) > 0 {
+		l.askForSession = askForSession[0]
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() { cancel(); l.group.Close() }()
+
+	out := os.Stdout
+	fmt.Fprintln(out, "orcli")
+	printed := map[*Session]int{}
+	printRows := func() bool {
+		rows := l.session.Log().Rows()
+		at := printed[l.session]
+		if at > len(rows) {
+			at = 0
+		}
+		if at == len(rows) {
+			return false
+		}
+		fmt.Fprint(out, "\r\x1b[2K\n")
+		for _, row := range rows[at:] {
+			fmt.Fprintln(out, lineMarker(row))
+		}
+		printed[l.session] = len(rows)
+		return true
+	}
+	printRows()
+	linePrompt(out, l.session.Editor().Text())
+	maybeSendHELO(ctx, l, helo)
+
+	events := make(chan tcell.Event)
+	go func() {
+		for {
+			e := screen.PollEvent()
+			select {
+			case events <- e:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			now := time.Now()
+			if l.session.BreakDue(now) {
+				l.session.StartBreak(now)
+				if l.session.Options().BreakBell {
+					fmt.Fprint(out, "\a")
+				}
+			} else {
+				l.session.TickBreak(now)
+			}
+			if printRows() {
+				linePrompt(out, l.session.Editor().Text())
+			}
+		case event := <-events:
+			switch e := event.(type) {
+			case *tcell.EventKey:
+				key, r := keyEvent(e)
+				if key == KeyNone {
+					continue
+				}
+				if l.act(ctx, key, r) {
+					return nil
+				}
+			case *tcell.EventPaste:
+				// Paste markers bracket the literal key events that follow; key handling
+				// already inserts those runes into the editor.
+			}
+			fmt.Fprint(out, "\r\x1b[2K")
+			printRows()
+			linePrompt(out, l.session.Editor().Text())
+		}
+	}
+}
+
+func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2Kroot@lolhost $ %s", text) }
+
+func lineMarker(row Row) string {
+	if row.Text == "" {
+		return ""
+	}
+	return row.Text
 }
 
 // pane0Screen returns a terminal screen that never enters the alternate screen.
