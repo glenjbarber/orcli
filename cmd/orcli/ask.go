@@ -379,7 +379,7 @@ func appendToolResult(s *tui.Session, result, toolName, toolID string, level int
 	}
 
 	role := toolRoleForName(toolName)
-	s.Log().ReplaceToolStatus(tui.Row{
+	s.ReplaceToolStatus(tui.Row{
 		Kind:   tui.KindTool,
 		Level:  level,
 		ToolID: toolID,
@@ -396,7 +396,7 @@ func appendToolActivity(s *tui.Session, call openrouter.ToolCall, level int) {
 	if text == "" {
 		return
 	}
-	s.Log().ReplaceToolStatus(tui.Row{
+	s.ReplaceToolStatus(tui.Row{
 		Kind:   tui.KindTool,
 		Level:  level,
 		ToolID: call.ID,

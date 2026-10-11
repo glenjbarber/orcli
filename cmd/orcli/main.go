@@ -476,6 +476,18 @@ func openInterface(ctx context.Context, s *tui.Session, cfg config.Config,
 		}
 		return askWithTaskIntegrations(target, newTransport(cfg), cfg.AttributionID, confirmed, d.cloudflareReady, capture, notionToken, []string{apiaryURL, apiaryToken}, taskIntegrationsFrom(cfg))
 	}
+	// /begin starts its worker turn immediately and keeps the worker's live
+	// notices, tool statuses and reply stream mirrored into pane 0. The worker
+	// receives the handoff note as a silent model instruction because the note
+	// is already present in pane 1's log.
+	d.beginTask = func(worker *tui.Session, note string) {
+		workerAsk := askForSession(worker)
+		go func() {
+			if err := workerAsk(ctx, note, 0, true); err != nil {
+				worker.Notice(err.Error(), 0, tui.RoleFailure)
+			}
+		}()
+	}
 
 	return tui.Start(ctx, s,
 		d.Run,

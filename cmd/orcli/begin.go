@@ -54,7 +54,11 @@ func (d *dispatcher) begin(note string) (tui.Result, error) {
 	for _, turn := range loaded.Turns {
 		worker.Notice(turn.Content, 0, tui.RoleEmphasis)
 	}
+	worker.SetMirror(d.mainSession)
 	d.worker = worker
+	if d.beginTask != nil {
+		d.beginTask(worker, note)
+	}
 
 	return tui.Result{
 		Text: fmt.Sprintf("begun: a new pane holds the handoff note (%d characters)", len(note)),
