@@ -275,15 +275,25 @@ func (d *dispatcher) copyCmd(args string) (tui.Result, error) {
 		return tui.Result{}, fmt.Errorf("/copy needs an open interface")
 	}
 
-	want := strings.TrimSpace(args)
-	n := 0
-	if want != "" {
-		parsed, err := strconv.Atoi(want)
-		if err != nil {
-			return tui.Result{}, fmt.Errorf("/copy %s is not a level number", want)
-		}
-		n = parsed
+	words := strings.Fields(args)
+	if len(words) > 2 {
+		return tui.Result{}, fmt.Errorf("/copy accepts a response number and optional sub-response number")
 	}
+	indices := []int{0, 0}
+	for i, word := range words {
+		parsed, err := strconv.Atoi(word)
+		if err != nil || parsed < 0 {
+			return tui.Result{}, fmt.Errorf("/copy %s is not a non-negative response number", word)
+		}
+		indices[i] = parsed
+	}
+	if text, ok := d.session.CopyResponse(indices[0], indices[1]); ok {
+		return tui.Result{Text: text}, nil
+	}
+	if len(words) == 2 {
+		return tui.Result{}, fmt.Errorf("response %d has no sub-response %d", indices[0], indices[1])
+	}
+	n := indices[0]
 
 	text, level, err := d.session.CopyText(n)
 	if err != nil {

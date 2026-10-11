@@ -465,8 +465,13 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	// was reached. Reverse the collected lines before drawing so the pane still reads
 	// oldest-to-newest from top to bottom.
 	newestFirst := make([]Row, 0, logRows)
+	latestResponse := latestResponseID(f.log)
 	for i := end - 1; i >= 0; i-- {
-		lines := foldRowLines(PlainRow(f.log[i]), width)
+		// The response marker occupies part of the terminal width. Apply it
+		// before folding so a wrapped response line leaves room for its marker
+		// instead of being wrapped to the full width and truncated afterward.
+		marked := withResponseMarker(PlainRow(f.log[i]), latestResponse)
+		lines := foldRowLines(marked, width)
 		for j := len(lines) - 1; j >= 0; j-- {
 			newestFirst = append(newestFirst, lines[j])
 			if len(newestFirst) >= logRows {
@@ -523,6 +528,35 @@ func (f *Frame) Draw(screen tcell.Screen) {
 	f.drawBarTwo(screen, x, y+barTwoRow, width, chrome)
 	drawCellText(screen, x, y+paneBarRow, width, renderPaneBar(f.bar.Status, width),
 		paneBarStyle(f.palette, chrome, f.bar.Status[fieldPaneState]))
+}
+
+func latestResponseID(rows []Row) int {
+	latest := 0
+	for _, row := range rows {
+		if row.ResponseID > latest {
+			latest = row.ResponseID
+		}
+	}
+	return latest
+}
+
+func withResponseMarker(row Row, latest int) Row {
+	if row.ResponseID == 0 || latest == 0 {
+		return row
+	}
+	n := latest - row.ResponseID + 1
+	marker := "[" + strconv.Itoa(n)
+	if row.ResponseSub > 0 {
+		marker += "," + strconv.Itoa(row.ResponseSub)
+	}
+	marker += "] "
+	shift := len(marker)
+	for i := range row.Spans {
+		row.Spans[i].Start += shift
+		row.Spans[i].End += shift
+	}
+	row.Text = marker + row.Text
+	return row
 }
 
 // paneBarStyle picks the style the pane bar draws in: a configured colour for
@@ -784,7 +818,7 @@ func foldRowLines(row Row, width int) []Row {
 		offset := 0
 		for i, text := range lines {
 			start, end := offset, offset+len(text)
-			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID}
+			physical[i] = Row{Text: text, Spans: rebaseSpans(row.Spans, start, end), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub}
 			offset = end + 1 // +1 skips the '\n' this line was split on.
 		}
 	}
@@ -855,12 +889,12 @@ func wrapRowLine(row Row, width int) []Row {
 	for {
 		cut := wrapCut(text, width)
 		if cut >= len(text) {
-			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
+			out = append(out, Row{Text: text, Spans: rebaseSpans(row.Spans, offset, offset+len(text)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub})
 			break
 		}
 
 		piece := text[:cut]
-		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID})
+		out = append(out, Row{Text: piece, Spans: rebaseSpans(row.Spans, offset, offset+len(piece)), Kind: row.Kind, Level: row.Level, ToolID: row.ToolID, ResponseID: row.ResponseID, ResponseSub: row.ResponseSub})
 
 		rest := text[cut:]
 		trimmed := strings.TrimLeft(rest, " ")

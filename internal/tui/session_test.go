@@ -177,6 +177,31 @@ func TestDeliverHoldsTheTextWhole(t *testing.T) {
 	}
 }
 
+func TestStreamedResponsesRenderAndCopyNewestFirst(t *testing.T) {
+	s := New(Options{Model: "some/model"})
+	s.DeliverDelta("A", 0)
+	s.DeliverDelta("B\n```text\ninside B\n```", 0)
+	s.DeliverDelta("C", 0)
+
+	for index, want := range map[int]string{0: "C", 1: "C", 2: "B\n```text\ninside B\n```"} {
+		got, ok := s.CopyResponse(index, 0)
+		if !ok || got != want {
+			t.Errorf("CopyResponse(%d) = %q, %t; want %q", index, got, ok, want)
+		}
+	}
+	if got, ok := s.CopyResponse(2, 1); !ok || got != "```text\ninside B\n```" {
+		t.Errorf("CopyResponse(2, 1) = %q, %t; want fenced sub-response", got, ok)
+	}
+
+	rows := s.Log().Rows()
+	if len(rows) != 5 { // banner, A, B text, B block, C
+		t.Fatalf("log has %d rows, want 5", len(rows))
+	}
+	if rows[1].ResponseID == 0 || rows[2].ResponseID != rows[3].ResponseID || rows[3].ResponseSub != 1 {
+		t.Fatalf("response metadata = %#v, want streamed and sub-response rows", rows[1:])
+	}
+}
+
 // TestDeliverIgnoresNothing covers the case where a turn produced no text, such as a
 // turn that went straight to a tool call. A row with no text in it is a blank line the
 // reader has to scroll past.

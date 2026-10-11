@@ -252,8 +252,8 @@ func init() {
 		},
 		{
 			Name:    "copy",
-			Args:    "N",
-			Summary: "copy the level N, or the whole conversation",
+			Args:    "[N [M]]",
+			Summary: "copy the newest response or response N and optional sub-response M",
 		},
 		{
 			Name:    "permission",
