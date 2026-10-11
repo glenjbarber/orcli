@@ -260,6 +260,10 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 	printed := map[*Session]int{}
 	lastRow := map[*Session]string{}
 	printRows := func() bool {
+		state, _ := l.session.State()
+		if state == StateThinking || state == StateWorking {
+			return false
+		}
 		rows := l.session.Log().Rows()
 		at := printed[l.session]
 		if at > len(rows) {
@@ -272,7 +276,7 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 			}
 			start = len(rows) - 1
 		}
-		fmt.Fprint(out, "\r\x1b[2K\n")
+		clearLineBuffer(out)
 		for _, row := range rows[start:] {
 			fmt.Fprintln(out, lineMarker(row))
 		}
@@ -341,6 +345,16 @@ func Start(ctx context.Context, s *Session, run LineRunner, ask AskFunc, helo st
 }
 
 func linePrompt(out *os.File, text string) { fmt.Fprintf(out, "\r\x1b[2K%s%s", Prompt, text) }
+
+// clearLineBuffer removes the current orcli/prompt/status block immediately before
+// completed rows are handed to ordinary terminal stdout. It leaves the cursor at the
+// first row below that block, so the emitted rows become native terminal scrollback.
+func clearLineBuffer(out *os.File) {
+	fmt.Fprint(out, "\x1b[5B\x1b[6A")
+	for i := 0; i < 6; i++ {
+		fmt.Fprint(out, "\r\x1b[2K\n")
+	}
+}
 
 // lineControls leaves the editable prompt above the two status panes. The cursor is
 // returned to the prompt after drawing the panes, while completed output remains in
