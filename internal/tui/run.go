@@ -747,7 +747,16 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	if ruleWidth < 0 {
 		ruleWidth = 0
 	}
-	rule := strings.Repeat("─", ruleWidth)
+	// The high-contrast rule is a heavier box-drawing glyph than the default,
+	// not just a colour - "═" reads as a stronger edge than a bold "─" alone
+	// at a glance, which is the point for a reader who asked for this because
+	// dim is hard to see. Both glyphs are one display column each, so
+	// swapping between them here never changes the row count below.
+	glyph := "─"
+	if l.session.Options().HighContrast {
+		glyph = "═"
+	}
+	rule := strings.Repeat(glyph, ruleWidth)
 	promptLine := Prompt + l.session.Editor().Text()
 	// Row counts are measured against the plain text, before any colour escapes
 	// are added below - displayWidth has no notion of an escape sequence, and
@@ -756,6 +765,14 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	// failure class every earlier fix in this file chased down.
 	rows := wrappedRows(rule, cols) + wrappedRows("orcli", cols) + wrappedRows(promptLine, cols) + wrappedRows("", cols) +
 		wrappedRows(bar1, cols) + wrappedRows(bar2, cols) + wrappedRows(rule, cols)
+	// The rule drawn below is bold and bright, rather than the terminal's
+	// default dim foreground, when high contrast is on - computed from the
+	// plain rule text above, same as the spectrum bars, so the escape bytes
+	// are never mistaken for display width.
+	drawRule := rule
+	if l.session.Options().HighContrast {
+		drawRule = "\x1b[1;97m" + rule + "\x1b[0m"
+	}
 	// While a turn is running, the two status bars cycle through the full colour
 	// spectrum one step per redraw instead of sitting still - a steadier, more
 	// visible "something is happening" signal than the single sweeping figure
@@ -788,7 +805,7 @@ func lineControls(out *os.File, l *interfaceLoop, cols, prevRows int) int {
 	// writes or the model replies next - but the first turn in a session has no
 	// earlier control block to borrow that edge from, and would otherwise be the
 	// one exchange with no separator above it at all.
-	fmt.Fprintf(out, "\r\x1b[2K%s\r\n\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", rule, promptLine, bar1, bar2, rule)
+	fmt.Fprintf(out, "\r\x1b[2K%s\r\n\x1b[2Korcli\r\n\x1b[2K%s\r\n\x1b[2K\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n\x1b[2K%s\r\n", drawRule, promptLine, bar1, bar2, drawRule)
 	total := rows
 	for total < prevRows {
 		fmt.Fprint(out, "\r\x1b[2K\n")

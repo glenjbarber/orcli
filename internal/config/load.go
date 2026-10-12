@@ -101,6 +101,13 @@ type Config struct {
 	// Trace reports whether redacted conversation capture starts enabled.
 	Trace bool `json:"trace,omitempty"`
 
+	// HighContrast reports whether the pane 0 control block's top and bottom
+	// rules are drawn heavier and brighter than the default, for a reader who
+	// needs a stronger visual edge between the status panes and the output on
+	// either side of them. Off is the default, and is decided by this file and
+	// by /contrast alone, the same as Color above.
+	HighContrast bool `json:"high_contrast,omitempty"`
+
 	// PaneActiveColor is the colour (`#rrggbb`) the pane bar is drawn in while a
 	// worker is running at the shown pane. It is a second, distinct toggle from
 	// Color above: Color decides whether colour is written at all, and this and
@@ -186,6 +193,7 @@ func Default() Config {
 		BreakBell:            false,
 		BreakEnabled:         true,
 		Color:                false,
+		HighContrast:         false,
 		PaneActiveColor:      DefaultPaneActiveColor,
 		PaneDoneColor:        DefaultPaneDoneColor,
 		Verbosity:            0,
@@ -340,6 +348,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			err = readBool(value, &c.BreakEnabled)
 		case "color":
 			err = readBool(value, &c.Color)
+		case "high_contrast":
+			err = readBool(value, &c.HighContrast)
 		case "trace":
 			err = readBool(value, &c.Trace)
 		case "pane_active_color":

@@ -141,6 +141,10 @@ func init() {
 			Hidden:  []string{"colour"},
 		},
 		{
+			Name:    "contrast",
+			Summary: "draw pane 0's control-block rules heavier and brighter, on or off, and save the choice",
+		},
+		{
 			// Renamed from /cognito, confirmed by Glen on 2026-10-07; /cognito is
 			// kept as a hidden alias on the same grounds /colour is kept for
 			// /color, above.

@@ -71,6 +71,12 @@ type Options struct {
 	// Color reports whether colour output is on.
 	Color bool
 
+	// HighContrast reports whether pane 0's control-block rules (see #75/#76)
+	// are drawn heavier and brighter than the default, for a reader who needs
+	// a stronger visual edge between the status panes and the output on
+	// either side of them.
+	HighContrast bool
+
 	// Bell reports whether the terminal bell is rung when a reply finishes
 	// arriving.
 	Bell bool
@@ -586,6 +592,16 @@ func (s *Session) SetCognito(on bool) {
 func (s *Session) SetColor(on bool) {
 	s.mu.Lock()
 	s.opts.Color = on
+	s.mu.Unlock()
+}
+
+// SetHighContrast changes whether the control block's rules are drawn in the
+// heavier, brighter style, on the same terms SetColor documents: the
+// session's own copy is what lineControls reads at draw time, so /contrast
+// has to move this, not just whatever it writes to the configuration file.
+func (s *Session) SetHighContrast(on bool) {
+	s.mu.Lock()
+	s.opts.HighContrast = on
 	s.mu.Unlock()
 }
 
