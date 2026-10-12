@@ -123,6 +123,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		breakInterval   = fs.Int("break-interval", 0, "minutes before a screen-break reminder (0 uses the configured default)")
 		breakBell       = fs.Bool("break-bell", false, "ring the terminal bell when a screen break starts")
 		color           = fs.Bool("color", false, "write colour")
+		highContrast    = fs.Bool("high-contrast", false, "draw pane 0's control-block rules heavier and brighter")
 		paneActiveColor = fs.String("pane-active-color", "", "#rrggbb for a pane with a running worker (default "+config.DefaultPaneActiveColor+")")
 		paneDoneColor   = fs.String("pane-done-color", "", "#rrggbb for a pane whose worker just finished (default "+config.DefaultPaneDoneColor+")")
 		dir             = fs.String("dir", "", "run in this directory rather than the current directory")
@@ -270,6 +271,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		BreakBell:            *breakBell || cfg.BreakBell,
 		BreakEnabled:         cfg.BreakEnabled,
 		Color:                *color || cfg.Color,
+		HighContrast:         *highContrast || cfg.HighContrast,
 		PaneActiveColor:      firstNonEmpty(*paneActiveColor, cfg.PaneActiveColor),
 		PaneDoneColor:        firstNonEmpty(*paneDoneColor, cfg.PaneDoneColor),
 		WorkingDir:           workDir,
@@ -314,6 +316,7 @@ type session struct {
 	BreakBell            bool
 	BreakEnabled         bool
 	Color                bool
+	HighContrast         bool
 	PaneActiveColor      string
 	PaneDoneColor        string
 	Bootstrap            string
@@ -350,6 +353,7 @@ func (s session) tuiSession() *tui.Session {
 		Approval:      tuiApproval(s.Approval),
 		WorkingDir:    s.WorkingDir,
 		Color:         s.Color,
+		HighContrast:  s.HighContrast,
 		Bell:          s.Bell,
 		BreakInterval: time.Duration(s.BreakIntervalMinutes) * time.Minute,
 		BreakBell:     s.BreakBell,
@@ -547,6 +551,7 @@ func printSession(w io.Writer, s session) {
 	fmt.Fprintf(w, "  bell           %s\n", enabled(s.Bell))
 	fmt.Fprintf(w, "  break          every %dm, bell %s\n", s.BreakIntervalMinutes, enabled(s.BreakBell))
 	fmt.Fprintf(w, "  colour         %s\n", enabled(s.Color))
+	fmt.Fprintf(w, "  high contrast  %s\n", enabled(s.HighContrast))
 	fmt.Fprintf(w, "  pane active    %s\n", orNone(s.PaneActiveColor))
 	fmt.Fprintf(w, "  pane done      %s\n", orNone(s.PaneDoneColor))
 	fmt.Fprintf(w, "  directory      %s\n", orNone(s.WorkingDir))

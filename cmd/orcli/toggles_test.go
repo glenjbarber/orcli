@@ -341,6 +341,41 @@ func TestColorSetsTheSessionAndSavesTheChoice(t *testing.T) {
 	}
 }
 
+// TestContrastSetsTheSessionAndSavesTheChoice mirrors
+// TestColorSetsTheSessionAndSavesTheChoice for /contrast's own save path.
+func TestContrastSetsTheSessionAndSavesTheChoice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orcli.json")
+	if err := os.WriteFile(path, []byte(`{"api_key":"k"}`), config.FileMode); err != nil {
+		t.Fatalf("write the configuration: %v", err)
+	}
+
+	oldPath, oldWrite := configPath, writeHighContrast
+	configPath = func() (string, error) { return path, nil }
+	writeHighContrast = config.WriteHighContrast
+	t.Cleanup(func() { configPath, writeHighContrast = oldPath, oldWrite })
+
+	d := togglesDispatcher(t)
+
+	out, err := d.Run(context.Background(), "/contrast on")
+	if err != nil {
+		t.Fatalf("/contrast on: %v", err)
+	}
+	if !d.session.Options().HighContrast {
+		t.Error("/contrast on did not set the session's own option")
+	}
+	if !strings.Contains(out.Text, "saved") {
+		t.Errorf("/contrast on did not say the choice was saved: %q", out.Text)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the file back: %v", err)
+	}
+	if !strings.Contains(string(got), `"high_contrast":true`) {
+		t.Errorf("the file does not carry the saved choice: %s", got)
+	}
+}
+
 // TestPauseTogglesStateAndMouse covers the two things /pause's own summary asks for
 // together: holding the log still and moving the mouse.
 func TestPauseTogglesStateAndMouse(t *testing.T) {

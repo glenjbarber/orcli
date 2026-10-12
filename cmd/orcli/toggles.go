@@ -339,6 +339,43 @@ func (d *dispatcher) color(args string) (tui.Result, error) {
 // the choice without touching a reader's real file stands in for this.
 var writeColor = config.WriteColor
 
+// contrast is the handler for /contrast, on the same terms color documents:
+// it moves the session's own copy, which is what lineControls reads starting
+// with the next control-block redraw, and the configuration file, through
+// config.WriteHighContrast.
+func (d *dispatcher) contrast(args string) (tui.Result, error) {
+	if d.session == nil {
+		return tui.Result{}, fmt.Errorf("/contrast needs an open interface")
+	}
+
+	set, on, err := onOff(args)
+	if err != nil {
+		return tui.Result{}, fmt.Errorf("/contrast %w", err)
+	}
+	if !set {
+		return tui.Result{Text: reportOnOff("high contrast", d.session.Options().HighContrast)}, nil
+	}
+
+	d.session.SetHighContrast(on)
+
+	path, err := d.activeConfigPath()
+	if err != nil {
+		return tui.Result{Text: fmt.Sprintf(
+			"high contrast is %s, and the configuration file could not be found so the choice is not saved: %v",
+			onOffWord(on), err)}, nil
+	}
+	if err := writeHighContrast(path, on); err != nil {
+		return tui.Result{Text: fmt.Sprintf(
+			"high contrast is %s, and saving the choice to %s failed: %v", onOffWord(on), path, err)}, nil
+	}
+
+	return tui.Result{Text: fmt.Sprintf("high contrast is %s, saved to %s", onOffWord(on), path)}, nil
+}
+
+// writeHighContrast is the configuration writer /contrast saves through, the
+// same variable-not-call reason writeColor is one.
+var writeHighContrast = config.WriteHighContrast
+
 // pause is the handler for /pause.
 //
 // The table's summary is two actions in one word: stop what the client writes, and

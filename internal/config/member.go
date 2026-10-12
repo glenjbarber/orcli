@@ -278,6 +278,35 @@ func WriteColor(path string, on bool) error {
 	return osWriteFile(path, edited)
 }
 
+// WriteHighContrast sets the top-level high_contrast key, by the same
+// byte-preserving edit WriteColor uses.
+func WriteHighContrast(path string, on bool) error {
+	if err := checkMode(path); err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("config: read %s: %w", path, err)
+	}
+	if !isObject(data) {
+		return fmt.Errorf("config: %s: %w", path, ErrNotAnObject)
+	}
+
+	value := "false"
+	if on {
+		value = "true"
+	}
+	edited, err := setMember(data, "high_contrast", value)
+	if err != nil {
+		return err
+	}
+	if err := checkMember(edited, "high_contrast", value); err != nil {
+		return fmt.Errorf("config: the edit did not verify: %w", err)
+	}
+	return osWriteFile(path, edited)
+}
+
 // WriteBreakEnabled sets the top-level break_enabled key while preserving the
 // rest of the hand-edited configuration file.
 func WriteBreakEnabled(path string, on bool) error {

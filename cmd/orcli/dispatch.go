@@ -213,6 +213,9 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 		"color": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
 			return d.color(args)
 		},
+		"contrast": func(ctx context.Context, d *dispatcher, args string) (tui.Result, error) {
+			return d.contrast(args)
+		},
 		// /stealth is the listed name; /cognito is kept as a hidden alias of it in
 		// internal/tui/command.go's table, and both keys here answer to the same
 		// handler since Run looks a typed name up in this map directly rather than
