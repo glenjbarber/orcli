@@ -43,8 +43,11 @@ func TestExampleConfigLoadsThroughTheRealParser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPServers() = %v, want nil", err)
 	}
-	if len(servers) != 1 || servers[0].Name != "example" {
-		t.Errorf("MCPServers() = %+v, want one server named %q", servers, "example")
+	if len(servers) != 2 || servers[0].Name != "example" {
+		t.Errorf("MCPServers() = %+v, want two servers, the first named %q", servers, "example")
+	}
+	if servers[1].Name != "remote-example" || servers[1].URL == "" || len(servers[1].Headers) == 0 {
+		t.Errorf("MCPServers()[1] = %+v, want the remote example with a URL and headers", servers[1])
 	}
 }
 

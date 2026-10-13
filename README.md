@@ -291,9 +291,26 @@ nothing is inherited from the orcli process, on the same grounds the API key
 is never read from it. A server is not started until the model calls
 `mcp_list_resources` or `mcp_read_resource` naming it, and is kept running for
 reuse by later calls in the same session once it is. Only resource listing
-and reading are offered; a server's own tools and prompts are not surfaced,
-and a remote server reached over HTTP or SSE rather than launched locally is
-not supported today.
+and reading are offered; a server's own tools and prompts are not surfaced.
+
+A server is also reachable remotely over the Streamable HTTP transport
+(issue #62) - the one the MCP specification currently recommends for new
+integrations; the older HTTP+SSE transport is not supported. Name `url`
+instead of `command`, with optional `headers` (a bearer token or any other
+credential the remote server itself needs, never read from this process's
+own environment, the same rule `env` follows for a local server):
+
+```json
+{"mcp":{"servers":[{"name":"watchgoose","url":"https://watchgoose.example.com/mcp","headers":{"Authorization":"Bearer your-token"}}]}}
+```
+
+A server names `command` (local) or `url` (remote), never both and never
+neither - either is refused by name at configuration read time. A local and
+a remote server can be configured side by side; `mcp_list_resources` and
+`mcp_read_resource` work identically against either kind once a server is
+named, since both speak the same JSON-RPC shape underneath. A remote
+server's session (if it assigns one) is torn down with a best-effort DELETE
+when the session ends, the same way a local server's subprocess is stopped.
 
 Task operations in Notion require the integration token to be shared with the
 task data source, plus explicit IDs/property names that bind task operations to
