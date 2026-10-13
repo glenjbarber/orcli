@@ -201,6 +201,11 @@ order, whitespace, escapes, and a missing final newline.
 not create or rewrite the default file, and a later run without the flag uses the
 ordinary search order. The selected file must already exist and be mode `0600`.
 
+[`orcli.json.example`](orcli.json.example) at the repository root shows every
+top-level member this client reads, including every optional block below, in
+one file. Copy it to `~/.orcli.json`, fill in the values, and set its mode to
+`0600` (`chmod 0600 ~/.orcli.json`) - a more permissive mode is refused.
+
 The optional `notion` block carries its integration credential and is preserved
 as raw JSON so unknown members survive configuration reads. For example:
 

@@ -1,0 +1,50 @@
+{
+  "api_key": "sk-or-v1-your-openrouter-key",
+  "model": "",
+  "provider": "openrouter.ai",
+  "attribution_id": "",
+  "mouse": false,
+  "bell": false,
+  "break_interval_minutes": 22,
+  "break_bell": false,
+  "break_enabled": true,
+  "color": false,
+  "high_contrast": false,
+  "pane_active_color": "#89b4fa",
+  "pane_done_color": "#a6e3a1",
+  "verbosity": 0,
+  "approval": "ask",
+  "ORCLI_TRUSTED": [],
+  "ORCLI_READABLE": [],
+  "cloudflare": {
+    "api_key": "your-cloudflare-token"
+  },
+  "notion": {
+    "api_key": "your-integration-token",
+    "task_data_source_id": "00000000-0000-0000-0000-000000000000",
+    "task_assignee_property": "Assignee",
+    "task_assignee_id": "00000000-0000-0000-0000-000000000000",
+    "task_status_property": "Status"
+  },
+  "github": {
+    "api_key": "your-github-token",
+    "login": "your-login",
+    "repositories": ["owner/repo"]
+  },
+  "apiary": {
+    "base_url": "https://apiary.example.com",
+    "viewer_token": "your-apiary-viewer-token"
+  },
+  "mcp": {
+    "servers": [
+      {
+        "name": "example",
+        "command": "npx",
+        "args": ["-y", "@example/mcp-server"],
+        "env": {
+          "EXAMPLE_API_KEY": "your-example-key"
+        }
+      }
+    ]
+  }
+}

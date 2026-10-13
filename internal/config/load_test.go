@@ -8,6 +8,46 @@ import (
 	"testing"
 )
 
+// TestExampleConfigLoadsThroughTheRealParser guards the repository's own
+// orcli.json.example: a reader who copies it to ~/.orcli.json should get a
+// file this client opens, not one they have to repair first. The fixture
+// is read from the repository root rather than copied into the test, so a
+// change to either file (adding a new top-level member here, or forgetting
+// to add it there) is caught without anyone having to remember to update
+// both by hand.
+func TestExampleConfigLoadsThroughTheRealParser(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "orcli.json.example"))
+	if err != nil {
+		t.Fatalf("read orcli.json.example: %v", err)
+	}
+
+	path := write(t, t.TempDir(), "orcli.json", string(data), FileMode)
+	cfg, err := Parse(data, path)
+	if err != nil {
+		t.Fatalf("Parse(orcli.json.example) = %v, want nil", err)
+	}
+	if cfg.APIKey == "" {
+		t.Errorf("the example's own api_key was not read back")
+	}
+	if cfg.Provider != "openrouter.ai" {
+		t.Errorf("Provider is %q, want openrouter.ai", cfg.Provider)
+	}
+
+	if key, err := cfg.CloudflareAPIKey(); err != nil || key == "" {
+		t.Errorf("CloudflareAPIKey() = (%q, %v), want a non-empty key and no error", key, err)
+	}
+	if baseURL, token, err := cfg.ApiarySettings(); err != nil || baseURL == "" || token == "" {
+		t.Errorf("ApiarySettings() = (%q, %q, %v), want both set and no error", baseURL, token, err)
+	}
+	servers, err := cfg.MCPServers()
+	if err != nil {
+		t.Fatalf("MCPServers() = %v, want nil", err)
+	}
+	if len(servers) != 1 || servers[0].Name != "example" {
+		t.Errorf("MCPServers() = %+v, want one server named %q", servers, "example")
+	}
+}
+
 // write puts a configuration file on disk at the given mode and returns its
 // path.
 //
