@@ -26,17 +26,28 @@ been scoped.
 
 ## Status
 
-> **Documentation status (October 9, 2026):** This README contains historical implementation descriptions not yet reconciled with the current source tree. `cmd/orcli/main.go` and the configuration and TUI packages now exist; this is no longer an OpenRouter-client-only source tree. Assertions below that these components have not been written or that no binary can be produced are obsolete. Some rendering details also describe an earlier architecture. Refer to current source code, tests, and merged changes for implementation evidence. [Issue #30](https://github.com/glenjbarber/orcli/issues/30) tracks fuller reconciliation. This notice does not assert that CI passes or that a stable release is available.
-
-
-The project is at the beginning. The API client is written and tested; the
-interface, tools, configuration, persistence, panes and compaction are not.
+The project is pre-release, but no longer at the beginning: `cmd/orcli` builds
+a binary, and the interface, tools, configuration, and persistence are written
+and tested alongside the API client.
 
 Implemented:
 
 | Package | Contents |
 | --- | --- |
+| `cmd/orcli` | main package: flags, trust gate, wiring |
+| `internal/apiary` | Apiary client |
+| `internal/clipboard` | clipboard access |
+| `internal/cloudflare` | Cloudflare client |
+| `internal/config` | JSON configuration, colour writer, trusted directories, MCP and keychain settings |
+| `internal/github` | GitHub client |
+| `internal/groq` | Groq client |
+| `internal/keychain` | macOS Keychain access |
+| `internal/mcp` | Model Context Protocol client (stdio and Streamable HTTP transports) |
+| `internal/notion` | Notion client |
 | `internal/openrouter` | HTTP client, SSE stream parser, wire types |
+| `internal/saved` | SQLite session store, autosave naming |
+| `internal/tools` | tool execution: filesystem, git, shell |
+| `internal/tui` | the interface: rendering, input, session, panes |
 
 Tested:
 
@@ -45,37 +56,36 @@ Tested:
 | Stream parser | marker required, text kept before a cut, fragments joined on the wire index, counts read in every shape the endpoint uses |
 | Request path | the request and its headers, the body reaching the parser unconsumed, a refused request quoted and bounded and redacted, tool calls and usage end to end, cancellation |
 
-There is no `cmd/orcli` yet, so no binary is produced by `make build`.
-
 Not yet written:
 
 | Package | Contents |
 | --- | --- |
-| `cmd/orcli` | main package: flags, trust gate, wiring |
 | `internal/bootstrap` | `--bootstrap` documents and symlink resolution |
 | `internal/complete` | Tab completion engine |
-| `internal/config` | JSON configuration, colour writer, trusted directories |
-| `internal/saved` | SQLite session store, autosave naming |
-| `internal/tools` | tool execution: filesystem, git, shell |
-| `internal/tui` | the interface: rendering, input, session, panes |
 
 ## Design overview
 
-A full account of the design lives in `DESIGN.md`. It is written from the code
-and the shape of its history, and it records what the system is and how its
-parts fit, where `AGENTS.md` records why individual decisions were taken. The
-summary below is a short orientation, not a substitute.
+This summary is a short orientation, written from the current source tree. It
+is not a substitute for reading the code.
 
-**Where the packages below are not yet in the tree, they are the design as
-recorded, not a description of code that exists.**
+**`internal/bootstrap` and `internal/complete` are not yet in the tree; they
+are the design as recorded, not a description of code that exists.**
 
 ### Packages
 
 ```
 cmd/orcli/     main package: flags, trust gate, wiring
+internal/apiary/        Apiary client
 internal/bootstrap/     --bootstrap documents (.md, .json, .db) and symlink resolution
+internal/clipboard/     clipboard access
+internal/cloudflare/    Cloudflare client
 internal/complete/      Tab completion engine
 internal/config/        JSON configuration, colour writer, trusted directories
+internal/github/        GitHub client
+internal/groq/          Groq client
+internal/keychain/      macOS Keychain access
+internal/mcp/           Model Context Protocol client (stdio and Streamable HTTP)
+internal/notion/        Notion client
 internal/openrouter/    HTTP client, SSE stream parser, wire types, cost ledger input
 internal/saved/         SQLite session store, autosave naming
 internal/tools/         tool execution: filesystem, git, shell
@@ -83,12 +93,13 @@ internal/tui/           the interface: rendering, input, session, panes
 ```
 
 `internal/` is the module boundary, and the dependency direction is one-way and
-deliberate:
+deliberate: `cmd/orcli` is the only package that imports both `tui` and
+`tools`, and wires them together at runtime rather than letting either import
+the other directly.
 
 ```
-main → config, bootstrap, tui
-tui   → openrouter, tools, config, complete, saved, bootstrap
-tools → openrouter        (wire types only)
+cmd/orcli → apiary, cloudflare, config, github, groq, keychain,
+            mcp, notion, openrouter, saved, tools, tui
 openrouter → (stdlib)
 ```
 
@@ -98,9 +109,14 @@ the interface that drew them.
 
 ### Rendering
 
-The interface is driven through `syscall` directly, with no terminal library,
-because the copyable-text requirement needs control of mouse reporting that
-higher-level libraries take by default.
+The interface uses `github.com/gdamore/tcell/v2`, but narrowly: tcell handles
+terminal initialization, terminfo capability lookup, and decoding key, mouse,
+and paste input events. The actual screen painting is still direct raw writes
+to stdout, driven by the same copyable-text requirement that needs control of
+mouse reporting that higher-level libraries take by default; tcell's own
+buffer-based `Draw`/`Show` path is never used by the active rendering code.
+(`internal/tui` also contains a fully tview/tcell-rendered code path, but it
+has no callers and is not reached at runtime.)
 
 `Frame` is the whole interface at one moment. Its load-bearing contract is that
 every row leaves the renderer as plain text, with the bytes a terminal would act
@@ -181,8 +197,6 @@ Accounting is decoded apart from the reply text. The endpoint sends counts in
 shapes this client cannot always read, and a figure it cannot parse must not cost
 the words beside it: a session with no cost for one response has an inexact
 total, which is a thing the ledger can say, while a lost reply is not.
-
-This is the one package that exists.
 
 ### Configuration
 
