@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
 	"github.com/glenjbarber/orcli/internal/tui"
@@ -693,5 +694,28 @@ func TestSilentTurnStillConfirmsTheModel(t *testing.T) {
 
 	if gotModel != "some/model" || !gotSilent {
 		t.Errorf("confirmed(%q, %v), want (\"some/model\", true)", gotModel, gotSilent)
+	}
+}
+
+// TestNewMCPManagerPassesTheRemoteServerFieldsThrough checks the adapter
+// forwards URL/Headers (issue #62), not only the local Command/Args/Env
+// fields config.MCPServer already carried - configuredServers() (used in
+// every tool's own description) names every configured server regardless of
+// kind, which is enough to prove the remote one actually reached the
+// Manager rather than being dropped on the way.
+func TestNewMCPManagerPassesTheRemoteServerFieldsThrough(t *testing.T) {
+	m := newMCPManager([]config.MCPServer{
+		{Name: "local-files", Command: "npx", Args: []string{"-y", "server-filesystem"}},
+		{Name: "watchgoose", URL: "https://watchgoose.example.com/mcp", Headers: map[string]string{"Authorization": "Bearer t"}},
+	})
+	defer m.Close()
+
+	set := m.ToolSet()
+	if len(set) == 0 {
+		t.Fatal("ToolSet() returned no tools")
+	}
+	desc := set[0].Describe().Function.Description
+	if !strings.Contains(desc, "local-files") || !strings.Contains(desc, "watchgoose") {
+		t.Fatalf("tool description = %q, want it to name both configured servers", desc)
 	}
 }

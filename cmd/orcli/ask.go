@@ -312,7 +312,10 @@ func newToolsetWithTasks(dir, notionToken string, apiarySettings []string, integ
 func newMCPManager(servers []config.MCPServer) *mcp.Manager {
 	set := make([]mcp.Server, 0, len(servers))
 	for _, s := range servers {
-		set = append(set, mcp.Server{Name: s.Name, Command: s.Command, Args: s.Args, Env: s.Env})
+		set = append(set, mcp.Server{
+			Name: s.Name, Command: s.Command, Args: s.Args, Env: s.Env,
+			URL: s.URL, Headers: s.Headers,
+		})
 	}
 	return mcp.NewManager(set)
 }

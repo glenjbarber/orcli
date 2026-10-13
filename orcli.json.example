@@ -44,6 +44,13 @@
         "env": {
           "EXAMPLE_API_KEY": "your-example-key"
         }
+      },
+      {
+        "name": "remote-example",
+        "url": "https://mcp.example.com/mcp",
+        "headers": {
+          "Authorization": "Bearer your-remote-server-token"
+        }
       }
     ]
   },

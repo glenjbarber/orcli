@@ -1,38 +1,51 @@
 // Package mcp provides model-callable tools backed by Model Context Protocol
-// servers the reader has configured, each launched as a subprocess and spoken
-// to over its standard input and output.
+// servers the reader has configured. A server is reached one of two ways: a
+// local command launched as a subprocess and spoken to over its standard
+// input and output, or a remote server reached over HTTP using the
+// Streamable HTTP transport (MCP spec 2025-03-26) - the transport the
+// specification currently recommends for new integrations. The older
+// HTTP+SSE transport is legacy and is not implemented; a server that only
+// offers it is not reachable from this client.
 //
 // Only resource listing and resource reading are offered today. A server's
-// tools and prompts are not surfaced, and a remote server reached over HTTP
-// or SSE rather than launched as a local subprocess is not supported; both
-// are tracked as follow-ups rather than built here.
+// tools and prompts are not surfaced.
 //
 // # Transport
 //
-// The wire format is JSON-RPC 2.0, one message per line, matching the
+// Both transports speak the same JSON-RPC 2.0 request/notification/response
+// shape; only how a message physically travels differs, which is why
+// client's own protocol methods (initialize, listResources, readResource)
+// are written once against the transport interface below and never need to
+// know which kind of server they are talking to.
+//
+// The stdio transport is one message per line on stdin/stdout, matching the
 // protocol's stdio transport. A subprocess is given PATH plus whatever the
 // reader named under the server's own env block in the configuration file,
 // and nothing else: the same rule internal/tools states for the shell and
 // git tools, so a server this package starts cannot inherit a credential the
 // reader did not explicitly hand it.
 //
+// The HTTP transport POSTs one JSON-RPC message per call to the server's
+// configured URL and reads back either a single `application/json` response
+// body or a single-event `text/event-stream` response, whichever the server
+// sends (see http_transport.go's own doc comment for what is and is not
+// implemented - notably, a standalone server-initiated SSE stream opened
+// with GET is not, since this client does not act on unsolicited server
+// notifications over stdio either).
+//
 // # Lazy, and kept once started
 //
 // A server named in the configuration file is not started until the model
 // actually calls a tool naming it. A session that never asks a configured
-// server for anything never pays the cost of a subprocess for it. Once
-// started, a server is kept running and reused by later calls in the same
-// session rather than relaunched each time, since the handshake a server
-// requires before its first real request is not free either.
+// server for anything never pays the cost of starting it. Once started, a
+// server is kept and reused by later calls in the same session rather than
+// relaunched or re-dialed each time, since the handshake a server requires
+// before its first real request is not free either.
 package mcp
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -43,8 +56,9 @@ import (
 
 // callTimeout bounds how long a single JSON-RPC round trip may take before it
 // is reported as timed out rather than left to hang the turn that asked for
-// it. A local subprocess that has not answered within this window is treated
-// as broken, and the next call to the same server starts a fresh one.
+// it. A local subprocess or a remote server that has not answered within this
+// window is treated as broken, and the next call to the same server starts a
+// fresh one.
 //
 // It is a variable, not a constant, only so a test can shrink it rather than
 // run for the full 30 seconds to prove a timeout is reported; production
@@ -60,8 +74,13 @@ const protocolVersion = "2024-11-05"
 // one tool call into an unbounded loop.
 const maxResourcePages = 64
 
-// Server names one MCP server the reader has configured, by the command and
-// arguments that launch it.
+// Server names one MCP server the reader has configured.
+//
+// A local server names Command (and, optionally, Args/Env); a remote one
+// names URL (and, optionally, Headers) instead. The two are mutually
+// exclusive - internal/config.MCPServers refuses a server naming both or
+// neither before this package ever sees it, so start treats a non-empty URL
+// as the only signal it needs to pick the HTTP transport.
 type Server struct {
 	// Name is how the model names this server when it calls a tool. It is
 	// the key the reader chose in the configuration file, not something
@@ -69,22 +88,43 @@ type Server struct {
 	Name string
 
 	// Command is the program to run, resolved by the search path the way
-	// internal/tools resolves the shell tool's programs.
+	// internal/tools resolves the shell tool's programs. Empty for a
+	// remote server.
 	Command string
 
-	// Args are the arguments the program is started with.
+	// Args are the arguments the program is started with. Local only.
 	Args []string
 
 	// Env is the subprocess's environment, as KEY=VALUE pairs, in addition
 	// to PATH. It is never read from this process's own environment: a
 	// server that needs a credential gets it because the reader wrote it
 	// into the server's own env block, the same way every other credential
-	// in the configuration file is handled.
+	// in the configuration file is handled. Local only.
 	Env []string
+
+	// URL is the remote server's own Streamable HTTP endpoint - one URL
+	// every JSON-RPC message is POSTed to. Empty for a local server.
+	URL string
+
+	// Headers are sent with every request to a remote server (for example
+	// Authorization), the HTTP transport's own equivalent of Env: a
+	// credential a remote server needs is here because the reader wrote it
+	// here, never read from this process's own environment. Remote only.
+	Headers map[string]string
+}
+
+// transport is the seam client's protocol methods are written against, so
+// initialize/listResources/readResource never need to know whether they are
+// talking to a subprocess or a remote endpoint.
+type transport interface {
+	call(method string, params any) (json.RawMessage, error)
+	notify(method string, params any) error
+	Close() error
 }
 
 // Manager holds the MCP servers a session was configured with, and starts
-// each one's subprocess lazily, on the first call that names it.
+// each one's subprocess or opens its HTTP session lazily, on the first call
+// that names it.
 type Manager struct {
 	mu      sync.Mutex
 	servers map[string]Server
@@ -146,8 +186,8 @@ func (m *Manager) configuredServers() string {
 	return "configured servers: " + strings.Join(names, ", ")
 }
 
-// get returns the running client for a configured server, starting and
-// initializing it on first use.
+// get returns the running client for a configured server, starting (local)
+// or dialing (remote) and initializing it on first use.
 func (m *Manager) get(name string) (*client, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -175,7 +215,8 @@ func (m *Manager) get(name string) (*client, error) {
 }
 
 // drop closes and discards a server's client, so the next call to it starts
-// a fresh subprocess rather than reusing one a prior call found broken.
+// a fresh subprocess or HTTP session rather than reusing one a prior call
+// found broken.
 func (m *Manager) drop(name string) {
 	m.mu.Lock()
 	c, ok := m.clients[name]
@@ -205,9 +246,9 @@ type rpcNotification struct {
 }
 
 // rpcResponse is what a server sends back. ID is read as raw JSON because an
-// MCP server's own notification to the client arrives on the same stream with
-// no id at all, and this client tells the two apart by whether ID decodes to
-// a number rather than by a separate shape.
+// MCP server's own notification to the client can arrive on the same stream
+// with no id at all, and this client tells the two apart by whether ID
+// decodes to a number rather than by a separate shape.
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -221,187 +262,46 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// client is one running MCP server, spoken to over newline-delimited
-// JSON-RPC on its stdin and stdout.
-//
-// A single background goroutine owns the read side and demultiplexes
-// responses to the call that is waiting for each one by ID, which is what
-// lets a call time out without corrupting a read another call still needs:
-// the reader never stops, it only stops being waited on.
+// client is one running MCP server - local or remote - spoken to through its
+// own transport. Every protocol-level method below (initialize,
+// listResources, readResource) is written once against transport and works
+// unchanged for either kind of server.
 type client struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-
-	mu      sync.Mutex
-	nextID  int64
-	pending map[int64]chan rpcResponse
-	readErr error
+	t transport
 }
 
-// start launches a server's subprocess and begins reading its output. It
-// does not perform the initialize handshake; the caller does that once the
-// client is constructed, so a failed handshake can close what start opened.
+// start opens a server's transport - launching a subprocess for a local
+// server, or preparing an HTTP session for a remote one - based on which of
+// Command/URL the Server names. It does not perform the initialize
+// handshake; the caller does that once the client is constructed, so a
+// failed handshake can close what start opened.
 func start(s Server) (*client, error) {
-	cmd := exec.Command(s.Command, s.Args...)
-	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, s.Env...)
-
-	stdin, err := cmd.StdinPipe()
+	if s.URL != "" {
+		return &client{t: newHTTPTransport(s.URL, s.Headers)}, nil
+	}
+	t, err := newStdioTransport(s)
 	if err != nil {
-		return nil, fmt.Errorf("mcp: open stdin: %w", err)
+		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("mcp: open stdout: %w", err)
-	}
-	// Stderr is discarded rather than captured: a server's diagnostic chatter
-	// is not a resource and is not shown to the model, and capturing it
-	// without a bound would be one more place a hung or chatty server could
-	// grow without limit.
-	cmd.Stderr = io.Discard
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("mcp: start %s: %w", s.Command, err)
-	}
-
-	c := &client{cmd: cmd, stdin: stdin, pending: make(map[int64]chan rpcResponse)}
-	go c.readLoop(stdout)
-	return c, nil
-}
-
-// readLoop reads one JSON-RPC message per line for the life of the
-// subprocess, and delivers each to whichever call is waiting for its ID. A
-// line this client cannot parse, or one carrying no numeric ID - a
-// notification a server sent unasked - is skipped rather than treated as a
-// fault: this client has nothing it is waiting to do with either.
-func (c *client) readLoop(r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16<<20)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var resp rpcResponse
-		if json.Unmarshal([]byte(line), &resp) != nil {
-			continue
-		}
-		var id int64
-		if json.Unmarshal(resp.ID, &id) != nil {
-			continue
-		}
-
-		c.mu.Lock()
-		ch, ok := c.pending[id]
-		if ok {
-			delete(c.pending, id)
-		}
-		c.mu.Unlock()
-
-		if ok {
-			ch <- resp
-		}
-	}
-
-	err := fmt.Errorf("mcp: the server's output ended")
-	if scanner.Err() != nil {
-		err = fmt.Errorf("mcp: read: %w", scanner.Err())
-	}
-
-	c.mu.Lock()
-	c.readErr = err
-	pending := c.pending
-	c.pending = make(map[int64]chan rpcResponse)
-	c.mu.Unlock()
-
-	for _, ch := range pending {
-		close(ch)
-	}
+	return &client{t: t}, nil
 }
 
 // call sends a request and waits for its matching response, or for
-// callTimeout to pass.
-//
-// A call that times out drops its own slot so the (possibly still arriving)
-// response is discarded by readLoop rather than delivered to no one, but it
-// does not stop the subprocess: a slow answer is not evidence the server is
-// broken, and the next call gets its own fresh wait.
+// callTimeout to pass. Delegates to the transport; see stdioTransport.call
+// and httpTransport.call for how each kind actually waits.
 func (c *client) call(method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	c.nextID++
-	id := c.nextID
-	ch := make(chan rpcResponse, 1)
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	req := rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.forget(id)
-		return nil, fmt.Errorf("mcp: encode %s: %w", method, err)
-	}
-	data = append(data, '\n')
-
-	if _, err := c.stdin.Write(data); err != nil {
-		c.forget(id)
-		return nil, fmt.Errorf("mcp: write %s: %w", method, err)
-	}
-
-	select {
-	case resp, ok := <-ch:
-		if !ok {
-			c.mu.Lock()
-			readErr := c.readErr
-			c.mu.Unlock()
-			return nil, fmt.Errorf("mcp: %s: %w", method, readErr)
-		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("mcp: %s: %s (code %d)", method, resp.Error.Message, resp.Error.Code)
-		}
-		return resp.Result, nil
-
-	case <-time.After(callTimeout):
-		c.forget(id)
-		return nil, fmt.Errorf("mcp: %s timed out after %s", method, callTimeout)
-	}
-}
-
-// forget removes a call's slot without waiting for it further.
-func (c *client) forget(id int64) {
-	c.mu.Lock()
-	delete(c.pending, id)
-	c.mu.Unlock()
+	return c.t.call(method, params)
 }
 
 // notify sends a JSON-RPC message with no reply expected.
 func (c *client) notify(method string, params any) error {
-	note := rpcNotification{JSONRPC: "2.0", Method: method, Params: params}
-	data, err := json.Marshal(note)
-	if err != nil {
-		return fmt.Errorf("mcp: encode %s: %w", method, err)
-	}
-	data = append(data, '\n')
-	_, err = c.stdin.Write(data)
-	return err
+	return c.t.notify(method, params)
 }
 
-// Close stops the subprocess, giving it a moment to exit on its own before it
-// is killed outright.
+// Close stops the subprocess, or ends the HTTP session, depending on which
+// transport this client was opened with.
 func (c *client) Close() error {
-	c.stdin.Close()
-
-	done := make(chan error, 1)
-	go func() { done <- c.cmd.Wait() }()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		if c.cmd.Process != nil {
-			c.cmd.Process.Kill()
-		}
-		<-done
-	}
-	return nil
+	return c.t.Close()
 }
 
 // initialize performs the handshake every MCP server requires before any

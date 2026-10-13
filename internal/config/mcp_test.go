@@ -41,6 +41,65 @@ func TestMCPServersAreReadAndUnknownMembersSurvive(t *testing.T) {
 	}
 }
 
+// TestMCPServersReadsARemoteServer covers a server configured with a url
+// instead of a command - the Streamable HTTP shape this client now supports
+// (issue #62).
+func TestMCPServersReadsARemoteServer(t *testing.T) {
+	h := home(t)
+	writeConfigAt(t, h, `{"api_key":"openrouter","mcp":{"servers":[{"name":"watchgoose","url":"https://watchgoose.example.com/mcp","headers":{"Authorization":"Bearer secret-token"}}]}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	servers, err := cfg.MCPServers()
+	if err != nil {
+		t.Fatalf("MCPServers: %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("MCPServers = %#v, want one server", servers)
+	}
+	got := servers[0]
+	if got.Name != "watchgoose" || got.URL != "https://watchgoose.example.com/mcp" {
+		t.Fatalf("MCPServers[0] = %#v", got)
+	}
+	if got.Command != "" {
+		t.Errorf("a remote server carried a command: %q", got.Command)
+	}
+	if got.Headers["Authorization"] != "Bearer secret-token" {
+		t.Errorf("MCPServers[0].Headers = %#v", got.Headers)
+	}
+}
+
+// TestMCPServersRejectBothCommandAndURL and
+// TestMCPServersRejectNeitherCommandNorURL guard the mutual-exclusion rule:
+// a server is local or remote, never both and never neither.
+func TestMCPServersRejectBothCommandAndURL(t *testing.T) {
+	h := home(t)
+	writeConfigAt(t, h, `{"api_key":"openrouter","mcp":{"servers":[{"name":"files","command":"npx","url":"https://example.com/mcp"}]}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	_, err = cfg.MCPServers()
+	if err == nil || !strings.Contains(err.Error(), "both a command and a url") {
+		t.Fatalf("MCPServers() = %v, want a refusal naming both a command and a url", err)
+	}
+}
+
+func TestMCPServersRejectNeitherCommandNorURL(t *testing.T) {
+	h := home(t)
+	writeConfigAt(t, h, `{"api_key":"openrouter","mcp":{"servers":[{"name":"files"}]}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	_, err = cfg.MCPServers()
+	if err == nil || !strings.Contains(err.Error(), "neither a command nor a url") {
+		t.Fatalf("MCPServers() = %v, want a refusal naming neither", err)
+	}
+}
+
 func TestMCPServersMissingBlockOrEmpty(t *testing.T) {
 	for _, body := range []string{
 		`{"api_key":"openrouter"}`,
