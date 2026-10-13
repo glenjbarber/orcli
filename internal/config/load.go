@@ -40,6 +40,18 @@ type Config struct {
 	// APIKey is the credential. It is never read from the environment.
 	APIKey string `json:"api_key,omitempty"`
 
+	// APIKeyKeychain names an entry in Keychain's own Items map that
+	// resolves to the credential when APIKey itself is empty (issue
+	// #67). See ResolveAPIKey for the precedence between the two.
+	APIKeyKeychain string `json:"api_key_keychain,omitempty"`
+
+	// Keychain holds the named macOS Keychain account/service
+	// references APIKeyKeychain (and, in future, a per-provider
+	// block's own equivalent) resolves against. See keychain.go's own
+	// doc comment for why this block is decoded rather than kept as
+	// raw bytes like Cloudflare/Notion/GitHub/Apiary below.
+	Keychain *Keychain `json:"keychain,omitempty"`
+
 	// Model is the model identifier a session starts with.
 	Model string `json:"model,omitempty"`
 
@@ -330,6 +342,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 		switch key {
 		case "api_key":
 			err = readString(value, &c.APIKey)
+		case "api_key_keychain":
+			err = readString(value, &c.APIKeyKeychain)
 		case "model":
 			err = readString(value, &c.Model)
 		case "provider":
@@ -374,6 +388,8 @@ func (c *Config) decode(raw map[string]json.RawMessage) error {
 			c.Apiary, err = readApiary(value)
 		case mcpKey:
 			c.MCP, err = readMCP(value)
+		case keychainKey:
+			c.Keychain, err = readKeychain(value)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)

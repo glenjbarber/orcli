@@ -213,6 +213,50 @@ as raw JSON so unknown members survive configuration reads. For example:
 {"notion":{"api_key":"your-integration-token"}}
 ```
 
+### Resolving `api_key` from the macOS Keychain
+
+`api_key` can name a macOS Keychain item instead of carrying the credential
+itself, so `orcli.json` never has to hold the raw key (issue #67). Add
+`api_key_keychain` naming an entry in a `keychain.items` block, where each
+entry is the `account`/`service` pair `security find-generic-password`'s own
+`-a`/`-s` flags match against:
+
+```json
+{"api_key_keychain":"openrouter","keychain":{"items":{"openrouter":{"account":"john@smith.com","service":"private-openrouter-api"}}}}
+```
+
+**Precedence is deliberate: an inline `api_key`, when present, always wins
+over `api_key_keychain`.** Migrating means removing `api_key` from the file,
+not just adding `api_key_keychain` beside it - a stale `api_key` sitting
+next to a working Keychain reference would otherwise keep being used with no
+error anywhere, which is the opposite of what this feature is for.
+
+Manage named items without ever typing a secret into the interactive session
+(which would echo it into the transcript) or display one on screen:
+
+```bash
+orcli keychain set openrouter john@smith.com private-openrouter-api   # prompts for the secret, no echo
+orcli keychain list                                                   # names, accounts, services - never secret values
+orcli keychain delete openrouter                                      # removes the config reference AND the Keychain item
+```
+
+`orcli keychain set` reads the secret from the terminal with echo
+suppressed when stdin is a real terminal (`golang.org/x/term.ReadPassword`);
+piped input is read as a single line instead, which has no terminal echo to
+suppress in the first place. The secret reaches the underlying `security
+add-generic-password` command as one argument - the one exposure this
+approach cannot avoid while driving that CLI rather than the Security
+framework's own API directly, visible only to another local process
+inspecting the process list at that moment, and never written to this
+program's own logs, stdout, or any error it returns.
+
+Separate named entries support distinct per-provider credentials and a
+dedicated test key (`keychain.items.test` in the example above), so running
+the test suite never has to revoke or share the credential a real session
+uses. Only macOS is supported; `orcli keychain` and `api_key_keychain` both
+report a clear, named error on any other platform rather than attempting to
+run a `security` binary that is not there.
+
 The optional `github` block carries an `api_key` string and preserves unknown
 members in the same way:
 

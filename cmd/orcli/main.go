@@ -14,9 +14,20 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/groq"
+	"github.com/glenjbarber/orcli/internal/keychain"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
+
+// keychainLookup adapts internal/keychain.Lookup to config.KeychainLookupFunc
+// - the one place this package's own dependency on internal/keychain is
+// named, so internal/config itself stays free of it (see
+// config.KeychainLookupFunc's own doc comment for why that boundary
+// matters). A package variable, like keychainSet/keychainDelete in
+// keychain_cmd.go, so a test can stand in for the real Keychain.
+var keychainLookup config.KeychainLookupFunc = func(ctx context.Context, ref config.KeychainRef) (string, error) {
+	return keychain.Lookup(ctx, keychain.Ref{Account: ref.Account, Service: ref.Service})
+}
 
 // version is the build identity.
 //
@@ -147,7 +158,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return nil
 	}
 
-	if rest := fs.Args(); len(rest) > 0 {
+	// keychain is dispatched after the configuration is loaded, below,
+	// because every one of its own subcommands needs cfg and
+	// activeConfigPath - version and help need neither, so they are
+	// still answered immediately rather than waiting on a config load
+	// and write they have no use for.
+	if rest := fs.Args(); len(rest) > 0 && rest[0] != "keychain" {
 		return subcommand(rest[0], rest[1:], stdout)
 	}
 
@@ -190,6 +206,24 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch {
 	case err == nil:
 	case errors.Is(err, config.ErrNoAPIKey):
+		// api_key_keychain (issue #67) is tried before falling back to the
+		// stub: a reader who migrated to a Keychain reference and removed
+		// api_key from the file should start normally, not be told the
+		// credential is missing when it is one Lookup away.
+		if cfg.APIKeyKeychain != "" {
+			key, kerr := cfg.ResolveAPIKey(ctx, keychainLookup)
+			if kerr == nil {
+				cfg.APIKey = key
+				break
+			}
+			// A configured reference that fails to resolve (locked
+			// Keychain, denied access, the item renamed or removed) is
+			// reported here rather than silently falling through to the
+			// stub, which would read as "no credential configured" when
+			// one plainly is - a reader debugging this needs to see which
+			// of the two states they are actually in.
+			return fmt.Errorf("resolving api_key_keychain %q: %w", cfg.APIKeyKeychain, kerr)
+		}
 		// A missing key does not stop startup. Keep an explicit empty member in the
 		// file the reader can edit, and let the interface report the missing value.
 		if err := config.EnsureAPIKeyStub(activeConfigPath); err != nil {
@@ -205,6 +239,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		// where the file should be. A file holding a credential that another account
 		// can read has already leaked, and that is worth refusing to start over.
 		return err
+	}
+
+	if rest := fs.Args(); len(rest) > 0 && rest[0] == "keychain" {
+		return runKeychainCommand(ctx, rest[1:], stdin, stdout, cfg, activeConfigPath)
 	}
 
 	approval, err := cfg.ApprovalMode()
@@ -625,8 +663,11 @@ func readable(path string) error {
 
 // subcommand runs a non-interactive command.
 //
-// There are two, and both print and stop. They exist so a script can ask what this
-// build is without starting a session that will not finish.
+// version and help print and stop; they exist so a script can ask what this
+// build is without starting a session that will not finish. keychain is
+// dispatched separately, in run itself, because it needs the loaded
+// configuration and this function does not have it (see run's own comment
+// at that call site).
 func subcommand(name string, _ []string, stdout io.Writer) error {
 	switch name {
 	case "version":
@@ -639,7 +680,7 @@ func subcommand(name string, _ []string, stdout io.Writer) error {
 		// An unknown name is refused by name rather than treated as a prompt, since
 		// a script that passed the wrong word has a bug in it that running an
 		// interactive session would hide.
-		return fmt.Errorf("unknown command %q: the commands are version and help", name)
+		return fmt.Errorf("unknown command %q: the commands are version, help and keychain", name)
 	}
 }
 
@@ -655,6 +696,9 @@ usage:
   orcli                  open the interface
   orcli version          print the version
   orcli help             print this message
+  orcli keychain set NAME ACCOUNT SERVICE    add/update a named macOS Keychain reference
+  orcli keychain list                        list configured names (never secret values)
+  orcli keychain delete NAME                 remove a named reference and its Keychain item
 
 flags:
   --version              print the version and stop

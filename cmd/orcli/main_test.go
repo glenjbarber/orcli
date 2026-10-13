@@ -715,6 +715,79 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
+// TestStartupResolvesAPIKeyFromKeychainWhenConfigured is issue #67's own
+// runtime path: a file with api_key_keychain set and no inline api_key
+// should start normally, using the Keychain-resolved credential, rather
+// than being treated as having no credential at all.
+func TestStartupResolvesAPIKeyFromKeychainWhenConfigured(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key_keychain":"openrouter","keychain":{"items":{"openrouter":{"account":"john@smith.com","service":"private-openrouter-api"}}}}`)
+		old := keychainLookup
+		keychainLookup = func(ctx context.Context, ref config.KeychainRef) (string, error) {
+			if ref.Account != "john@smith.com" || ref.Service != "private-openrouter-api" {
+				t.Errorf("lookup called with %+v", ref)
+			}
+			return "resolved-from-keychain", nil
+		}
+		t.Cleanup(func() { keychainLookup = old })
+
+		if _, _, err := runIn(t, false); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		data, readErr := os.ReadFile(config.SearchOrder[0])
+		if readErr != nil {
+			t.Fatalf("read config: %v", readErr)
+		}
+		if strings.Contains(string(data), `"api_key": ""`) {
+			t.Error("the empty api_key stub was written despite a resolvable api_key_keychain")
+		}
+	})
+}
+
+// TestStartupReportsAFailedKeychainResolutionRatherThanFallingBackSilently
+// proves the deliberate choice in run's own ErrNoAPIKey case: a configured
+// api_key_keychain that fails to resolve is a startup error naming the
+// reference, not a silent fall-through to "no credential configured".
+func TestStartupReportsAFailedKeychainResolutionRatherThanFallingBackSilently(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key_keychain":"openrouter","keychain":{"items":{"openrouter":{"account":"a","service":"s"}}}}`)
+		old := keychainLookup
+		sentinel := errors.New("keychain: locked")
+		keychainLookup = func(ctx context.Context, ref config.KeychainRef) (string, error) {
+			return "", sentinel
+		}
+		t.Cleanup(func() { keychainLookup = old })
+
+		_, _, err := runIn(t, false)
+		if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "openrouter") {
+			t.Fatalf("run() error = %v, want it to wrap the lookup failure and name %q", err, "openrouter")
+		}
+		data, readErr := os.ReadFile(config.SearchOrder[0])
+		if readErr != nil {
+			t.Fatalf("read config: %v", readErr)
+		}
+		if strings.Contains(string(data), `"api_key": ""`) {
+			t.Error("the empty api_key stub was written over a configured (if currently failing) api_key_keychain")
+		}
+	})
+}
+
+// TestKeychainSubcommandDispatchesThroughRun proves `orcli keychain list`
+// reaches runKeychainCommand end to end, with the configuration run itself
+// loaded rather than a hand-built one.
+func TestKeychainSubcommandDispatchesThroughRun(t *testing.T) {
+	withHome(t, func() {
+		writeConfig(t, `{"api_key":"k","keychain":{"items":{"openrouter":{"account":"a","service":"s"}}}}`)
+		out, _, err := runIn(t, false, "keychain", "list")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(out, "openrouter") {
+			t.Errorf("output = %q, want it to mention the configured item", out)
+		}
+	})
+}
+
 func TestMissingAPIKeyLeavesAnEmptyConfigStub(t *testing.T) {
 	withHome(t, func() {
 		_, _, err := runIn(t, false)
