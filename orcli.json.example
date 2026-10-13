@@ -46,5 +46,17 @@
         }
       }
     ]
+  },
+  "keychain": {
+    "items": {
+      "openrouter": {
+        "account": "john@smith.com",
+        "service": "private-openrouter-api"
+      },
+      "test": {
+        "account": "john@smith.com",
+        "service": "orcli-test-key"
+      }
+    }
   }
 }
