@@ -56,7 +56,7 @@ reader may act on, and what the session is holding.
 | --- | --- | --- | --- |
 | 0 | `fieldCwd` | the directory | `.` |
 | 1 | `fieldSession` | which session | `1` |
-| 2 | `fieldProvider` | the endpoint host | first character, `-` if none |
+| 2 | `fieldProvider` | the configured provider selector | first character, `-` if none |
 | 3 | `fieldModel` | the model | first character, `-` if none |
 | 4 | `fieldKey` | whether a credential is set | `k` or `-` |
 | 5 | `fieldState` | the state | the word, not a glyph |

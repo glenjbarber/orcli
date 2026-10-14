@@ -167,11 +167,16 @@ There is no connection command. The wiring in `openInterface` is where the probe
 lives:
 
 ```go
-return tui.Start(ctx, s, tui.NewScreen(out, size),
+return tui.Start(ctx, s,
     d.Run,
-    ask(s, newTransport(cfg.APIKey), cfg.AttributionID, confirmModel(s)),
+    ask(s, transportFor(cfg.Provider, cfg.APIKey), cfg.AttributionID, confirmModel(s)),
 )
 ```
+
+`transportFor` selects Liquid when the trimmed, case-insensitive provider value
+is `liquid`. Empty and other provider values retain the OpenRouter default.
+Liquid model discovery is routed by the dispatcher through the same provider
+selection rule.
 
 A reader's own first question is the probe. A turn that came back with text has
 proved the credential and the model together, and `confirmModel` is what writes
@@ -244,7 +249,6 @@ present is the only thing it has any business carrying.
    reported and gates nothing: `tui.Options` has no field for it, and no tool is
    offered.
 
-4. **The model is not chosen from a catalogue.** `ModelIsOffered` is exported and
-   has no caller, since the transport has no models endpoint, so a reader naming a
-   model the endpoint does not offer finds out from a refusal rather than before
-   the request.
+4. **Choosing a model is not validated against a catalogue.** Liquid `/models`
+   lists live IDs, but `/model` does not check a selected ID against that list.
+   OpenRouter model discovery is not implemented in this build.

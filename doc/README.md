@@ -68,10 +68,12 @@ C0 and C1 controls and the delete character, keeping only the tab. A model can
 write anything into a reply, so a row that is not filtered before it is drawn is a
 model steering the terminal.
 
-**The credential never reaches a row, a diagnostic, or the environment.** It is
-read from the configuration file and from nowhere else. `OPENROUTER_API_KEY` is
-ignored even when set, since a file shadowed by a stale value elsewhere is a
-failure a reader cannot see.
+**The credential never reaches a row, a diagnostic, or the environment.** The
+selected provider's key is read from the configuration file and from nowhere
+else. `OPENROUTER_API_KEY`, `LIQUID_API_KEY`, and other key-shaped environment
+variables are ignored even when set. OpenRouter remains the default; setting
+`"provider": "liquid"` selects Liquid Console with the same top-level
+`api_key` member.
 
 **A path outside the working directory is refused** before anything is opened or
 run, and containment for a subprocess is an open descriptor rather than a prefix

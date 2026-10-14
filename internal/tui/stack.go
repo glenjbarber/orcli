@@ -117,7 +117,7 @@ const (
 	// fieldSession is which session the field is typed into.
 	fieldSession
 
-	// fieldProvider is the endpoint host.
+	// fieldProvider is the configured provider selector.
 	fieldProvider
 
 	// fieldModel is the model answering.

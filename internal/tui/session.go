@@ -55,7 +55,7 @@ type Options struct {
 	// and the reader is better served by being told which key to press.
 	Model string
 
-	// Provider names the endpoint host, for the status bar.
+	// Provider names the selected provider, for the status bar.
 	Provider string
 
 	// Approval is the session approval mode: ask, allow, or deny.
