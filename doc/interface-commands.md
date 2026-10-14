@@ -561,5 +561,5 @@ switches between it and the main session; a full pane set is not implemented.
    conversation, so a follow-up question is blind to what came before it.
 
 6. **`ModelIsOffered` has no caller.** It is the check a reader naming a model the
-   endpoint does not offer would want, and it needs a catalogue that nothing
-   fetches, since the transport has no models endpoint.
+   endpoint does not offer would want. `/models` now fetches the configured
+   provider's catalog, though model selection does not yet call this check.

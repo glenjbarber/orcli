@@ -206,6 +206,10 @@ func renderModels(models []openrouter.ModelInfo, freeOnly bool) string {
 			fmt.Fprintf(&b, "%s  %s", m.ID, m.Name)
 			continue
 		}
+		if m.PricingUnknown {
+			fmt.Fprintf(&b, "%s  pricing unavailable", m.ID)
+			continue
+		}
 		fmt.Fprintf(&b, "%s  %s  prompt %s / completion %s per token",
 			m.ID, m.Name, orDash(m.Pricing.Prompt), orDash(m.Pricing.Completion))
 	}

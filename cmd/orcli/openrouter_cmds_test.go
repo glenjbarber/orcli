@@ -97,6 +97,22 @@ var modelsFixture = []openrouter.ModelInfo{
 	{ID: "other/paid", Name: "Other Paid", Pricing: openrouter.Pricing{Prompt: "0.00001", Completion: "0.00002"}},
 }
 
+func TestUnknownPricingIsNotFreeAndIsShown(t *testing.T) {
+	model := openrouter.ModelInfo{ID: "liquid/model", Name: "liquid/model", PricingUnknown: true}
+	if model.Free() {
+		t.Fatal("unknown pricing was treated as free")
+	}
+	d := overCatalog(t, &fakeCatalog{models: []openrouter.ModelInfo{model}})
+	out := runCmd(t, d, "/models")
+	if !strings.Contains(out.Text, "pricing unavailable") {
+		t.Errorf("unknown pricing not rendered: %q", out.Text)
+	}
+	free := runCmd(t, d, "/freemodels")
+	if !strings.Contains(free.Text, "no free models match") {
+		t.Errorf("unknown price appeared free: %q", free.Text)
+	}
+}
+
 // TestModelsListsEveryModelUnfiltered covers /models with no argument.
 func TestModelsListsEveryModelUnfiltered(t *testing.T) {
 	d := overCatalog(t, &fakeCatalog{models: modelsFixture})

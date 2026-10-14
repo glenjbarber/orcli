@@ -5,6 +5,7 @@ import (
 
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/groq"
+	"github.com/glenjbarber/orcli/internal/liquid"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 )
 
@@ -28,6 +29,32 @@ func TestIsGroqProvider(t *testing.T) {
 		if got := isGroqProvider(tc.provider); got != tc.want {
 			t.Errorf("isGroqProvider(%q) = %v, want %v", tc.provider, got, tc.want)
 		}
+	}
+}
+
+func TestIsLiquidProvider(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		want     bool
+	}{
+		{"liquid", true}, {"Liquid", true}, {" LIQUID ", true}, {"", false}, {"openrouter.ai", false}, {"not-liquid", false},
+	} {
+		if got := isLiquidProvider(tc.provider); got != tc.want {
+			t.Errorf("isLiquidProvider(%q) = %v, want %v", tc.provider, got, tc.want)
+		}
+	}
+}
+
+func TestNewDispatcherForChoosesLiquidClient(t *testing.T) {
+	d := newDispatcherFor(config.Config{APIKey: "k", Provider: "liquid"})
+	if _, ok := d.newORClient("k").(*liquid.Client); !ok {
+		t.Errorf("newORClient chose %T, want *liquid.Client", d.newORClient("k"))
+	}
+}
+
+func TestNewTransportChoosesLiquid(t *testing.T) {
+	if _, ok := newTransport(config.Config{APIKey: "k", Provider: "liquid"}).(*liquid.Client); !ok {
+		t.Error("newTransport did not choose *liquid.Client")
 	}
 }
 

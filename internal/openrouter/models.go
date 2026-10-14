@@ -33,6 +33,10 @@ type ModelInfo struct {
 	// what [ModelInfo.Free] answers, which is the one thing /freemodels exists to
 	// filter on.
 	Pricing Pricing `json:"pricing"`
+
+	// PricingUnknown distinguishes providers that do not publish model pricing
+	// from providers whose catalog reports an empty (and therefore zero) price.
+	PricingUnknown bool `json:"-"`
 }
 
 // Pricing is the per-token cost of one model, as the endpoint reports it.
@@ -59,7 +63,7 @@ type Pricing struct {
 // prices at zero under a name that does not say so, and would wrongly admit one
 // that happens to end in ":free" but whose price changed.
 func (m ModelInfo) Free() bool {
-	return isZeroPrice(m.Pricing.Prompt) && isZeroPrice(m.Pricing.Completion)
+	return !m.PricingUnknown && isZeroPrice(m.Pricing.Prompt) && isZeroPrice(m.Pricing.Completion)
 }
 
 // isZeroPrice reports whether a pricing figure is absent or exactly zero.

@@ -42,6 +42,7 @@ Implemented:
 | `internal/config` | JSON configuration, colour writer, trusted directories, MCP and keychain settings |
 | `internal/github` | GitHub client |
 | `internal/groq` | Groq client |
+| `internal/liquid` | Liquid Console client |
 | `internal/keychain` | macOS Keychain access |
 | `internal/mcp` | Model Context Protocol client (stdio and Streamable HTTP transports) |
 | `internal/notion` | Notion client |
@@ -112,6 +113,7 @@ internal/complete/      Tab completion engine
 internal/config/        JSON configuration, colour writer, trusted directories
 internal/github/        GitHub client
 internal/groq/          Groq client
+internal/liquid/        Liquid Console client
 internal/keychain/      macOS Keychain access
 internal/mcp/           Model Context Protocol client (stdio and Streamable HTTP)
 internal/notion/        Notion client
@@ -127,7 +129,7 @@ deliberate: `cmd/orcli` is the only package that imports both `tui` and
 the other directly.
 
 ```
-cmd/orcli → apiary, cloudflare, config, github, groq, keychain,
+cmd/orcli → apiary, cloudflare, config, github, groq, liquid, keychain,
             mcp, notion, openrouter, saved, tools, tui
 openrouter → (stdlib)
 ```

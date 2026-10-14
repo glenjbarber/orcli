@@ -20,6 +20,9 @@ import "strings"
 // /models response (see internal/groq.Client.Models).
 const groqProviderName = "groq"
 
+// liquidProviderName is the exact selector for Liquid Console.
+const liquidProviderName = "liquid"
+
 // isGroqProvider reports whether a configured provider string selects Groq
 // rather than OpenRouter.
 //
@@ -31,4 +34,9 @@ const groqProviderName = "groq"
 // named in, must keep working exactly as it did.
 func isGroqProvider(provider string) bool {
 	return strings.EqualFold(strings.TrimSpace(provider), groqProviderName)
+}
+
+// isLiquidProvider reports whether a configured provider string selects Liquid.
+func isLiquidProvider(provider string) bool {
+	return strings.EqualFold(strings.TrimSpace(provider), liquidProviderName)
 }

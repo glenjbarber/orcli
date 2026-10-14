@@ -29,8 +29,8 @@ func TestExampleConfigLoadsThroughTheRealParser(t *testing.T) {
 	if cfg.APIKey == "" {
 		t.Errorf("the example's own api_key was not read back")
 	}
-	if cfg.Provider != "openrouter.ai" {
-		t.Errorf("Provider is %q, want openrouter.ai", cfg.Provider)
+	if cfg.Provider != "liquid" {
+		t.Errorf("Provider is %q, want liquid", cfg.Provider)
 	}
 
 	if key, err := cfg.CloudflareAPIKey(); err != nil || key == "" {

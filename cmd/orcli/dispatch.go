@@ -10,6 +10,7 @@ import (
 	"github.com/glenjbarber/orcli/internal/cloudflare"
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/groq"
+	"github.com/glenjbarber/orcli/internal/liquid"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
@@ -125,13 +126,12 @@ func newDispatcherFor(cfg config.Config) *dispatcher {
 	d := &dispatcher{cfg: cfg, newClient: cloudflare.New}
 
 	// newORClient is chosen by the configuration's own Provider field, the same
-	// way newTransport in main.go is: a session configured for Groq gets a
-	// *groq.Client here too, so /key, /models and /freemodels read Groq's own
-	// endpoints rather than OpenRouter's whenever that is the provider in force.
-	// See isGroqProvider's doc comment in provider.go for what decides which
-	// provider a configuration names.
+	// way newTransport in main.go is: catalogs follow the configured provider,
+	// so /key, /models and /freemodels use the selected provider's own endpoints.
 	if isGroqProvider(cfg.Provider) {
 		d.newORClient = func(key string) catalogClient { return groq.New(key) }
+	} else if isLiquidProvider(cfg.Provider) {
+		d.newORClient = func(key string) catalogClient { return liquid.New(key) }
 	} else {
 		d.newORClient = func(key string) catalogClient { return openrouter.New(key) }
 	}

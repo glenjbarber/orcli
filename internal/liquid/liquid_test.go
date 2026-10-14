@@ -176,7 +176,7 @@ func TestModelsMarksPricingUnknownAndUsageUnsupported(t *testing.T) {
 	if len(models) != 1 || models[0].ID != "live-model" || !models[0].PricingUnknown {
 		t.Fatalf("models %#v", models)
 	}
-	if err := c.KeyUsage(context.Background()); err != ErrUsageUnsupported {
+	if _, err := c.KeyUsage(context.Background()); err != ErrKeyUsageUnsupported {
 		t.Errorf("KeyUsage error %v", err)
 	}
 }

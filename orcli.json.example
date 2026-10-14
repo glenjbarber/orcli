@@ -1,7 +1,7 @@
 {
-  "api_key": "sk-or-v1-your-openrouter-key",
+  "api_key": "REPLACE_LOCALLY_WITH_YOUR_LIQUID_API_KEY",
   "model": "",
-  "provider": "openrouter.ai",
+  "provider": "liquid",
   "attribution_id": "",
   "mouse": false,
   "bell": false,
@@ -56,9 +56,9 @@
   },
   "keychain": {
     "items": {
-      "openrouter": {
+      "liquid": {
         "account": "john@smith.com",
-        "service": "private-openrouter-api"
+        "service": "orcli-liquid-api"
       },
       "test": {
         "account": "john@smith.com",

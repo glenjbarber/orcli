@@ -251,4 +251,5 @@ present is the only thing it has any business carrying.
 
 4. **Choosing a model is not validated against a catalogue.** Liquid `/models`
    lists live IDs, but `/model` does not check a selected ID against that list.
-   OpenRouter model discovery is not implemented in this build.
+   OpenRouter, Groq, and Liquid expose catalogs through `/models`; model
+   selection does not yet validate a chosen identifier against that catalog.

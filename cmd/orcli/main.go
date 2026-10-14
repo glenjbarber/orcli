@@ -15,6 +15,7 @@ import (
 	"github.com/glenjbarber/orcli/internal/config"
 	"github.com/glenjbarber/orcli/internal/groq"
 	"github.com/glenjbarber/orcli/internal/keychain"
+	"github.com/glenjbarber/orcli/internal/liquid"
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tui"
 )
@@ -80,8 +81,8 @@ var gate = ensureTrusted
 // See openInterface for how the terminal is handed to tview.
 var draw = openInterface
 
-// newTransport builds the chat transport a turn is sent through, choosing
-// OpenRouter or Groq by the configuration's own Provider field.
+// newTransport builds the chat transport a turn is sent through, selecting the
+// configured provider and retaining OpenRouter as the default.
 //
 // It is a variable rather than a call for the same reason gate and draw
 // above are: it is the seam that keeps a test from reaching the network,
@@ -90,17 +91,17 @@ var draw = openInterface
 // configuration rather than only the credential - unlike the single-provider
 // openrouter.New it replaces here - because choosing between the two
 // transports needs the Provider field alongside the key, and a seam that
-// took the key alone would have no way to ask for Groq instead of
-// OpenRouter.
+// took the key alone would not select the requested provider.
 //
-// Only Chat is required, so this stays provider-agnostic at the one
-// signature cmd/orcli's chatClient interface names: both *openrouter.Client
-// and *groq.Client already satisfy it, since internal/groq's own Chat method
-// reads and writes the same openrouter.Request and openrouter.Event types
-// (see internal/groq's package doc for why).
+// Only Chat is required, so this stays provider-agnostic at the one signature
+// cmd/orcli's chatClient interface names. Each provider uses shared
+// openrouter.Request and openrouter.Event types at this boundary.
 var newTransport = func(cfg config.Config) chatClient {
 	if isGroqProvider(cfg.Provider) {
 		return groq.New(cfg.APIKey)
+	}
+	if isLiquidProvider(cfg.Provider) {
+		return liquid.New(cfg.APIKey)
 	}
 	return openrouter.New(cfg.APIKey)
 }
@@ -690,7 +691,7 @@ func subcommand(name string, _ []string, stdout io.Writer) error {
 // to a discarded writer and a usage generated from the parser would grow a flag
 // nobody was meant to be offered.
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `orcli is a terminal client for the OpenRouter API.
+	fmt.Fprint(w, `orcli is a terminal client for OpenRouter, Groq, and Liquid Console.
 
 usage:
   orcli                  open the interface

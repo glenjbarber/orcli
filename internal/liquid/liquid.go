@@ -21,7 +21,7 @@ import (
 const baseURL = "https://api.liquid.ai/openai/v1"
 
 var ErrNoAPIKey = errors.New("liquid: no API key configured")
-var ErrUsageUnsupported = errors.New("liquid: key usage reporting is not documented")
+var ErrKeyUsageUnsupported = errors.New("liquid: key usage reporting is not documented")
 
 // Client is a Liquid Console inference client. Its endpoint is fixed in production.
 type Client struct {
@@ -250,17 +250,8 @@ func (c *Client) stream(ctx context.Context, r io.Reader, emit func(openrouter.E
 	return nil
 }
 
-// ModelInfo is the Liquid model catalog record. The API currently documents IDs
-// only; pricing and context limits therefore remain unknown.
-type ModelInfo struct {
-	ID             string `json:"id"`
-	Object         string `json:"object"`
-	OwnedBy        string `json:"owned_by"`
-	PricingUnknown bool
-}
-
 // Models returns the models available to the configured organization.
-func (c *Client) Models(ctx context.Context) ([]ModelInfo, error) {
+func (c *Client) Models(ctx context.Context) ([]openrouter.ModelInfo, error) {
 	if c.apiKey == "" {
 		return nil, ErrNoAPIKey
 	}
@@ -280,16 +271,27 @@ func (c *Client) Models(ctx context.Context) ([]ModelInfo, error) {
 		return nil, c.httpError(resp)
 	}
 	var result struct {
-		Data []ModelInfo `json:"data"`
+		Data []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4*1024*1024)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("liquid: decode models: %w", err)
 	}
-	for i := range result.Data {
-		result.Data[i].PricingUnknown = true
+	models := make([]openrouter.ModelInfo, 0, len(result.Data))
+	for _, model := range result.Data {
+		models = append(models, openrouter.ModelInfo{
+			ID:             model.ID,
+			Name:           model.ID,
+			PricingUnknown: true,
+		})
 	}
-	return result.Data, nil
+	return models, nil
 }
 
 // KeyUsage is unavailable because the documented API has no key-scoped usage endpoint.
-func (c *Client) KeyUsage(context.Context) error { return ErrUsageUnsupported }
+func (c *Client) KeyUsage(context.Context) (openrouter.KeyInfo, error) {
+	return openrouter.KeyInfo{}, ErrKeyUsageUnsupported
+}

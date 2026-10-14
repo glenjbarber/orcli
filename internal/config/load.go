@@ -55,11 +55,12 @@ type Config struct {
 	// Model is the model identifier a session starts with.
 	Model string `json:"model,omitempty"`
 
-	// Provider is the endpoint host, defaulting to the OpenRouter one.
+	// Provider selects the inference service: empty and "openrouter.ai" use
+	// OpenRouter, "groq" uses Groq, and "liquid" uses Liquid Console.
 	//
 	// It is read as a plain string rather than validated against an enum,
-	// which is what lets "groq" be a legal value today with no change to this
-	// package: cmd/orcli is what reads this field to choose between its two
+	// which is what lets provider names remain a string: cmd/orcli reads this
+	// field to choose the transport between its
 	// transports (see cmd/orcli/provider.go's isGroqProvider), and this
 	// package's job stops at carrying whatever the reader wrote. The single
 	// APIKey field above is still read as the credential for whichever
