@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/glenjbarber/orcli/internal/openrouter"
 	"github.com/glenjbarber/orcli/internal/tools"
@@ -47,16 +48,14 @@ type chatClient interface {
 // the model together, and that is what confirms the model was good before anything
 // is written to the configuration file.
 //
-// # Tools, not yet session state
+// # Conversation history
 //
 // A turn now carries real tools - filesystem, git, shell, all from internal/tools,
 // contained to the session's own working directory - and loops, replaying the
 // model's own tool calls and their results, until it answers with no further call or
-// maxToolRounds is reached. What it still does not carry is history: each question is
-// its own conversation, with no memory of a turn before it. That is adr-0000006's
-// queue and every record built on a running conversation left exactly as open as it
-// was; this closes the separate, narrower gap ask.go's own doc comment used to name -
-// "no tools are offered" - without deciding the first.
+// maxToolRounds is reached. Completed turns remain in the conversation for their
+// level, including assistant tool calls and the results paired with them. A failed or
+// interrupted turn is not committed as history.
 //
 // # The introduction
 //
@@ -70,8 +69,24 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 	toolset := newToolset(s.Options().WorkingDir)
 	schemas := toolSchemas(toolset)
 	intro := introduction(s.Options().WorkingDir)
+	var historiesMu sync.Mutex
+	histories := make(map[int][]openrouter.Message)
+	var levelMu sync.Mutex
+	levelLocks := make(map[int]*sync.Mutex)
+	conversationLock := func(level int) *sync.Mutex {
+		levelMu.Lock()
+		defer levelMu.Unlock()
+		if levelLocks[level] == nil {
+			levelLocks[level] = &sync.Mutex{}
+		}
+		return levelLocks[level]
+	}
 
 	return func(ctx context.Context, question string, level int) error {
+		conversation := conversationLock(level)
+		conversation.Lock()
+		defer conversation.Unlock()
+
 		turnCtx, err := s.Begin(ctx, question, level)
 		if err != nil {
 			return err
@@ -84,8 +99,10 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 		model := s.Options().Model
 		approval := string(s.Options().Approval)
 
-		messages := make([]openrouter.Message, 0, 3)
-		if intro != "" {
+		historiesMu.Lock()
+		messages := append([]openrouter.Message(nil), histories[level]...)
+		historiesMu.Unlock()
+		if len(messages) == 0 && intro != "" {
 			messages = append(messages, openrouter.Message{Role: "system", Content: intro})
 		}
 		messages = append(messages, openrouter.Message{Role: "user", Content: question})
@@ -143,6 +160,12 @@ func ask(s *tui.Session, c chatClient, attribution string, confirmed func(model 
 				// before any text does not write a blank row.
 				s.Deliver(reply.String(), level)
 				s.Finished(reason)
+				if finished {
+					messages = append(messages, openrouter.Message{Role: "assistant", Content: reply.String()})
+					historiesMu.Lock()
+					histories[level] = append([]openrouter.Message(nil), messages...)
+					historiesMu.Unlock()
+				}
 
 				// A reply with text in it is the confirmation, and an empty one
 				// is a refusal even when the endpoint called the turn finished.
