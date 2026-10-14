@@ -103,7 +103,7 @@ type Config struct {
 	BreakBell bool `json:"break_bell,omitempty"`
 
 	// BreakEnabled controls whether periodic screen-break reminders run.
-	// Missing values default to enabled for compatibility with older files.
+	// Missing values default to disabled; see [Default].
 	BreakEnabled bool `json:"break_enabled,omitempty"`
 
 	// Color reports whether colour output is on. Off is the default, and is
@@ -204,7 +204,7 @@ func Default() Config {
 		Bell:                 false,
 		BreakIntervalMinutes: 22,
 		BreakBell:            false,
-		BreakEnabled:         true,
+		BreakEnabled:         false,
 		Color:                false,
 		HighContrast:         false,
 		PaneActiveColor:      DefaultPaneActiveColor,

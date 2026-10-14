@@ -456,3 +456,79 @@ func TestAttemptBoundAllowsARetry(t *testing.T) {
 		t.Errorf("retryBound is %d, want at least 2", retryBound)
 	}
 }
+
+// errAfter is an io.Reader that yields a fixed prefix and then fails with a
+// non-EOF error, the shape of a server dropping the connection mid-stream
+// rather than closing it cleanly.
+type errAfter struct {
+	rest string
+	err  error
+}
+
+func (r *errAfter) Read(p []byte) (int, error) {
+	if r.rest == "" {
+		return 0, r.err
+	}
+	n := copy(p, r.rest)
+	r.rest = r.rest[n:]
+	return n, nil
+}
+
+// TestStreamDisconnectBeforeDeliveryIsRetried checks that a server dropping
+// the connection before anything arrived is treated the same as any other
+// undelivered failure: nothing was spent, so [Client.Chat] may try again.
+func TestStreamDisconnectBeforeDeliveryIsRetried(t *testing.T) {
+	c := &Client{apiKey: "k"}
+
+	var got []Event
+	err := c.stream(t.Context(),
+		&errAfter{err: errors.New("connection reset by peer")},
+		func(e Event) { got = append(got, e) })
+
+	var undelivered *undeliveredError
+	if !errors.As(err, &undelivered) {
+		t.Fatalf("stream returned %v, want a failure with nothing delivered", err)
+	}
+	for _, e := range got {
+		if e.Kind == EventFinish {
+			t.Error("an EventFinish was reported for an attempt that will be retried, want none")
+		}
+	}
+}
+
+// TestStreamDisconnectAfterDeliveryStillFinishes is the regression for the
+// disruption a dropped connection caused: a read failure after text had
+// already arrived must still end in exactly one EventFinish, the same as
+// every other way a turn ends, so a caller driving state off EventFinish is
+// never left waiting on a turn that has actually already stopped.
+func TestStreamDisconnectAfterDeliveryStillFinishes(t *testing.T) {
+	c := &Client{apiKey: "k"}
+
+	var got []Event
+	err := c.stream(t.Context(),
+		&errAfter{
+			rest: sse(chunkOf("partial reply")),
+			err:  errors.New("connection reset by peer"),
+		},
+		func(e Event) { got = append(got, e) })
+
+	if err != nil {
+		t.Fatalf("stream returned %v, want nil: the failure is reported through the callback", err)
+	}
+	if got, want := deltas(got), "partial reply"; got != want {
+		t.Errorf("reply text = %q, want %q: text that arrived before the disconnect is kept", got, want)
+	}
+	if _, ok := find(got, EventError); !ok {
+		t.Error("no error event for the disconnect, want one")
+	}
+	finish, ok := last(got, EventFinish)
+	if !ok {
+		t.Fatal("no finish event, want exactly one: a caller driving state off EventFinish must not wait on this turn forever")
+	}
+	if finish.Finished {
+		t.Error("Finished = true, want false: the connection dropped before the marker arrived")
+	}
+	if got := count(got, EventFinish); got != 1 {
+		t.Errorf("finish events = %d, want 1", got)
+	}
+}

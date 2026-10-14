@@ -95,6 +95,13 @@ type progress struct {
 	// told records that a failure has already been shown to the reader, so the
 	// missing terminating marker does not arrive as a second and vaguer one.
 	told bool
+
+	// readErr is a failure reading the connection itself - a disconnect from
+	// the server rather than a payload it wrote into the stream. It is held
+	// rather than reported at once, for the same reason reported is: whether
+	// it ends the turn or is retried depends on delivered, and either way
+	// [stream] still owes the reader exactly one EventFinish.
+	readErr error
 }
 
 // report delivers one event and counts it, so the retry rule sees everything the
@@ -240,11 +247,13 @@ func (c *Client) stream(ctx context.Context, body io.Reader, onEvent func(Event)
 		}
 		if err != nil {
 			if err != io.EOF {
-				onEvent(Event{
-					Kind: EventError,
-					Err:  fmt.Errorf("openrouter: read stream: %w", err),
-				})
-				return nil
+				// A disconnect from the server, not a payload it wrote. It is
+				// held rather than reported here: reporting it and returning
+				// at once, as a transport error from [Client.post] would,
+				// skips the EventFinish every other exit from this function
+				// delivers, and a caller driving state off EventFinish is
+				// left waiting on a turn that has actually already stopped.
+				p.readErr = fmt.Errorf("openrouter: read stream: %w", err)
 			}
 			break
 		}
@@ -262,14 +271,21 @@ func (c *Client) stream(ctx context.Context, body io.Reader, onEvent func(Event)
 		return &undeliveredError{msg: Filter(p.reported, c.apiKey)}
 	}
 
+	// A disconnect before anything arrived is the same case: nothing was
+	// spent, so it is worth retrying rather than shown as a failed reply.
+	if p.readErr != nil && p.delivered == 0 {
+		return &undeliveredError{msg: Filter(p.readErr.Error(), c.apiKey)}
+	}
+
 	// The cause is known already when it arrived after text, and repeating it as
 	// a missing marker would report the symptom a second time and let it read as
 	// the whole of what went wrong.
 	if !p.marked && !p.told {
-		onEvent(Event{
-			Kind: EventError,
-			Err:  errors.New("openrouter: stream ended without its terminating marker"),
-		})
+		err := p.readErr
+		if err == nil {
+			err = errors.New("openrouter: stream ended without its terminating marker")
+		}
+		onEvent(Event{Kind: EventError, Err: err})
 	}
 	onEvent(Event{Kind: EventFinish, Finished: p.marked, Reason: p.reason})
 	return nil

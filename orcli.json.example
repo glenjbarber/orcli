@@ -7,7 +7,7 @@
   "bell": false,
   "break_interval_minutes": 22,
   "break_bell": false,
-  "break_enabled": true,
+  "break_enabled": false,
   "color": false,
   "high_contrast": false,
   "pane_active_color": "#89b4fa",
