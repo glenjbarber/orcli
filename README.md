@@ -77,6 +77,8 @@ configuration file. Keys are never read from the environment.
 }
 ```
 
+The same example is in [`orcli.json.example`](orcli.json.example).
+
 According to the [Liquid Console API reference](https://console.liquid.ai/docs/getting-started),
 Liquid requests use `https://api.liquid.ai/openai/v1/chat/completions` and
 `GET /openai/v1/models`, with bearer authentication. `/models` lists the live
