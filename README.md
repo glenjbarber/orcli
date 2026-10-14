@@ -14,7 +14,8 @@
 ![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/orcli)
 [![Go CI](https://github.com/glenjbarber/orcli/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/orcli/actions/workflows/go-ci.yml)
 
-A terminal client for the [OpenRouter.ai](https://openrouter.ai) API.
+A terminal client for the [OpenRouter.ai](https://openrouter.ai) API and the
+Liquid Console inference API.
 
 `orcli` is built around one substantial feature: an interactive, full-screen chat
 interface in the manner of Codex, ChatGPT, Claude, and Perplexity. Around it
@@ -62,6 +63,32 @@ Not yet written:
 | --- | --- |
 | `internal/bootstrap` | `--bootstrap` documents and symlink resolution |
 | `internal/complete` | Tab completion engine |
+
+### Liquid Console
+
+Set `provider` to `liquid` to use the Liquid Console inference API. The API key
+uses the existing `api_key` configuration field and must stay in the mode 0600
+configuration file. Keys are never read from the environment.
+
+```json
+{
+  "provider": "liquid",
+  "api_key": "REPLACE_LOCALLY_WITH_YOUR_LIQUID_KEY"
+}
+```
+
+According to the [Liquid Console API reference](https://console.liquid.ai/docs/getting-started),
+Liquid requests use `https://api.liquid.ai/openai/v1/chat/completions` and
+`GET /openai/v1/models`, with bearer authentication. `/models` lists the live
+model IDs. The documented catalog does not include prices or context limits, so
+prices are shown as unavailable and `/freemodels` does not treat unknown prices
+as free. Liquid does not document a key usage endpoint. The transport preserves
+usage values reported in chat streams, though the current interface does not
+render those values.
+
+The API reference describes chat completions as OpenAI-compatible and supports
+streaming and tool request parameters. The client keeps tool execution inside
+orcli's existing dispatch and permission flow. No live API call has been made.
 
 ## Design overview
 
