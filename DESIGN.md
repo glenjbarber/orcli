@@ -25,6 +25,10 @@ system is meant to be. Neither records why a decision was taken.
 `orcli` is a terminal client for the OpenRouter API. It is an interface for
 holding several AI conversations at once, reading one while another is working,
 moving between them without losing any, and putting back what was there before.
+It replaces [`openrouter-cli`](https://github.com/glenjbarber/openrouter-cli),
+carrying forward lessons from building that tool. The earlier project's
+implementation and history remain in its own upstream repository; this document
+describes the replacement.
 
 It is a multiplexer in the sense the reader means. The main pane is `tty0`,
 pane 1 is `tty1`, and a reader who knows `tmux` knows how to move between

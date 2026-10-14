@@ -41,10 +41,6 @@ staged/bin/
 # Local preferences and memory
 .OPENROUTER.md
 
-# The work log and its lock, at the root and named with the program rather
-# than with the ledger convention above. Local observation only, like those two.
-.orcli.log
-.orcli.log.lock
 DESIGN-NOTES.md
 staged/*.md
 
