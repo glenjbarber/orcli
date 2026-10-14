@@ -40,9 +40,8 @@ picture, since the real picture is larger and not yet fully understood.
 Build, lint and test gates pass when the work ends, and a failure that cannot
 be settled is reported rather than left for the reader to find.
 
-**Push only on the exact phrase.** Never push to a remote unless told
-otherwise with the words `YES-I-REALLY-MEAN-IT`. The repository is pushed by
-hand.
+**Push only when explicitly requested.** Never push to a remote without an
+explicit request from the user. The repository is pushed by hand.
 
 ## Where things live
 

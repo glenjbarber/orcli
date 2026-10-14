@@ -439,8 +439,8 @@ func (l *interfaceLoop) act(ctx context.Context, key Key, r rune) bool {
 		// consuming it is what keeps its bytes out of the field.
 
 	case KeyUp, KeyDown:
-		// Read so a reader pressing one is not left pressing. This unit has no history, and
-		// one would need a conversation this interface does not carry.
+		// Read so a reader pressing one is not left pressing. Input history is not wired
+		// into this unit.
 
 	case KeyScrollUp:
 		l.session.ScrollUp(1)
