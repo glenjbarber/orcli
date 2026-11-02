@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/rivo/tview v0.42.0
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.61.0
 )
